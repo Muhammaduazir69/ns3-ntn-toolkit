@@ -7,10 +7,10 @@
 #include "nr-gnb-mac.h"
 #include "nr-gnb-phy.h"
 
-#include <ns3/abort.h>
-#include <ns3/boolean.h>
-#include <ns3/log.h>
-#include <ns3/pointer.h>
+#include "ns3/abort.h"
+#include "ns3/boolean.h"
+#include "ns3/log.h"
+#include "ns3/pointer.h"
 
 namespace ns3
 {
@@ -131,6 +131,19 @@ BandwidthPartGnb::SetCellId(uint16_t cellId)
 {
     NS_LOG_FUNCTION(this << cellId);
     m_cellId = cellId;
+}
+
+void
+BandwidthPartGnb::SetBwpId(uint16_t bwpId)
+{
+    NS_LOG_FUNCTION(this << bwpId);
+    m_bwpId = bwpId;
+}
+
+uint16_t
+BandwidthPartGnb::GetBwpId() const
+{
+    return m_bwpId;
 }
 
 } // namespace ns3

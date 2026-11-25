@@ -11,30 +11,40 @@
 
 #include "frame-exchange-manager.h"
 
+#include "ns3/wifi-export.h"
+
 #include <optional>
 
 namespace ns3
 {
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  *
  * QosFrameExchangeManager handles the frame exchange sequences
  * for QoS stations.
  * Note that Basic Block Ack is not supported.
  */
-class QosFrameExchangeManager : public FrameExchangeManager
+class WIFI_EXPORT QosFrameExchangeManager : public FrameExchangeManager
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     QosFrameExchangeManager();
     ~QosFrameExchangeManager() override;
 
-    bool StartTransmission(Ptr<Txop> edca, MHz_u allowedWidth) override;
+    /**
+     * Request the FrameExchangeManager to start a frame exchange sequence. This function is not
+     * expected to be overridden. If needed, the StartFrameExchange function shall be overridden.
+     *
+     * @param edca the channel access function that gained channel access
+     * @param allowedWidth the allowed width for the frame exchange sequence
+     * @return true if a frame exchange sequence was started, false otherwise
+     */
+    bool StartTransmission(Ptr<Txop> edca, MHz_u allowedWidth) final;
 
     /**
      * Recompute the protection and acknowledgment methods to use if the given MPDU
@@ -44,26 +54,28 @@ class QosFrameExchangeManager : public FrameExchangeManager
      * The protection and acknowledgment methods held by the given TX parameters are
      * only updated if the given MPDU can be added.
      *
-     * \param mpdu the MPDU to add to the frame being built
-     * \param txParams the TX parameters describing the frame being built
-     * \param availableTime the time limit on the frame exchange sequence
-     * \return true if the given MPDU can be added to the frame being built
+     * @param mpdu the MPDU to add to the frame being built
+     * @param txParams the TX parameters describing the frame being built
+     * @param availableTime the time limit (if any) on the frame exchange sequence
+     * @return true if the given MPDU can be added to the frame being built
      */
-    bool TryAddMpdu(Ptr<const WifiMpdu> mpdu, WifiTxParameters& txParams, Time availableTime) const;
+    bool TryAddMpdu(Ptr<const WifiMpdu> mpdu,
+                    WifiTxParameters& txParams,
+                    const std::optional<Time>& availableTime) const;
 
     /**
      * Check whether the given MPDU can be added to the frame being built (as described
      * by the given TX parameters) without violating the given constraint on the
      * PPDU transmission duration.
      *
-     * \param mpdu the MPDU to add to the frame being built
-     * \param txParams the TX parameters describing the frame being built
-     * \param ppduDurationLimit the time limit on the PPDU transmission duration
-     * \return true if the given MPDU can be added to the frame being built
+     * @param mpdu the MPDU to add to the frame being built
+     * @param txParams the TX parameters describing the frame being built
+     * @param ppduDurationLimit the time limit (if any) on the PPDU transmission duration
+     * @return true if the given MPDU can be added to the frame being built
      */
     virtual bool IsWithinLimitsIfAddMpdu(Ptr<const WifiMpdu> mpdu,
                                          const WifiTxParameters& txParams,
-                                         Time ppduDurationLimit) const;
+                                         const std::optional<Time>& ppduDurationLimit) const;
 
     /**
      * Check whether the transmission time of the frame being built (as described
@@ -72,26 +84,31 @@ class QosFrameExchangeManager : public FrameExchangeManager
      * <i>ppduPayloadSize</i>. Also check that the PSDU size does not exceed the
      * max PSDU size for the modulation class being used.
      *
-     * \param ppduPayloadSize the new PSDU size
-     * \param receiver the MAC address of the receiver of the PSDU
-     * \param txParams the TX parameters describing the frame being built
-     * \param ppduDurationLimit the limit on the PPDU duration
-     * \return true if the constraints on the PPDU duration limit and the maximum PSDU size are met
+     * @param ppduPayloadSize the new PSDU size
+     * @param receiver the MAC address of the receiver of the PSDU
+     * @param txParams the TX parameters describing the frame being built
+     * @param ppduDurationLimit the limit (if any) on the PPDU duration
+     * @return true if the constraints on the PPDU duration limit and the maximum PSDU size are met
      */
     virtual bool IsWithinSizeAndTimeLimits(uint32_t ppduPayloadSize,
                                            Mac48Address receiver,
                                            const WifiTxParameters& txParams,
-                                           Time ppduDurationLimit) const;
+                                           const std::optional<Time>& ppduDurationLimit) const;
 
     /**
      * Create an alias of the given MPDU for transmission by this Frame Exchange Manager.
      * This is required by 11be MLDs to support translation of MAC addresses. For single
      * link devices, the given MPDU is simply returned.
      *
-     * \param mpdu the given MPDU
-     * \return the alias of the given MPDU for transmission on this link
+     * @param mpdu the given MPDU
+     * @return the alias of the given MPDU for transmission on this link
      */
     virtual Ptr<WifiMpdu> CreateAliasIfNeeded(Ptr<WifiMpdu> mpdu) const;
+
+    /**
+     * @return the TXOP holder (if any)
+     */
+    std::optional<Mac48Address> GetTxopHolder() const;
 
   protected:
     void DoDispose() override;
@@ -103,7 +120,10 @@ class QosFrameExchangeManager : public FrameExchangeManager
     void PreProcessFrame(Ptr<const WifiPsdu> psdu, const WifiTxVector& txVector) override;
     void PostProcessFrame(Ptr<const WifiPsdu> psdu, const WifiTxVector& txVector) override;
     void NavResetTimeout() override;
-    void UpdateNav(Ptr<const WifiPsdu> psdu, const WifiTxVector& txVector) override;
+    void Reset() override;
+    void UpdateNav(const WifiMacHeader& hdr,
+                   const WifiTxVector& txVector,
+                   const Time& surplus = Time{0}) override;
     Time GetFrameDurationId(const WifiMacHeader& header,
                             uint32_t size,
                             const WifiTxParameters& txParams,
@@ -115,56 +135,64 @@ class QosFrameExchangeManager : public FrameExchangeManager
                                 Time txDuration,
                                 Time response) const override;
     void TransmissionSucceeded() override;
-    void TransmissionFailed() override;
+    void TransmissionFailed(bool forceCurrentCw = false) override;
+    void NotifyChannelReleased() override;
     void ForwardMpduDown(Ptr<WifiMpdu> mpdu, WifiTxVector& txVector) override;
+    void ReceivedMacHdr(const WifiMacHeader& macHdr,
+                        const WifiTxVector& txVector,
+                        Time psduDuration) override;
 
     /**
-     * Request the FrameExchangeManager to start a frame exchange sequence.
+     * Request the FrameExchangeManager to start a frame exchange sequence by using the EDCAF
+     * that got channel access.
      *
-     * \param edca the EDCA that gained channel access
-     * \param txopDuration the duration of a TXOP. This value is only used when a
-     *                     new TXOP is started (and hence the TXOP limit for the
-     *                     given EDCAF is non-zero)
-     * \return true if a frame exchange sequence was started, false otherwise
+     * @return true if a frame exchange sequence was started, false otherwise
      */
-    virtual bool StartTransmission(Ptr<QosTxop> edca, Time txopDuration);
+    bool StartTransmission();
+
+    /**
+     * This method is intended to be called when this device is the TXOP holder and returns the
+     * amount of time that can be used to transmit within the TXOP. If a receiver is specified,
+     * this function returns the amount of time that can be used to transmit to the given receiver.
+     *
+     * @param receiver the (MLD or link) MAC address of the receiver
+     * @return the amount of time that can be used to transmit
+     */
+    std::optional<Time> GetAvailTxopTime(
+        const std::optional<Mac48Address>& receiver = std::nullopt) const;
 
     /**
      * Start a frame exchange (including protection frames and acknowledgment frames
-     * as needed) that fits within the given <i>availableTime</i> (if different than
-     * Time::Min()).
+     * as needed).
      *
-     * \param edca the EDCAF which has been granted the opportunity to transmit
-     * \param availableTime the amount of time allowed for the frame exchange. Pass
-     *                      Time::Min() in case the TXOP limit is null
-     * \param initialFrame true if the frame being transmitted is the initial frame
-     *                     of the TXOP. This is used to determine whether the TXOP
-     *                     limit can be exceeded
-     * \return true if a frame exchange is started, false otherwise
+     * @return true if a frame exchange is started, false otherwise
      */
-    virtual bool StartFrameExchange(Ptr<QosTxop> edca, Time availableTime, bool initialFrame);
+    virtual bool StartFrameExchange();
 
     /**
      * Perform a PIFS recovery as a response to transmission failure within a TXOP.
      * If the carrier sense indicates that the medium is idle, continue the TXOP.
      * Otherwise, release the channel.
+     *
+     * @param forceCurrentCw whether to force the contention window to stay equal to the current
+     *                       value if PIFs recovery fails (normally, contention window is updated)
      */
-    void PifsRecovery();
+    void PifsRecovery(bool forceCurrentCw);
 
     /**
      * Send a CF-End frame to indicate the completion of the TXOP, provided that
      * the remaining duration is long enough to transmit this frame.
      *
-     * \return true if a CF-End frame was sent, false otherwise
+     * @return true if a CF-End frame was sent, false otherwise
      */
     virtual bool SendCfEndIfNeeded();
 
     /**
      * Determine the holder of the TXOP, if possible, based on the received frame
      *
-     * \param hdr the MAC header of an MPDU included in the received PSDU
-     * \param txVector TX vector of the received PSDU
-     * \return the holder of the TXOP, if one was found
+     * @param hdr the MAC header of an MPDU included in the received PSDU
+     * @param txVector TX vector of the received PSDU
+     * @return the holder of the TXOP, if one was found
      */
     virtual std::optional<Mac48Address> FindTxopHolder(const WifiMacHeader& hdr,
                                                        const WifiTxVector& txVector);
@@ -178,15 +206,21 @@ class QosFrameExchangeManager : public FrameExchangeManager
     std::optional<Mac48Address> m_txopHolder; //!< MAC address of the TXOP holder
     bool m_setQosQueueSize;                   /**< whether to set the Queue Size subfield of the
                                                    QoS Control field of QoS data frames */
+    bool m_protectSingleExchange; /**< true if the Duration/ID field in frames establishing
+                                     protection only covers the immediate frame exchange instead of
+                                     rest of the TXOP limit when the latter is non-zero */
+    Time m_singleExchangeProtectionSurplus; /**< additional time to protect beyond end of the
+                                               immediate frame exchange in case of non-zero TXOP
+                                               limit when a single frame exchange is protected */
 
   private:
     /**
      * Set the TXOP holder, if needed, based on the received frame
      *
-     * \param psdu the received PSDU
-     * \param txVector TX vector of the received PSDU
+     * @param hdr the MAC header of the received PSDU
+     * @param txVector TX vector of the received PSDU
      */
-    void SetTxopHolder(Ptr<const WifiPsdu> psdu, const WifiTxVector& txVector);
+    void SetTxopHolder(const WifiMacHeader& hdr, const WifiTxVector& txVector);
 
     /**
      * Cancel the PIFS recovery event and have the EDCAF attempting PIFS recovery

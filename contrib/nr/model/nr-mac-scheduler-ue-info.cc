@@ -4,7 +4,12 @@
 
 #include "nr-mac-scheduler-ue-info.h"
 
-#include <ns3/log.h>
+#include <algorithm>
+#include <cmath>
+
+#include "ns3/log.h"
+
+#include <numeric>
 
 namespace ns3
 {
@@ -22,25 +27,25 @@ NrMacSchedulerUeInfo::~NrMacSchedulerUeInfo()
 {
 }
 
-uint32_t&
+std::vector<uint16_t>&
 NrMacSchedulerUeInfo::GetDlRBG(const UePtr& ue)
 {
     return ue->m_dlRBG;
 }
 
-uint32_t&
+std::vector<uint16_t>&
 NrMacSchedulerUeInfo::GetUlRBG(const UePtr& ue)
 {
     return ue->m_ulRBG;
 }
 
-uint8_t&
+std::vector<uint8_t>&
 NrMacSchedulerUeInfo::GetDlSym(const UePtr& ue)
 {
     return ue->m_dlSym;
 }
 
-uint8_t&
+std::vector<uint8_t>&
 NrMacSchedulerUeInfo::GetUlSym(const UePtr& ue)
 {
     return ue->m_ulSym;
@@ -50,6 +55,74 @@ uint8_t&
 NrMacSchedulerUeInfo::GetDlMcs(const UePtr& ue)
 {
     return ue->m_dlMcs;
+}
+
+template <typename T>
+uint8_t
+ComputeMcs(const NrMacSchedulerUeInfo* ueInfo,
+           T NrMacSchedulerUeInfo::SbMcsInfo::* field,
+           std::function<uint8_t(double)> postProcessing)
+{
+    // Compute average field of allocated RBGs
+    const auto sum = std::transform_reduce(
+        ueInfo->m_dlRBG.begin(),
+        ueInfo->m_dlRBG.end(),
+        0.0,
+        [](auto a, auto b) { return a + b; },
+        [ueInfo, field](auto a) {
+            return ueInfo->m_dlSbMcsInfo.at(ueInfo->m_rbgToSb.at(a)).*field;
+        });
+    const auto avg = sum / ueInfo->m_dlRBG.size();
+    return postProcessing(avg);
+}
+
+uint8_t
+NrMacSchedulerUeInfo::GetDlMcs() const
+{
+    // Return maximum allowed MCS according to Fronthaul control
+    if (m_fhMaxMcsAssignable.has_value())
+    {
+        return m_fhMaxMcsAssignable.value();
+    }
+
+    // In case there is no sub-band info or no RBG has been allocated, return the wideband MCS
+    if (m_dlSbMcsInfo.empty() || m_dlRBG.empty() || (m_mcsCsiSource == McsCsiSource::WIDEBAND_MCS))
+    {
+        return m_dlMcs;
+    }
+
+    // ntn-patch 13 (v5.1 port): the sub-band estimate gets the same outer-loop
+    // correction as the wideband MCS (m_dlMcs already carries it), otherwise OLLA
+    // would do nothing whenever sub-band CSI drives the MCS.
+    auto olla = [this](uint8_t sbMcs) -> uint8_t {
+        const int mcs = static_cast<int>(sbMcs) - static_cast<int>(std::lround(m_dlOllaOffset));
+        return static_cast<uint8_t>(
+            std::min(std::max(mcs, 0), static_cast<int>(m_dlAmc->GetMaxMcs())));
+    };
+
+    // Otherwise, compute the SINR of allocated RBGs
+    switch (m_mcsCsiSource)
+    {
+    // Estimate MCS based on the average MCS of allocated RBGs
+    case McsCsiSource::AVG_MCS: {
+        return olla(
+            ComputeMcs(this, &SbMcsInfo::mcs, [](double avg) { return (uint8_t)floor(avg); }));
+    }
+    // Estimate MCS based on the average spectral efficiency of allocated RBGs
+    case McsCsiSource::AVG_SPEC_EFF: {
+        return olla(ComputeMcs(this,
+                               &SbMcsInfo::specEff,
+                               std::bind_front(&NrAmc::GetMcsFromSpectralEfficiency, m_dlAmc)));
+    }
+    // Estimate MCS based on the average SINR of allocated RBGs
+    case McsCsiSource::AVG_SINR: {
+        return olla(ComputeMcs(this, &SbMcsInfo::sinr, [amc = m_dlAmc](double avgSinr) {
+            return amc->GetMcsFromSpectralEfficiency(amc->GetSpectralEfficiencyForSinr(avgSinr));
+        }));
+    }
+    default:
+        NS_ABORT_MSG("Invalid csi source for MCS computation");
+    }
 }
 
 uint8_t&
@@ -92,12 +165,12 @@ void
 NrMacSchedulerUeInfo::PrintLcInfo(uint16_t ue,
                                   uint8_t lcgId,
                                   uint8_t lcId,
-                                  uint8_t qci,
+                                  uint8_t fiveQi,
                                   uint8_t P,
                                   uint8_t minP)
 {
     NS_LOG_DEBUG("UE " << ue << " LCG ID: " << static_cast<uint32_t>(lcgId) << " LC ID "
-                       << static_cast<uint32_t>(lcId) << " QCI: " << static_cast<uint32_t>(qci)
+                       << static_cast<uint32_t>(lcId) << " QCI: " << static_cast<uint32_t>(fiveQi)
                        << " P: " << static_cast<uint32_t>(P) << " minP: " << +minP);
 }
 
@@ -105,8 +178,8 @@ void
 NrMacSchedulerUeInfo::ResetDlSchedInfo()
 {
     m_dlMRBRetx = 0;
-    m_dlRBG = 0;
-    m_dlSym = 0;
+    m_dlRBG.clear();
+    m_dlSym.clear();
     m_dlTbSize = 0;
 }
 
@@ -114,21 +187,22 @@ void
 NrMacSchedulerUeInfo::ResetUlSchedInfo()
 {
     m_ulMRBRetx = 0;
-    m_ulRBG = 0;
-    m_ulSym = 0;
+    m_ulRBG.clear();
+    m_ulSym.clear();
     m_ulTbSize = 0;
 }
 
 void
-NrMacSchedulerUeInfo::UpdateDlMetric(const Ptr<const NrAmc>& amc)
+NrMacSchedulerUeInfo::UpdateDlMetric()
 {
-    if (m_dlRBG == 0)
+    if (m_dlRBG.empty())
     {
         m_dlTbSize = 0;
     }
     else
     {
-        m_dlTbSize = amc->CalculateTbSize(m_dlMcs, m_dlRank, m_dlRBG * GetNumRbPerRbg());
+        m_dlTbSize =
+            m_dlAmc->CalculateTbSize(GetDlMcs(), m_dlRank, m_dlRBG.size() * GetNumRbPerRbg());
     }
 }
 
@@ -139,15 +213,15 @@ NrMacSchedulerUeInfo::ResetDlMetric()
 }
 
 void
-NrMacSchedulerUeInfo::UpdateUlMetric(const Ptr<const NrAmc>& amc)
+NrMacSchedulerUeInfo::UpdateUlMetric()
 {
-    if (m_ulRBG == 0)
+    if (m_ulRBG.empty())
     {
         m_ulTbSize = 0;
     }
     else
     {
-        m_ulTbSize = amc->CalculateTbSize(m_ulMcs, m_ulRank, m_ulRBG * GetNumRbPerRbg());
+        m_ulTbSize = m_ulAmc->CalculateTbSize(m_ulMcs, m_ulRank, m_ulRBG.size() * GetNumRbPerRbg());
     }
 }
 
@@ -167,6 +241,70 @@ NrMacSchedulerUeInfo::GetTotalDlBuffer() const
         totBuffer += lcg->GetTotalSize();
     }
     return totBuffer;
+}
+
+uint32_t
+NrMacSchedulerUeInfo::GetTotalNumDlLc() const
+{
+    NS_LOG_FUNCTION(this);
+
+    uint32_t total = 0;
+    for (const auto& [lcgId, lcg] : m_dlLCG)
+    {
+        total += lcg->NumOfLC();
+    }
+
+    return total;
+}
+
+uint32_t
+NrMacSchedulerUeInfo::GetTotalNumUlLc() const
+{
+    NS_LOG_FUNCTION(this);
+
+    uint32_t total = 0;
+    for (const auto& [lcgId, lcg] : m_ulLCG)
+    {
+        total += lcg->NumOfLC();
+    }
+
+    return total;
+}
+
+uint32_t
+NrMacSchedulerUeInfo::GetTotalNumActiveDlLc() const
+{
+    NS_LOG_FUNCTION(this);
+
+    uint32_t total = 0;
+    for (const auto& [lcgId, lcg] : m_dlLCG)
+    {
+        total += lcg->NumOfActiveLC();
+    }
+
+    return total;
+}
+
+uint32_t
+NrMacSchedulerUeInfo::GetTotalNumActiveUlLc() const
+{
+    NS_LOG_FUNCTION(this);
+
+    uint32_t total = 0;
+    for (const auto& [lcgId, lcg] : m_ulLCG)
+    {
+        total += lcg->NumOfActiveLC();
+    }
+
+    return total;
+}
+
+bool
+NrMacSchedulerUeInfo::HasPendingDlSignalingTraffic() const
+{
+    constexpr uint8_t dlSignalingLcgId = 0;
+    auto it = m_dlLCG.find(dlSignalingLcgId);
+    return it != m_dlLCG.end() && it->second && it->second->GetTotalSize() > 0;
 }
 
 uint32_t

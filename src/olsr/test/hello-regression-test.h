@@ -20,16 +20,16 @@ namespace ns3
 namespace olsr
 {
 /**
- * \ingroup olsr-test
- * \ingroup tests
+ * @ingroup olsr-test
+ * @ingroup tests
  *
- * \brief Trivial (still useful) test of OLSR operation
+ * @brief Trivial (still useful) test of OLSR operation
  *
  * This test creates 2 stations with point-to-point link and runs OLSR without any extra traffic.
  * It is expected that only HELLO messages will be sent.
  *
  * Expected trace (5 seconds):
-   \verbatim
+   @verbatim
     1       2
     |------>|   HELLO (empty) src = 10.1.1.1
     |<------|   HELLO (empty) src = 10.1.1.2
@@ -37,7 +37,7 @@ namespace olsr
     |<------|   HELLO (Link type: Asymmetric link, Neighbor address: 10.1.1.1) src = 10.1.1.2
     |------>|   HELLO (Link type: Symmetric link, Neighbor address: 10.1.1.2) src = 10.1.1.1
     |<------|   HELLO (Link type: Symmetric link, Neighbor address: 10.1.1.1) src = 10.1.1.2
-   \endverbatim
+   @endverbatim
  */
 class HelloRegressionTest : public TestCase
 {
@@ -54,7 +54,7 @@ class HelloRegressionTest : public TestCase
 
     /**
      * Receive raw data on node A
-     * \param socket receiving socket
+     * @param socket receiving socket
      */
     void ReceivePktProbeA(Ptr<Socket> socket);
     /// Packet counter on node A
@@ -63,7 +63,7 @@ class HelloRegressionTest : public TestCase
     Ptr<Ipv4RawSocketImpl> m_rxSocketA;
     /**
      * Receive raw data on node B
-     * \param socket receiving socket
+     * @param socket receiving socket
      */
     void ReceivePktProbeB(Ptr<Socket> socket);
     /// Packet counter on node B

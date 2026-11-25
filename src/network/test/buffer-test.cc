@@ -14,13 +14,13 @@
 using namespace ns3;
 
 /**
- * \ingroup network
- * \defgroup network-test Network module unit tests
+ * @ingroup network
+ * @defgroup network-test Network module unit tests
  */
 
 /**
- * \ingroup network-test
- * \ingroup tests
+ * @ingroup network-test
+ * @ingroup tests
  *
  * Buffer unit tests.
  */
@@ -29,9 +29,9 @@ class BufferTest : public TestCase
   private:
     /**
      * Checks the buffer content
-     * \param b The buffer to check
-     * \param n The number of bytes to check
-     * \param array The array of bytes that should be in the buffer
+     * @param b The buffer to check
+     * @param n The number of bytes to check
+     * @param array The array of bytes that should be in the buffer
      */
     void EnsureWrittenBytes(Buffer b, uint32_t n, uint8_t array[]);
 
@@ -161,15 +161,9 @@ BufferTest::DoRun()
     buff64.AddAtStart(8);
     i = buff64.Begin();
     i.WriteU64(0x0123456789ABCDEFLLU);
-    i = buff64.Begin();
-    NS_TEST_ASSERT_MSG_EQ(i.ReadU64(), 0x0123456789abcdefLLU, "Could not read expected value");
-    i = buff64.Begin();
-    i.WriteHtolsbU64(0x0123456789ABCDEFLLU);
     ENSURE_WRITTEN_BYTES(buff64, 8, 0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01);
     i = buff64.Begin();
-    NS_TEST_ASSERT_MSG_EQ(i.ReadLsbtohU64(),
-                          0x0123456789abcdefLLU,
-                          "Could not read expected value");
+    NS_TEST_ASSERT_MSG_EQ(i.ReadU64(), 0x0123456789abcdefLLU, "Could not read expected value");
     i = buff64.Begin();
     i.WriteHtonU64(0x0123456789ABCDEFLLU);
     ENSURE_WRITTEN_BYTES(buff64, 8, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef);
@@ -382,13 +376,29 @@ BufferTest::DoRun()
     val2 <<= 8;
     val2 |= i.ReadU8();
     NS_TEST_ASSERT_MSG_EQ(val1, val2, "Bad ReadNtohU16()");
+
+    // @issueid{1298}: write/read a uint8_t container through the iterator-pair
+    // Write(first, last) / Read(first, last) overloads.
+    {
+        std::vector<uint8_t> src = {0xde, 0xad, 0xbe, 0xef, 0x42};
+        Buffer rangeBuf;
+        rangeBuf.AddAtStart(src.size());
+        Buffer::Iterator wi = rangeBuf.Begin();
+        wi.Write(src.begin(), src.end());
+        std::vector<uint8_t> dst(src.size(), 0);
+        Buffer::Iterator ri = rangeBuf.Begin();
+        ri.Read(dst.begin(), dst.end());
+        NS_TEST_ASSERT_MSG_EQ((src == dst),
+                              true,
+                              "Buffer iterator-pair Write/Read round-trip failed");
+    }
 }
 
 /**
- * \ingroup network-test
- * \ingroup tests
+ * @ingroup network-test
+ * @ingroup tests
  *
- * \brief Buffer TestSuite
+ * @brief Buffer TestSuite
  */
 class BufferTestSuite : public TestSuite
 {

@@ -12,15 +12,13 @@
 #include "ns3/simulator.h"
 #include "ns3/wifi-tx-vector.h"
 
-#define Min(a, b) ((a < b) ? a : b)
-
 namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("OnoeWifiManager");
 
 /**
- * \brief hold per-remote-station state for ONOE Wifi manager.
+ * @brief hold per-remote-station state for ONOE Wifi manager.
  *
  * This struct extends from WifiRemoteStation struct to hold additional
  * information required by the ONOE Wifi manager
@@ -50,7 +48,7 @@ OnoeWifiManager::GetTypeId()
             .AddConstructor<OnoeWifiManager>()
             .AddAttribute("UpdatePeriod",
                           "The interval between decisions about rate control changes",
-                          TimeValue(Seconds(1.0)),
+                          TimeValue(Seconds(1)),
                           MakeTimeAccessor(&OnoeWifiManager::m_updatePeriod),
                           MakeTimeChecker())
             .AddAttribute("RaiseThreshold",
@@ -324,9 +322,9 @@ OnoeWifiManager::DoGetDataTxVector(WifiRemoteStation* st, MHz_u allowedWidth)
         }
     }
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     WifiMode mode = GetSupported(station, rateIndex);
     uint64_t rate = mode.GetDataRate(channelWidth);
@@ -353,9 +351,9 @@ OnoeWifiManager::DoGetRtsTxVector(WifiRemoteStation* st)
     NS_LOG_FUNCTION(this << st);
     auto station = static_cast<OnoeWifiRemoteStation*>(st);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     UpdateMode(station);
     WifiMode mode;

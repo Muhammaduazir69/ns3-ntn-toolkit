@@ -10,6 +10,7 @@
 #include "nr-pdcp-sap.h"
 #include "nr-rlc-sap.h"
 
+#include "ns3/nr-export.h"
 #include "ns3/object.h"
 #include "ns3/trace-source-accessor.h"
 #include "ns3/traced-value.h"
@@ -20,7 +21,7 @@ namespace ns3
 /**
  * LTE PDCP entity, see 3GPP TS 36.323
  */
-class NrPdcp : public Object // SimpleRefCount<NrPdcp>
+class NR_EXPORT NrPdcp : public Object // SimpleRefCount<NrPdcp>
 {
     /// allow NrPdcpSpecificNrRlcSapUser class friend access
     friend class NrPdcpSpecificNrRlcSapUser;
@@ -31,8 +32,8 @@ class NrPdcp : public Object // SimpleRefCount<NrPdcp>
     NrPdcp();
     ~NrPdcp() override;
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     void DoDispose() override;
@@ -40,42 +41,42 @@ class NrPdcp : public Object // SimpleRefCount<NrPdcp>
     /**
      *
      *
-     * \param rnti
+     * @param rnti
      */
     void SetRnti(uint16_t rnti);
 
     /**
      *
      *
-     * \param lcId
+     * @param lcId
      */
     void SetLcId(uint8_t lcId);
 
     /**
      *
      *
-     * \param s the PDCP SAP user to be used by this NR_PDCP
+     * @param s the PDCP SAP user to be used by this NR_PDCP
      */
     void SetNrPdcpSapUser(NrPdcpSapUser* s);
 
     /**
      *
      *
-     * \return the PDCP SAP Provider interface offered to the RRC by this NR_PDCP
+     * @return the PDCP SAP Provider interface offered to the RRC by this NR_PDCP
      */
     NrPdcpSapProvider* GetNrPdcpSapProvider();
 
     /**
      *
      *
-     * \param s the RLC SAP Provider to be used by this NR_PDCP
+     * @param s the RLC SAP Provider to be used by this NR_PDCP
      */
     void SetNrRlcSapProvider(NrRlcSapProvider* s);
 
     /**
      *
      *
-     * \return the RLC SAP User interface offered to the RLC by this NR_PDCP
+     * @return the RLC SAP User interface offered to the RLC by this NR_PDCP
      */
     NrRlcSapUser* GetNrRlcSapUser();
 
@@ -85,7 +86,7 @@ class NrPdcp : public Object // SimpleRefCount<NrPdcp>
     /**
      * Status variables of the PDCP
      */
-    struct Status
+    struct NR_EXPORT Status
     {
         uint16_t txSn; ///< TX sequence number
         uint16_t rxSn; ///< RX sequence number
@@ -93,35 +94,35 @@ class NrPdcp : public Object // SimpleRefCount<NrPdcp>
 
     /**
      *
-     * \return the current status of the PDCP
+     * @return the current status of the PDCP
      */
     Status GetStatus() const;
 
     /**
      * Set the status of the PDCP
      *
-     * \param s
+     * @param s
      */
     void SetStatus(Status s);
 
     /**
      * TracedCallback for PDU transmission event.
      *
-     * \param [in] rnti The C-RNTI identifying the UE.
-     * \param [in] lcid The logical channel id corresponding to
+     * @param [in] rnti The C-RNTI identifying the UE.
+     * @param [in] lcid The logical channel id corresponding to
      *             the sending RLC instance.
-     * \param [in] size Packet size.
+     * @param [in] size Packet size.
      */
     typedef void (*PduTxTracedCallback)(uint16_t rnti, uint8_t lcid, uint32_t size);
 
     /**
      * TracedCallback signature for PDU receive event.
      *
-     * \param [in] rnti The C-RNTI identifying the UE.
-     * \param [in] lcid The logical channel id corresponding to
+     * @param [in] rnti The C-RNTI identifying the UE.
+     * @param [in] lcid The logical channel id corresponding to
      *             the sending RLC instance.
-     * \param [in] size Packet size.
-     * \param [in] delay Delay since packet sent, in ns..
+     * @param [in] size Packet size.
+     * @param [in] delay Delay since packet sent, in ns..
      */
     typedef void (*PduRxTracedCallback)(const uint16_t rnti,
                                         const uint8_t lcid,
@@ -132,7 +133,7 @@ class NrPdcp : public Object // SimpleRefCount<NrPdcp>
     /**
      * Interface provided to upper RRC entity
      *
-     * \param params the TransmitPdcpSduParameters
+     * @param params the TransmitPdcpSduParameters
      */
     virtual void DoTransmitPdcpSdu(NrPdcpSapProvider::TransmitPdcpSduParameters params);
 
@@ -142,7 +143,7 @@ class NrPdcp : public Object // SimpleRefCount<NrPdcp>
     /**
      * Interface provided to lower RLC entity
      *
-     * \param p packet
+     * @param p packet
      */
     virtual void DoReceivePdu(Ptr<Packet> p);
 

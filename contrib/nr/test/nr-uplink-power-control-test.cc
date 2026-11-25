@@ -4,29 +4,31 @@
 
 #include "ns3/antenna-module.h"
 #include "ns3/applications-module.h"
+#include "ns3/boolean.h"
+#include "ns3/callback.h"
+#include "ns3/config.h"
+#include "ns3/double.h"
+#include "ns3/integer.h"
 #include "ns3/internet-module.h"
+#include "ns3/log.h"
+#include "ns3/mobility-helper.h"
+#include "ns3/nr-module.h"
 #include "ns3/point-to-point-module.h"
+#include "ns3/pointer.h"
+#include "ns3/rng-seed-manager.h"
+#include "ns3/simulator.h"
 #include "ns3/test.h"
-#include <ns3/boolean.h>
-#include <ns3/callback.h>
-#include <ns3/config.h>
-#include <ns3/double.h>
-#include <ns3/integer.h>
-#include <ns3/log.h>
-#include <ns3/mobility-helper.h>
-#include <ns3/nr-module.h>
-#include <ns3/pointer.h>
-#include <ns3/rng-seed-manager.h>
-#include <ns3/simulator.h>
+
+#include <cmath>
 
 using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("NrUplinkPowerControlTestCase");
 
 /**
- * \file nr-test-uplink-power-control.cc
- * \ingroup test
+ * @file nr-uplink-power-control-test.cc
+ * @ingroup test
  *
- * \brief Test suite for NrUplinkPowerControlTestCase.
+ * @brief Test suite for NrUplinkPowerControlTestCase.
  *
  */
 class NrUplinkPowerControlTestSuite : public TestSuite
@@ -36,10 +38,10 @@ class NrUplinkPowerControlTestSuite : public TestSuite
 };
 
 /**
- * \file nr-test-uplink-power-control.cc
- * \ingroup test
+ * @file nr-uplink-power-control-test.cc
+ * @ingroup test
  *
- * \brief NR uplink power control test case. Tests PUSCH and PUCCH
+ * @brief NR uplink power control test case. Tests PUSCH and PUCCH
  * power control adaptation. Move UE to different positions and check
  * whether the power is adjusted as expected (open loop, closed loop
  * absolute/accumulated mode).
@@ -48,23 +50,23 @@ class NrUplinkPowerControlTestCase : public TestCase
 {
   public:
     /**
-     * \brief Constructor
-     * \param name the test case name
-     * \param closedLoop - whether open or closed loop mode will be activated, if true closed loop
+     * @brief Constructor
+     * @param name the test case name
+     * @param closedLoop - whether open or closed loop mode will be activated, if true closed loop
      * will be used, if false open loop \param accumulatedMode - if closed loop is activated then
      * this variable defines whether absolute or accumulation mode is being used
      */
     NrUplinkPowerControlTestCase(std::string name, bool closedLoop, bool accumulatedMode);
     /**
-     * \brief Destructor
+     * @brief Destructor
      */
     ~NrUplinkPowerControlTestCase() override;
 
     /**
      * Function that moves the UE to a different position
      *
-     * \param distance a new distance to be set between UE and gNB
-     * \param expectedPuschTxPower the expected PUSCH transmit power in dBm after moving to a new
+     * @param distance a new distance to be set between UE and gNB
+     * @param expectedPuschTxPower the expected PUSCH transmit power in dBm after moving to a new
      * position \param expectedPucchTxPower the expected PUCCH transmit power in dBm after moving to
      * a new position
      */
@@ -72,24 +74,37 @@ class NrUplinkPowerControlTestCase : public TestCase
 
     /**
      * PUSCH transmit power trace function
-     * \param cellId the cell ID
-     * \param rnti the RNTI
-     * \param txPower the transmit power in dBm
+     * @param cellId the cell ID
+     * @param rnti the RNTI
+     * @param txPower the transmit power in dBm
      */
     void PuschTxPowerTrace(uint16_t cellId, uint16_t rnti, double txPower);
     /**
      * PUCCH transmit power trace function
-     * \param cellId the cell ID
-     * \param rnti the RNTI
-     * \param txPower the transmit power in dBm
+     * @param cellId the cell ID
+     * @param rnti the RNTI
+     * @param txPower the transmit power in dBm
      */
     void PucchTxPowerTrace(uint16_t cellId, uint16_t rnti, double txPower);
+    /**
+     * SRS transmit power trace function
+     * @param cellId the cell ID
+     * @param rnti the RNTI
+     * @param txPower the transmit power in dBm
+     */
+    void SrsTxPowerTrace(uint16_t cellId, uint16_t rnti, double txPower);
+    /**
+     * Check that the SRS was transmitted with the power reported by the power control
+     * @param txPower the reported SRS transmit power in dBm
+     */
+    void CheckSrsTxPower(double txPower);
 
   protected:
     void DoRun() override;
 
     Ptr<MobilityModel> m_ueMobility;    //!< UE mobility model
     Ptr<NrUePowerControl> m_ueUpc;      //!< UE uplink power control
+    Ptr<NrUePhy> m_uePhy;               //!< UE PHY
     Time m_movingTime;                  //!< moving time
     double m_expectedPuschTxPower{0.0}; //!< expected PUSCH transmit power in dBm
     double m_expectedPucchTxPower{0.0}; //!< expected PUCCH transmit power in dBm
@@ -100,7 +115,94 @@ class NrUplinkPowerControlTestCase : public TestCase
         true}; //!< flag to indicate if the trace, which calls the test function got executed
     bool m_pucchTxPowerTraceFired{
         true}; //!< Flag to indicate if the trace, which calls the test function got executed
+    uint32_t m_srsTxPowerReports{0}; //!< Number of SRS transmit power reports
 };
+
+/**
+ * @ingroup test
+ *
+ * @brief Check the SRS transmit power computed for each technical specification.
+ *
+ * With TS 36.213, the SRS power is derived from the PUSCH P0 and the SRS offset. With
+ * TS 38.213, it uses the P0Srs attribute instead. The power is compared with the formula of
+ * each specification for a known path loss, and P0Srs is checked to only accept the range
+ * of the p0 field of SRS-Config (TS 38.331).
+ */
+class NrSrsPowerControlTestCase : public TestCase
+{
+  public:
+    /**
+     * @brief Constructor
+     * @param technicalSpec the technical specification used to compute the SRS power
+     */
+    NrSrsPowerControlTestCase(NrUePowerControl::TechnicalSpec technicalSpec)
+        : TestCase(std::string("SRS transmit power with ") +
+                   (technicalSpec == NrUePowerControl::TS_36_213 ? "TS 36.213" : "TS 38.213")),
+          m_technicalSpec(technicalSpec)
+    {
+    }
+
+  protected:
+    void DoRun() override;
+
+  private:
+    NrUePowerControl::TechnicalSpec m_technicalSpec; //!< Technical specification under test
+};
+
+void
+NrSrsPowerControlTestCase::DoRun()
+{
+    auto uePhy = CreateObject<NrUePhy>();
+    auto upc = uePhy->GetUplinkPowerControl();
+
+    const double p0Srs = -70;
+    const int16_t psrsOffset = 9;
+    const int16_t poNominalPusch = -90;
+    const double alpha = 0.8;
+    const double pathLoss = 100;
+    const std::size_t rbNum = 10;
+
+    upc->SetTechnicalSpec(m_technicalSpec);
+    upc->SetAttribute("P0Srs", DoubleValue(p0Srs));
+    upc->SetAttribute("PsrsOffset", IntegerValue(psrsOffset));
+    upc->SetPoNominalPusch(poNominalPusch);
+    upc->SetPoUePusch(0);
+    upc->SetAlpha(alpha);
+    upc->SetPcmin(-40);
+    upc->SetPcmax(23);
+    // The first RSRP only initializes the filter; the second one sets the path loss
+    upc->ConfigureReferenceSignalPower(30);
+    upc->SetRsrp(30 - pathLoss);
+    upc->SetRsrp(30 - pathLoss);
+
+    // Open loop, so the power control adjustment state is 0
+    const double bandwidthTerm = 10 * std::log10(std::pow(2, uePhy->GetNumerology()) * rbNum);
+    const double expected =
+        m_technicalSpec == NrUePowerControl::TS_36_213
+            ? (-10.5 + 1.5 * psrsOffset) + bandwidthTerm + poNominalPusch + alpha * pathLoss
+            : p0Srs + bandwidthTerm + alpha * pathLoss;
+    NS_TEST_EXPECT_MSG_EQ_TOL(upc->GetSrsTxPower(rbNum),
+                              expected,
+                              1e-9,
+                              "Unexpected SRS transmit power");
+
+    // P0Srs only takes values in the range of the p0 field of SRS-Config
+    NS_TEST_EXPECT_MSG_EQ(upc->SetAttributeFailSafe("P0Srs", DoubleValue(-202)),
+                          true,
+                          "P0Srs must accept -202 dBm");
+    NS_TEST_EXPECT_MSG_EQ(upc->SetAttributeFailSafe("P0Srs", DoubleValue(24)),
+                          true,
+                          "P0Srs must accept 24 dBm");
+    NS_TEST_EXPECT_MSG_EQ(upc->SetAttributeFailSafe("P0Srs", DoubleValue(-203)),
+                          false,
+                          "P0Srs must reject values below -202 dBm");
+    NS_TEST_EXPECT_MSG_EQ(upc->SetAttributeFailSafe("P0Srs", DoubleValue(25)),
+                          false,
+                          "P0Srs must reject values above 24 dBm");
+
+    uePhy->Dispose();
+    Simulator::Destroy();
+}
 
 NrUplinkPowerControlTestSuite::NrUplinkPowerControlTestSuite()
     : TestSuite("nr-uplink-power-control-test", Type::SYSTEM)
@@ -116,6 +218,8 @@ NrUplinkPowerControlTestSuite::NrUplinkPowerControlTestSuite()
     AddTestCase(
         new NrUplinkPowerControlTestCase("ClosedLoopPowerControlAccumulatedModeTest", true, true),
         Duration::QUICK);
+    AddTestCase(new NrSrsPowerControlTestCase(NrUePowerControl::TS_36_213), Duration::QUICK);
+    AddTestCase(new NrSrsPowerControlTestCase(NrUePowerControl::TS_38_213), Duration::QUICK);
 }
 
 static NrUplinkPowerControlTestSuite lteUplinkPowerControlTestSuite;
@@ -136,6 +240,15 @@ PucchTxPowerReport(NrUplinkPowerControlTestCase* testcase,
                    double txPower)
 {
     testcase->PucchTxPowerTrace(cellId, rnti, txPower);
+}
+
+void
+SrsTxPowerReport(NrUplinkPowerControlTestCase* testcase,
+                 uint16_t cellId,
+                 uint16_t rnti,
+                 double txPower)
+{
+    testcase->SrsTxPowerTrace(cellId, rnti, txPower);
 }
 
 NrUplinkPowerControlTestCase::NrUplinkPowerControlTestCase(std::string name,
@@ -233,6 +346,27 @@ NrUplinkPowerControlTestCase::PucchTxPowerTrace(uint16_t cellId, uint16_t rnti, 
 }
 
 void
+NrUplinkPowerControlTestCase::SrsTxPowerTrace(uint16_t cellId, uint16_t rnti, double txPower)
+{
+    NS_LOG_FUNCTION(this);
+    // Count the reports, to check at the end that the SRS power was computed at all
+    m_srsTxPowerReports++;
+    // The trace fires inside NrUePhy::UlSrs(), before the PHY stores the power.
+    // Check the PHY power in a separate event, once UlSrs() has returned.
+    Simulator::ScheduleNow(&NrUplinkPowerControlTestCase::CheckSrsTxPower, this, txPower);
+}
+
+void
+NrUplinkPowerControlTestCase::CheckSrsTxPower(double txPower)
+{
+    // The SRS must go out with its own power, not the one left by the last PUSCH or PUCCH
+    NS_TEST_ASSERT_MSG_EQ_TOL(m_uePhy->GetTxPower(),
+                              txPower,
+                              1e-9,
+                              "SRS not transmitted with its power-controlled transmit power");
+}
+
+void
 NrUplinkPowerControlTestCase::DoRun()
 {
     std::string scenario = "InH-OfficeMixed"; // scenario
@@ -242,7 +376,7 @@ NrUplinkPowerControlTestCase::DoRun()
     double hUT = 1.5;                         // user antenna height in meters
     double gNBTxPower = 30;                   // gNb tx power
     double ueTxPower = 10;                    // ue tx power
-    enum BandwidthPartInfo::Scenario scenarioEnum = BandwidthPartInfo::InH_OfficeMixed_LoS;
+    std::string condition = "LOS";
     uint16_t numerology = 0;   // numerology to be used
     uint16_t numCcPerBand = 1; // number of component carrier in the assigned band
     Time udpAppStartTime = MilliSeconds(50);
@@ -265,10 +399,15 @@ NrUplinkPowerControlTestCase::DoRun()
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Configure the spectrum channel
+    channelHelper->ConfigureFactories(scenario, condition, "ThreeGpp");
+    // Disable shadowing
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
 
-    // Create Nodes: eNodeB and UE
+    // Create Nodes: gNB and UE
     NodeContainer gnbNodes;
     NodeContainer ueNodes;
     gnbNodes.Create(1);
@@ -286,7 +425,7 @@ NrUplinkPowerControlTestCase::DoRun()
     mobility.Install(allNodes);
     m_ueMobility = ueNodes.Get(0)->GetObject<MobilityModel>();
 
-    // Create Devices and install them in the Nodes (eNB and UE)
+    // Create Devices and install them in the Nodes (gNB and UE)
     NetDeviceContainer gnbDevs;
     NetDeviceContainer ueDevs;
     nrHelper->SetGnbPhyAttribute("Numerology", UintegerValue(numerology));
@@ -294,14 +433,11 @@ NrUplinkPowerControlTestCase::DoRun()
     nrHelper->SetUePhyAttribute("TxPower", DoubleValue(ueTxPower));
     nrHelper->SetUePhyAttribute("EnableUplinkPowerControl", BooleanValue(true));
 
-    CcBwpCreator::SimpleOperationBandConf bandConf(frequency,
-                                                   bandwidth,
-                                                   numCcPerBand,
-                                                   scenarioEnum);
+    CcBwpCreator::SimpleOperationBandConf bandConf(frequency, bandwidth, numCcPerBand);
     CcBwpCreator ccBwpCreator;
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-    // Initialize channel and pathloss, plus other things inside band.
-    nrHelper->InitializeOperationBand(&band, NrHelper::INIT_PROPAGATION | NrHelper::INIT_CHANNEL);
+    channelHelper->AssignChannelsToBands({band}, NrChannelHelper::INIT_PROPAGATION);
+
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
 
     // Configure ideal beamforming method
@@ -319,47 +455,34 @@ NrUplinkPowerControlTestCase::DoRun()
     nrHelper->SetGnbAntennaAttribute("NumColumns", UintegerValue(1));
     nrHelper->SetGnbAntennaAttribute("AntennaElement",
                                      PointerValue(CreateObject<IsotropicAntennaModel>()));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
     gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
     ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    Ptr<NrUePhy> uePhy = nrHelper->GetUePhy(ueDevs.Get(0), 0);
+    m_uePhy = NrHelper::GetUePhy(ueDevs.Get(0), 0);
 
-    m_ueUpc = uePhy->GetUplinkPowerControl();
+    m_ueUpc = m_uePhy->GetUplinkPowerControl();
 
     m_ueUpc->TraceConnectWithoutContext("ReportPuschTxPower",
                                         MakeBoundCallback(&PuschTxPowerReport, this));
     m_ueUpc->TraceConnectWithoutContext("ReportPucchTxPower",
                                         MakeBoundCallback(&PucchTxPowerReport, this));
+    // Fires every time the power control computes the SRS power
+    m_ueUpc->TraceConnectWithoutContext("ReportSrsTxPower",
+                                        MakeBoundCallback(&SrsTxPowerReport, this));
 
     Ptr<const NrSpectrumPhy> txSpectrumPhy =
-        nrHelper->GetGnbPhy(gnbDevs.Get(0), 0)->GetSpectrumPhy();
+        NrHelper::GetGnbPhy(gnbDevs.Get(0), 0)->GetSpectrumPhy();
     Ptr<SpectrumChannel> txSpectrumChannel = txSpectrumPhy->GetSpectrumChannel();
     Ptr<ThreeGppPropagationLossModel> propagationLossModel =
         DynamicCast<ThreeGppPropagationLossModel>(txSpectrumChannel->GetPropagationLossModel());
     NS_ASSERT(propagationLossModel != nullptr);
-    propagationLossModel->AssignStreams(1);
-    Ptr<ChannelConditionModel> channelConditionModel =
-        propagationLossModel->GetChannelConditionModel();
-    channelConditionModel->AssignStreams(1);
     Ptr<ThreeGppSpectrumPropagationLossModel> spectrumLossModel =
         DynamicCast<ThreeGppSpectrumPropagationLossModel>(
             txSpectrumChannel->GetPhasedArraySpectrumPropagationLossModel());
     NS_ASSERT_MSG(
         spectrumLossModel == nullptr,
         "3GPP spectrum model should be disabled in this test to have deterministic behaviour.");
-
-    // When all the configuration is done, explicitly call UpdateConfig ()
-    for (auto it = gnbDevs.Begin(); it != gnbDevs.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueDevs.Begin(); it != ueDevs.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
 
     // traffic configuration
     Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
@@ -385,10 +508,6 @@ NrUplinkPowerControlTestCase::DoRun()
     internet.Install(ueNodes);
 
     Ipv4InterfaceContainer ueIpIface = nrEpcHelper->AssignUeIpv4Address(ueDevs);
-    // Set the default gateway for the UE
-    Ptr<Ipv4StaticRouting> ueStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(0)->GetObject<Ipv4>());
-    ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
 
     // Attach a UE to a gNB
     nrHelper->AttachToGnb(ueDevs.Get(0), gnbDevs.Get(0));
@@ -411,40 +530,42 @@ NrUplinkPowerControlTestCase::DoRun()
     serverApps.Add(ulPacketSink.Install(remoteHost));
 
     UdpClientHelper dlClient;
-    dlClient.SetAttribute("RemotePort", UintegerValue(dlPort));
     dlClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClient.SetAttribute("PacketSize", UintegerValue(100));
     dlClient.SetAttribute("Interval", TimeValue(MilliSeconds(1)));
-    NrEpsBearer dlBearer(NrEpsBearer::GBR_CONV_VIDEO);
-    Ptr<NrEpcTft> dlTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpf;
+    NrQosFlow dlFlow(NrQosFlow::GBR_CONV_VIDEO);
+    Ptr<NrQosRule> dlRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpf;
     dlpf.localPortStart = dlPort;
     dlpf.localPortEnd = dlPort;
-    dlTft->Add(dlpf);
+    dlRule->Add(dlpf);
 
     UdpClientHelper ulClient;
-    ulClient.SetAttribute("RemotePort", UintegerValue(ulPort));
     ulClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     ulClient.SetAttribute("PacketSize", UintegerValue(100));
     ulClient.SetAttribute("Interval", TimeValue(MilliSeconds(1)));
-    NrEpsBearer ulBearer(NrEpsBearer::GBR_CONV_VIDEO);
-    Ptr<NrEpcTft> ulTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter ulpf;
+    NrQosFlow ulFlow(NrQosFlow::GBR_CONV_VIDEO);
+    Ptr<NrQosRule> ulRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter ulpf;
     ulpf.remotePortStart = ulPort;
     ulpf.remotePortEnd = ulPort;
-    ulpf.direction = NrEpcTft::UPLINK;
-    ulTft->Add(ulpf);
+    ulpf.direction = NrQosRule::UPLINK;
+    ulRule->Add(ulpf);
 
     ApplicationContainer clientApps;
     // set and add downlink app to container
     Address ueAddress = ueIpIface.GetAddress(0);
-    dlClient.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+    dlClient.SetAttribute("Remote",
+                          AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPort)));
+
     clientApps.Add(dlClient.Install(remoteHost));
-    nrHelper->ActivateDedicatedEpsBearer(ueDevs.Get(0), dlBearer, dlTft);
+    nrHelper->ActivateDedicatedQosFlow(ueDevs.Get(0), dlFlow, dlRule);
     // set and add uplink app to container
-    ulClient.SetAttribute("RemoteAddress", AddressValue(internetIpIfaces.GetAddress(1)));
+    ulClient.SetAttribute(
+        "Remote",
+        AddressValue(addressUtils::ConvertToSocketAddress(internetIpIfaces.GetAddress(1), ulPort)));
     clientApps.Add(ulClient.Install(ueNodes.Get(0)));
-    nrHelper->ActivateDedicatedEpsBearer(ueDevs.Get(0), ulBearer, ulTft);
+    nrHelper->ActivateDedicatedQosFlow(ueDevs.Get(0), ulFlow, ulRule);
 
     // start UDP server and client apps
     serverApps.Start(udpAppStartTime);
@@ -696,8 +817,17 @@ NrUplinkPowerControlTestCase::DoRun()
         }
     }
 
+    nrHelper->AssignStreams({.assignEpc = true,
+                             .remoteHostNodes = remoteHostContainer,
+                             .ueNodes = ueNodes,
+                             .gnbDevs = gnbDevs,
+                             .ueDevs = ueDevs});
+
     Simulator::Stop(simTime);
     Simulator::Run();
+
+    // Without UL power control applied to the SRS, the trace never fires
+    NS_TEST_EXPECT_MSG_GT(m_srsTxPowerReports, 0, "SRS transmit power was never computed");
 
     Simulator::Destroy();
 }

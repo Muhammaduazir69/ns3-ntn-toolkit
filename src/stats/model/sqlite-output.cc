@@ -22,6 +22,7 @@ SQLiteOutput::SQLiteOutput(const std::string& name)
 {
     int rc = sqlite3_open(name.c_str(), &m_db);
     NS_ABORT_MSG_UNLESS(rc == SQLITE_OK, "Failed to open DB");
+    sqlite3_busy_timeout(m_db, 100); // set 100 ms timeout for sqlite3 operations
 }
 
 SQLiteOutput::~SQLiteOutput()
@@ -84,7 +85,7 @@ SQLiteOutput::RetrieveColumn(sqlite3_stmt* /* stmt */, int /* pos */) const
     NS_FATAL_ERROR("Can't call generic fn");
 }
 
-/// \copydoc SQLiteOutput::RetrieveColumn
+/// @copydoc SQLiteOutput::RetrieveColumn
 template <>
 int
 SQLiteOutput::RetrieveColumn(sqlite3_stmt* stmt, int pos) const
@@ -92,7 +93,7 @@ SQLiteOutput::RetrieveColumn(sqlite3_stmt* stmt, int pos) const
     return sqlite3_column_int(stmt, pos);
 }
 
-/// \copydoc SQLiteOutput::RetrieveColumn
+/// @copydoc SQLiteOutput::RetrieveColumn
 template <>
 uint32_t
 SQLiteOutput::RetrieveColumn(sqlite3_stmt* stmt, int pos) const
@@ -100,7 +101,7 @@ SQLiteOutput::RetrieveColumn(sqlite3_stmt* stmt, int pos) const
     return static_cast<uint32_t>(sqlite3_column_int(stmt, pos));
 }
 
-/// \copydoc SQLiteOutput::RetrieveColumn
+/// @copydoc SQLiteOutput::RetrieveColumn
 template <>
 double
 SQLiteOutput::RetrieveColumn(sqlite3_stmt* stmt, int pos) const

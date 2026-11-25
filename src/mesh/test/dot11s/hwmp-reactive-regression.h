@@ -5,6 +5,10 @@
  *
  * Authors: Kirill Andreev <andreev@iitp.ru>
  */
+
+#ifndef HWMP_REACTIVE_REGRESSION_H
+#define HWMP_REACTIVE_REGRESSION_H
+
 #include "ns3/ipv4-interface-container.h"
 #include "ns3/node-container.h"
 #include "ns3/nstime.h"
@@ -14,13 +18,13 @@
 using namespace ns3;
 
 /**
- * \ingroup dot11s-test
+ * @ingroup dot11s-test
  *
- * \brief test for multihop path establishing and path error
+ * @brief test for multihop path establishing and path error
  * procedures
  * Initiate scenario with 6 stations. Procedure of opening peer link
  * is the following: (PMP routines are not shown)
- * \verbatim
+ * @verbatim
  *      0    1    2    3    4    5
  *      |    |    |    |    |<---|--->  ARP request (2.002s)
  *      |....|....|....|....|....|      ARP requests (continued)
@@ -54,7 +58,7 @@ using namespace ns3;
  *      |    |    |         |<---|--->  PREQ
  *      |    |    |     <---|--->|      PREQ
  *      |....|....|.........|....|      Repeated attempts of PREQ
- * \endverbatim
+ * @endverbatim
  */
 
 class HwmpReactiveRegressionTest : public TestCase
@@ -68,7 +72,7 @@ class HwmpReactiveRegressionTest : public TestCase
     void CheckResults();
 
   private:
-    /// \internal It is important to have pointers here
+    /// @internal It is important to have pointers here
     NodeContainer* m_nodes;
     /// Simulation time
     Time m_time;
@@ -93,25 +97,27 @@ class HwmpReactiveRegressionTest : public TestCase
 
     /**
      * Send data
-     * \param socket the sending socket
+     * @param socket the sending socket
      */
     void SendData(Ptr<Socket> socket);
 
     /**
-     * \brief Handle a packet reception.
+     * @brief Handle a packet reception.
      *
      * This function is called by lower layers.
      *
-     * \param socket the socket the packet was received to.
+     * @param socket the socket the packet was received to.
      */
     void HandleReadServer(Ptr<Socket> socket);
 
     /**
-     * \brief Handle a packet reception.
+     * @brief Handle a packet reception.
      *
      * This function is called by lower layers.
      *
-     * \param socket the socket the packet was received to.
+     * @param socket the socket the packet was received to.
      */
     void HandleReadClient(Ptr<Socket> socket);
 };
+
+#endif // HWMP_REACTIVE_REGRESSION_H

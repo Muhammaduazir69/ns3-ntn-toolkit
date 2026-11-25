@@ -136,6 +136,7 @@
  */
 
 #include "ns3/channel-condition-model.h"
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
@@ -2806,6 +2807,15 @@ main(int argc, char* argv[])
         Simulator::Schedule(Seconds(0.0), &RunAccuracy);
         Simulator::Stop(Seconds(0.01));
         Simulator::Run();
+        // ntn-dataset@1 record at the top of the run directory: the TTE predictions are
+        // evaluated on SGP4 geometry, no packets.
+        ns3::ntnobs::WriteDatasetRecord(p.outputDir,
+                                        "ntn-cho-tte-campaign",
+                                        "analytic",
+                                        argc,
+                                        argv,
+                                        {{"accuracy_samples", std::to_string(p.accuracySamples), "config"}},
+                                        {{"mode", p.mode}});
         Simulator::Destroy();
         g_acc.close();
         return 0;
@@ -2950,6 +2960,38 @@ main(int argc, char* argv[])
               << " outage=" << 100.0 * sumOut / (p.numUes * p.simTime) << "% meanSINR="
               << (nSamp ? sumSinr / nSamp : 0.0) << " dB meanToS=" << meanTos
               << " s wall=" << wall << " s\n";
+    // ntn-dataset@1 record at the top of the run directory (the packet-level replay of
+    // terminal 0 writes its own measured record under nr_check/). The campaign KPIs come
+    // from the link-budget and measurement model on SGP4 geometry, not from packets.
+    auto num = [](double v) {
+        std::ostringstream o;
+        o << std::setprecision(6) << v;
+        return o.str();
+    };
+    ns3::ntnobs::WriteDatasetRecord(
+        p.outputDir,
+        "ntn-cho-tte-campaign",
+        "analytic",
+        argc,
+        argv,
+        {{"policy", p.policy, "config"},
+         {"num_ues", std::to_string(p.numUes), "config"},
+         {"n_sats", std::to_string(g_sats.size()), "config"},
+         {"ho_attempts", num(sumAtt), "analytic"},
+         {"ho_success", num(sumOk), "analytic"},
+         {"hof", num(sumHof), "analytic"},
+         {"rlf", num(sumRlf), "analytic"},
+         {"pp5", num(sumPp5), "analytic"},
+         {"ho_per_ue_min", num(sumOk / ueMin), "analytic"},
+         {"rlf_per_ue_min", num(sumRlf / ueMin), "analytic"},
+         {"outage_frac", num(sumOut / (p.numUes * p.simTime)), "analytic"},
+         {"mean_sinr_db", num(nSamp ? sumSinr / nSamp : 0.0), "analytic"},
+         {"mean_se", num(nSamp ? sumSe / nSamp : 0.0), "analytic"},
+         {"mean_tos_s", num(meanTos), "analytic"},
+         {"median_tos_s", num(medTos), "analytic"}},
+        {{"mode", p.mode},
+         {"packet_level_replay",
+          p.nrCheckS > 0.0 ? "nr_check/ (measured, NtnRealStackHelper)" : "off"}});
     // Terminal 0's start position, read before the clock is reset.
     Vector ue0Start = g_ues.empty() ? Vector() : g_ues[0].startPos;
     Simulator::Destroy();

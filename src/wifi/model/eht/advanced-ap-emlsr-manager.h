@@ -12,6 +12,7 @@
 #include "default-ap-emlsr-manager.h"
 
 #include "ns3/nstime.h"
+#include "ns3/wifi-export.h"
 
 #include <set>
 
@@ -24,16 +25,16 @@ class WifiPsdu;
 class WifiTxVector;
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  *
  * AdvancedApEmlsrManager is an advanced AP EMLSR manager.
  */
-class AdvancedApEmlsrManager : public DefaultApEmlsrManager
+class WIFI_EXPORT AdvancedApEmlsrManager : public DefaultApEmlsrManager
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -45,7 +46,8 @@ class AdvancedApEmlsrManager : public DefaultApEmlsrManager
     Time GetDelayOnTxPsduNotForEmlsr(Ptr<const WifiPsdu> psdu,
                                      const WifiTxVector& txVector,
                                      WifiPhyBand band) override;
-    bool UpdateCwAfterFailedIcf() override;
+    bool UpdateCwAfterFailedIcf() const override;
+    bool ReportFailedIcf() const override;
 
   protected:
     void DoDispose() override;
@@ -54,10 +56,10 @@ class AdvancedApEmlsrManager : public DefaultApEmlsrManager
     /**
      * Store information about the MAC header of the MPDU being received on the given link.
      *
-     * \param linkId the ID of the given link
-     * \param macHdr the MAC header of the MPDU being received
-     * \param txVector the TXVECTOR used to transmit the PSDU
-     * \param psduDuration the remaining duration of the PSDU
+     * @param linkId the ID of the given link
+     * @param macHdr the MAC header of the MPDU being received
+     * @param txVector the TXVECTOR used to transmit the PSDU
+     * @param psduDuration the remaining duration of the PSDU
      */
     void ReceivedMacHdr(uint8_t linkId,
                         const WifiMacHeader& macHdr,
@@ -79,6 +81,9 @@ class AdvancedApEmlsrManager : public DefaultApEmlsrManager
     bool m_updateCwAfterFailedIcf;      //!< Whether the AP MLD shall double the CW upon CTS timeout
                                    //!< after an MU-RTS in case all the clients solicited by the
                                    //!< MU-RTS are EMLSR clients that have sent a frame to the AP
+    bool m_reportFailedIcf; //!< Whether the AP MLD shall report an ICF failure to the remote
+                            //!< station manager when all the clients solicited by the MU-RTS
+                            //!< are EMLSR clients that have sent a frame to the AP
 };
 
 } // namespace ns3

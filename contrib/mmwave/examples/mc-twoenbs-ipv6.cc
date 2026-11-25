@@ -612,7 +612,7 @@ main(int argc, char* argv[])
     for (uint32_t buildingIndex = 0; buildingIndex < numBlocks; buildingIndex++)
     {
         Ptr<Building> building;
-        building = Create<Building>();
+        building = CreateObject<Building>();
         /* returns a vecotr where:
          * position [0]: coordinates for x min
          * position [1]: coordinates for x max

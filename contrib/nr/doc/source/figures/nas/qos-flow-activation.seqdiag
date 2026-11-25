@@ -1,0 +1,20 @@
+diagram {
+   edge_length = 300;
+   IpStack; UeNas; Rrc;
+
+   === Flow pre-registration (before / at attach) ===
+   UeNas => UeNas [label="ActivateQosFlow:\nqueue the pending flow\n(QFI required on rule)"]
+
+   === On reaching ACTIVE ===
+   UeNas <<- Rrc [label="NotifyConnectionSuccessful"]
+   UeNas => UeNas [label="SwitchToState(ACTIVE);\nadd NrQosRule to\nuplink classifier"]
+
+   === Uplink data path ===
+   IpStack ->> UeNas [label="Send(packet, protocolNumber)"]
+   UeNas => UeNas [label="classify -> QFI\n(drop if no match)"]
+   UeNas ->> Rrc [label="SendData(packet, qfi)"]
+
+   === Per-flow teardown ===
+   UeNas <<- Rrc [label="DeactivateQosFlow(qfi)"]
+   UeNas => UeNas [label="remove rule\nfrom classifier"]
+}

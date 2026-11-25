@@ -15,6 +15,7 @@
 #include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/mobility-model.h"
+#include "ns3/node.h"
 #include "ns3/pointer.h"
 #include "ns3/string.h"
 
@@ -208,20 +209,6 @@ FriisPropagationLossModel::GetFrequency() const
 }
 
 double
-FriisPropagationLossModel::DbmToW(double dbm) const
-{
-    double mw = std::pow(10.0, dbm / 10.0);
-    return mw / 1000.0;
-}
-
-double
-FriisPropagationLossModel::DbmFromW(double w) const
-{
-    double dbm = std::log10(w * 1000.0) * 10.0;
-    return dbm;
-}
-
-double
 FriisPropagationLossModel::DoCalcRxPower(double txPowerDbm,
                                          Ptr<MobilityModel> a,
                                          Ptr<MobilityModel> b) const
@@ -366,20 +353,6 @@ double
 TwoRayGroundPropagationLossModel::GetFrequency() const
 {
     return m_frequency;
-}
-
-double
-TwoRayGroundPropagationLossModel::DbmToW(double dbm) const
-{
-    double mw = std::pow(10.0, dbm / 10.0);
-    return mw / 1000.0;
-}
-
-double
-TwoRayGroundPropagationLossModel::DbmFromW(double w) const
-{
-    double dbm = std::log10(w * 1000.0) * 10.0;
-    return dbm;
 }
 
 double
@@ -863,7 +836,8 @@ MatrixPropagationLossModel::SetLoss(Ptr<MobilityModel> ma,
 {
     NS_ASSERT(ma && mb);
 
-    MobilityPair p = std::make_pair(ma, mb);
+    uint64_t p = ((uint64_t)ma->GetObject<Node>()->GetId()) << 32 |
+                 ((uint64_t)mb->GetObject<Node>()->GetId());
     auto i = m_loss.find(p);
 
     if (i == m_loss.end())
@@ -886,7 +860,9 @@ MatrixPropagationLossModel::DoCalcRxPower(double txPowerDbm,
                                           Ptr<MobilityModel> a,
                                           Ptr<MobilityModel> b) const
 {
-    auto i = m_loss.find(std::make_pair(a, b));
+    uint64_t p =
+        ((uint64_t)a->GetObject<Node>()->GetId()) << 32 | ((uint64_t)b->GetObject<Node>()->GetId());
+    auto i = m_loss.find(p);
 
     if (i != m_loss.end())
     {

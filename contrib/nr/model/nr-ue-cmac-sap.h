@@ -7,6 +7,10 @@
 #ifndef NR_UE_CMAC_SAP_H
 #define NR_UE_CMAC_SAP_H
 
+#include "nr-qos-flow.h"
+
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 class NrMacSapUser;
@@ -17,13 +21,13 @@ class NrMacSapUser;
  * This is the MAC SAP Provider, i.e., the part of the SAP that contains the MAC methods called
  * by the RRC
  */
-class NrUeCmacSapProvider
+class NR_EXPORT NrUeCmacSapProvider
 {
   public:
     virtual ~NrUeCmacSapProvider() = default;
 
     /// RachConfig structure
-    struct RachConfig
+    struct NR_EXPORT RachConfig
     {
         uint8_t numberOfRaPreambles;  ///< number of RA preambles
         uint8_t preambleTransMax;     ///< preamble transmit maximum
@@ -34,7 +38,7 @@ class NrUeCmacSapProvider
     /**
      * Configure RACH function
      *
-     * \param rc the RACH config
+     * @param rc the RACH config
      */
     virtual void ConfigureRach(RachConfig rc) = 0;
 
@@ -49,18 +53,19 @@ class NrUeCmacSapProvider
      * tell the MAC to start a non-contention-based random access
      * procedure, e.g., as a consequence of handover
      *
-     * \param rnti
-     * \param rapId Random Access Preamble Identifier
-     * \param prachMask
+     * @param rnti
+     * @param rapId Random Access Preamble Identifier
+     * @param prachMask
      */
     virtual void StartNonContentionBasedRandomAccessProcedure(uint16_t rnti,
                                                               uint8_t rapId,
                                                               uint8_t prachMask) = 0;
 
     /// LogicalChannelConfig structure
-    struct LogicalChannelConfig
+    struct NR_EXPORT LogicalChannelConfig
     {
         uint8_t priority;                ///< priority
+        NrQosFlow::FiveQi fiveQi;        ///< 5G QoS Identifier
         uint16_t prioritizedBitRateKbps; ///< prioritize bit rate Kbps
         uint16_t bucketSizeDurationMs;   ///< bucket size duration ms
         uint8_t logicalChannelGroup;     ///< logical channel group
@@ -69,16 +74,16 @@ class NrUeCmacSapProvider
     /**
      * add a new Logical Channel (LC)
      *
-     * \param lcId the ID of the LC
-     * \param lcConfig the LC configuration provided by the RRC
-     * \param msu the corresponding NrMacSapUser
+     * @param lcId the ID of the LC
+     * @param lcConfig the LC configuration provided by the RRC
+     * @param msu the corresponding NrMacSapUser
      */
     virtual void AddLc(uint8_t lcId, LogicalChannelConfig lcConfig, NrMacSapUser* msu) = 0;
 
     /**
      * remove an existing LC
      *
-     * \param lcId
+     * @param lcId
      */
     virtual void RemoveLc(uint8_t lcId) = 0;
 
@@ -90,21 +95,23 @@ class NrUeCmacSapProvider
 
     /**
      *
-     * \param rnti the cell-specific UE identifier
+     * @param rnti the cell-specific UE identifier
      */
     virtual void SetRnti(uint16_t rnti) = 0;
 
     /**
-     * \brief Notify MAC about the successful RRC connection
+     * @brief Notify MAC about the successful RRC connection
      * establishment.
      */
     virtual void NotifyConnectionSuccessful() = 0;
 
     /**
-     * \brief A method call by UE RRC to communicate the IMSI to the UE MAC
-     * \param imsi the IMSI of the UE
+     * @brief A method call by UE RRC to communicate the IMSI to the UE MAC
+     * @param imsi the IMSI of the UE
      */
     virtual void SetImsi(uint64_t imsi) = 0;
+
+    virtual void RegisterToGnb(uint16_t cellId) = 0;
 };
 
 /**
@@ -113,7 +120,7 @@ class NrUeCmacSapProvider
  * This is the MAC SAP User, i.e., the part of the SAP that contains the RRC methods called by
  * the MAC
  */
-class NrUeCmacSapUser
+class NR_EXPORT NrUeCmacSapUser
 {
   public:
     virtual ~NrUeCmacSapUser() = default;
@@ -121,7 +128,7 @@ class NrUeCmacSapUser
     /**
      *
      *
-     * \param rnti the T-C-RNTI, which will eventually become the C-RNTI after contention
+     * @param rnti the T-C-RNTI, which will eventually become the C-RNTI after contention
      * resolution
      */
     virtual void SetTemporaryCellRnti(uint16_t rnti) = 0;

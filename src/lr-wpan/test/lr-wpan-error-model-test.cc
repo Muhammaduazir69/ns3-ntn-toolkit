@@ -5,21 +5,21 @@
  *
  * Author: Tom Henderson <thomas.r.henderson@boeing.com>
  */
+#include "ns3/callback.h"
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-error-model.h"
+#include "ns3/lr-wpan-mac.h"
+#include "ns3/lr-wpan-net-device.h"
+#include "ns3/mac16-address.h"
+#include "ns3/net-device.h"
+#include "ns3/node.h"
+#include "ns3/packet.h"
+#include "ns3/propagation-loss-model.h"
 #include "ns3/rng-seed-manager.h"
-#include <ns3/callback.h>
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/log.h>
-#include <ns3/lr-wpan-error-model.h>
-#include <ns3/lr-wpan-mac.h>
-#include <ns3/lr-wpan-net-device.h>
-#include <ns3/mac16-address.h>
-#include <ns3/net-device.h>
-#include <ns3/node.h>
-#include <ns3/packet.h>
-#include <ns3/propagation-loss-model.h>
-#include <ns3/simulator.h>
-#include <ns3/single-model-spectrum-channel.h>
-#include <ns3/test.h>
+#include "ns3/simulator.h"
+#include "ns3/single-model-spectrum-channel.h"
+#include "ns3/test.h"
 
 using namespace ns3;
 using namespace ns3::lrwpan;
@@ -27,10 +27,10 @@ using namespace ns3::lrwpan;
 NS_LOG_COMPONENT_DEFINE("lr-wpan-error-model-test");
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan Error Vs Distance Test
+ * @brief LrWpan Error Vs Distance Test
  */
 class LrWpanErrorDistanceTestCase : public TestCase
 {
@@ -39,8 +39,8 @@ class LrWpanErrorDistanceTestCase : public TestCase
     ~LrWpanErrorDistanceTestCase() override;
 
     /**
-     * \brief Get the number of received packets.
-     * \returns The number of received packets.
+     * @brief Get the number of received packets.
+     * @returns The number of received packets.
      */
     uint32_t GetReceived() const
     {
@@ -51,19 +51,19 @@ class LrWpanErrorDistanceTestCase : public TestCase
     void DoRun() override;
 
     /**
-     * \brief Function to be called when a packet is received.
-     * \param params MCPS params.
-     * \param p The packet.
+     * @brief Function to be called when a packet is received.
+     * @param params MCPS params.
+     * @param p The packet.
      */
     void Callback(McpsDataIndicationParams params, Ptr<Packet> p);
     uint32_t m_received; //!< The number of received packets.
 };
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan Error model Test
+ * @brief LrWpan Error model Test
  */
 class LrWpanErrorModelTestCase : public TestCase
 {
@@ -76,7 +76,7 @@ class LrWpanErrorModelTestCase : public TestCase
 };
 
 LrWpanErrorDistanceTestCase::LrWpanErrorDistanceTestCase()
-    : TestCase("Test the 802.15.4 error model vs distance"),
+    : TestCase("IEEE 802.15.4 distance error model test"),
       m_received(0)
 {
 }
@@ -135,7 +135,7 @@ LrWpanErrorDistanceTestCase::DoRun()
 
     Ptr<Packet> p;
     mob0->SetPosition(Vector(0, 0, 0));
-    mob1->SetPosition(Vector(100, 0, 0));
+    mob1->SetPosition(Vector(95, 0, 0));
     for (int i = 0; i < 1000; i++)
     {
         p = Create<Packet>(20);
@@ -144,9 +144,14 @@ LrWpanErrorDistanceTestCase::DoRun()
 
     Simulator::Run();
 
-    // Test that we received 977 packets out of 1000, at distance of 100 m
-    // with default power of 0
-    NS_TEST_ASSERT_MSG_EQ(GetReceived(), 977, "Model fails");
+    // Test that we received fewer packets than 1000, at distance less than 100 m
+    // with default Tx power of 0 dBm using the default maximum sensitivity (-106.58 dBm).
+    NS_TEST_ASSERT_MSG_GT_OR_EQ(GetReceived(),
+                                990,
+                                "Not enough packets received, distance model failure");
+    NS_TEST_ASSERT_MSG_LT_OR_EQ(GetReceived(),
+                                1000,
+                                "Too many packets received, distance model failure");
 
     Simulator::Destroy();
 }
@@ -185,10 +190,10 @@ LrWpanErrorModelTestCase::DoRun()
 }
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan Error model TestSuite
+ * @brief LrWpan Error model TestSuite
  */
 class LrWpanErrorModelTestSuite : public TestSuite
 {

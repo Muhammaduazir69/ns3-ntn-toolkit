@@ -28,7 +28,7 @@ class Emitter : public Object
   public:
     /**
      * Register this type.
-     * \return The TypeId.
+     * @return The TypeId.
      */
     static TypeId GetTypeId();
     Emitter();
@@ -97,9 +97,9 @@ Emitter::Count()
 /**
  * This is a function to test hooking a raw function to the trace source,
  *
- * \param context The trace context.
- * \param oldVal Old value.
- * \param newVal New value.
+ * @param context The trace context.
+ * @param oldVal Old value.
+ * @param newVal New value.
  */
 void
 NotifyViaTraceSource(std::string context, double oldVal, double newVal)
@@ -110,9 +110,9 @@ NotifyViaTraceSource(std::string context, double oldVal, double newVal)
 /**
  * This is a function to test hooking it to the probe output
  *
- * \param context The trace context.
- * \param oldVal Old value.
- * \param newVal New value.
+ * @param context The trace context.
+ * @param oldVal Old value.
+ * @param newVal New value.
  */
 void
 NotifyViaProbe(std::string context, double oldVal, double newVal)
@@ -201,9 +201,9 @@ main(int argc, char* argv[])
 
     // The Emitter object is not associated with an ns-3 node, so
     // it won't get started automatically, so we need to do this ourselves
-    Simulator::Schedule(Seconds(0.0), &Emitter::Initialize, emitter);
+    Simulator::Schedule(Seconds(0), &Emitter::Initialize, emitter);
 
-    Simulator::Stop(Seconds(100.0));
+    Simulator::Stop(Seconds(100));
     Simulator::Run();
     Simulator::Destroy();
 

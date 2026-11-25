@@ -19,9 +19,19 @@
 #include "ns3/yans-wifi-channel.h"
 #include "ns3/yans-wifi-helper.h"
 
+/**
+ * @file
+ * @ingroup wifi
+ * Clear channel example
+ */
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ClearChannelCmu");
+
+/** Unnamed namespace, to disambiguate class Experiment. */
+namespace
+{
 
 /**
  * WiFi clear channel cmu experiment class.
@@ -34,16 +44,16 @@ class Experiment
     Experiment();
     /**
      * Constructor.
-     * \param name The name of the experiment.
+     * @param name The name of the experiment.
      */
     Experiment(std::string name);
     /**
      * Run an experiment.
-     * \param wifi      //!< The WifiHelper class.
-     * \param wifiPhy   //!< The YansWifiPhyHelper class.
-     * \param wifiMac   //!< The WifiMacHelper class.
-     * \param wifiChannel //!< The YansWifiChannelHelper class.
-     * \return the number of received packets.
+     * @param wifi      //!< The WifiHelper class.
+     * @param wifiPhy   //!< The YansWifiPhyHelper class.
+     * @param wifiMac   //!< The WifiMacHelper class.
+     * @param wifiChannel //!< The YansWifiChannelHelper class.
+     * @return the number of received packets.
      */
     uint32_t Run(const WifiHelper& wifi,
                  const YansWifiPhyHelper& wifiPhy,
@@ -53,33 +63,33 @@ class Experiment
   private:
     /**
      * Receive a packet.
-     * \param socket The receiving socket.
+     * @param socket The receiving socket.
      */
     void ReceivePacket(Ptr<Socket> socket);
     /**
      * Set the position of a node.
-     * \param node The node.
-     * \param position The position of the node.
+     * @param node The node.
+     * @param position The position of the node.
      */
     void SetPosition(Ptr<Node> node, Vector position);
     /**
      * Get the position of a node.
-     * \param node The node.
-     * \return the position of the node.
+     * @param node The node.
+     * @return the position of the node.
      */
     Vector GetPosition(Ptr<Node> node);
     /**
      * Setup the receiving socket.
-     * \param node The receiving node.
-     * \return the socket.
+     * @param node The receiving node.
+     * @return the socket.
      */
     Ptr<Socket> SetupPacketReceive(Ptr<Node> node);
     /**
      * Generate the traffic.
-     * \param socket The sending socket.
-     * \param pktSize The packet size.
-     * \param pktCount The number of packets to send.
-     * \param pktInterval The time between packets.
+     * @param socket The sending socket.
+     * @param pktSize The packet size.
+     * @param pktCount The number of packets to send.
+     * @param pktInterval The time between packets.
      */
     void GenerateTraffic(Ptr<Socket> socket, uint32_t pktSize, uint32_t pktCount, Time pktInterval);
 
@@ -97,14 +107,14 @@ Experiment::Experiment(std::string name)
     m_output.SetStyle(Gnuplot2dDataset::LINES);
 }
 
-void
+[[maybe_unused]] void
 Experiment::SetPosition(Ptr<Node> node, Vector position)
 {
     Ptr<MobilityModel> mobility = node->GetObject<MobilityModel>();
     mobility->SetPosition(position);
 }
 
-Vector
+[[maybe_unused]] Vector
 Experiment::GetPosition(Ptr<Node> node)
 {
     Ptr<MobilityModel> mobility = node->GetObject<MobilityModel>();
@@ -197,7 +207,7 @@ Experiment::Run(const WifiHelper& wifi,
     uint32_t packetSize = 1014;
     uint32_t maxPacketCount = 200;
     Time interPacketInterval = Seconds(1.);
-    Simulator::Schedule(Seconds(1.0),
+    Simulator::Schedule(Seconds(1),
                         &Experiment::GenerateTraffic,
                         this,
                         source,
@@ -210,6 +220,8 @@ Experiment::Run(const WifiHelper& wifi,
 
     return m_pktsTotal;
 }
+
+} // unnamed namespace
 
 int
 main(int argc, char* argv[])

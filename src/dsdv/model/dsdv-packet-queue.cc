@@ -139,14 +139,14 @@ PacketQueue::GetCountForPacketsWithDst(Ipv4Address dst)
 struct IsExpired
 {
     /**
-     * \brief Check for expired entry
-     * \param e QueueEntry to check
-     * \return true if expired
+     * @brief Check for expired entry
+     * @param e QueueEntry to check
+     * @return true if expired
      */
     bool operator()(const QueueEntry& e) const
     {
         // NS_LOG_DEBUG("Expire time for packet in req queue: "<<e.GetExpireTime ());
-        return (e.GetExpireTime() < Seconds(0));
+        return (e.GetExpireTime().IsStrictlyNegative());
     }
 };
 

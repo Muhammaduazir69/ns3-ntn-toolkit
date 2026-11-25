@@ -18,7 +18,7 @@ namespace ns3
 {
 
 /**
- * \ingroup uan
+ * @ingroup uan
  *
  * Standard ambient acoustic noise model.
  *
@@ -43,7 +43,7 @@ class UanNoiseModelDefault : public UanNoiseModel
 
     /**
      * Register this type.
-     * \return The TypeId.
+     * @return The TypeId.
      */
     static TypeId GetTypeId();
 
@@ -53,8 +53,7 @@ class UanNoiseModelDefault : public UanNoiseModel
   private:
     double m_wind;     //!< Wind speed in m/s.
     double m_shipping; //!< Shipping contribution to noise between 0 and 1.
-
-}; // class UanNoiseModelDefault
+};
 
 } // namespace ns3
 

@@ -2,10 +2,23 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file lena-lte-comparison-campaign.cc
+ *
+ * @brief Simulation-campaign entry point of the LENA vs 5G-LENA comparison example. It exposes on
+ * the command line the options typically swept in campaigns (scenario UMa/UMi/RMa, number of
+ * rings or site file, simulator LENA/5GLENA, technology LTE/NR, TDD/FDD, numerology and TDD
+ * pattern, traffic scenario and direction, error model, scheduler PF/RR, bandwidth, frequency
+ * reuse, downtilt, UL power control, power allocation, simTag/outputDir), fills the shared
+ * Parameters structure, and calls LenaLteComparison() with a periodic progress report. The
+ * scenario itself and the SQLite/FlowMonitor outputs are implemented in lena-lte-comparison.cc.
+ */
+
 #include "lena-lte-comparison.h"
 
-#include <ns3/command-line.h>
-#include <ns3/show-progress.h>
+#include "ns3/command-line.h"
+#include "ns3/show-progress.h"
 
 using namespace ns3;
 
@@ -71,7 +84,7 @@ main(int argc, char* argv[])
                  "for all sectors)",
                  params.freqScenario);
     cmd.AddValue("downtiltAngle",
-                 "Base station antenna down tilt angle (deg)",
+                 "Base station antenna downtilt angle (deg)",
                  params.downtiltAngle);
     cmd.AddValue("enableUlPc", "Whether to enable or disable UL power control", params.enableUlPc);
     cmd.AddValue("powerAllocation",

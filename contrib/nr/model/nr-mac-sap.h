@@ -7,7 +7,8 @@
 #ifndef NR_MAC_SAP_H
 #define NR_MAC_SAP_H
 
-#include <ns3/packet.h>
+#include "ns3/nr-export.h"
+#include "ns3/packet.h"
 
 namespace ns3
 {
@@ -19,7 +20,7 @@ namespace ns3
  * This is the MAC SAP Provider, i.e., the part of the SAP that contains the MAC methods called by
  * the RLC
  */
-class NrMacSapProvider
+class NR_EXPORT NrMacSapProvider
 {
   public:
     virtual ~NrMacSapProvider() = default;
@@ -28,7 +29,7 @@ class NrMacSapProvider
      * Parameters for NrMacSapProvider::TransmitPdu
      *
      */
-    struct TransmitPduParameters
+    struct NR_EXPORT TransmitPduParameters
     {
         Ptr<Packet> pdu; /**< the RLC PDU */
         uint16_t rnti;   /**< the C-RNTI identifying the UE */
@@ -45,14 +46,14 @@ class NrMacSapProvider
      * send an RLC PDU to the MAC for transmission. This method is to be
      * called as a response to NrMacSapUser::NotifyTxOpportunity
      *
-     * \param params TransmitPduParameters
+     * @param params TransmitPduParameters
      */
     virtual void TransmitPdu(TransmitPduParameters params) = 0;
 
     /**
-     * Parameters for NrMacSapProvider::ReportBufferStatus
+     * Parameters for NrMacSapProvider::BufferStatusReport
      */
-    struct ReportBufferStatusParameters
+    struct NR_EXPORT BufferStatusReportParameters
     {
         uint16_t rnti; /**< the C-RNTI identifying the UE */
         uint8_t lcid;  /**< the logical channel id corresponding to the sending RLC instance */
@@ -62,14 +63,15 @@ class NrMacSapProvider
         uint16_t retxQueueHolDelay; /**<  the Head Of Line delay of the retransmission queue */
         uint16_t
             statusPduSize; /**< the current size of the pending STATUS RLC  PDU message in bytes */
+        bool expBsrTimer;
     };
 
     /**
      * Report the RLC buffer status to the MAC
      *
-     * \param params ReportBufferStatusParameters
+     * @param params BufferStatusReportParameters
      */
-    virtual void ReportBufferStatus(ReportBufferStatusParameters params) = 0;
+    virtual void BufferStatusReport(BufferStatusReportParameters params) = 0;
 };
 
 /**
@@ -79,7 +81,7 @@ class NrMacSapProvider
  * This is the MAC SAP User, i.e., the part of the SAP that contains the RLC methods called by the
  * MAC
  */
-class NrMacSapUser
+class NR_EXPORT NrMacSapUser
 {
   public:
     virtual ~NrMacSapUser() = default;
@@ -88,16 +90,16 @@ class NrMacSapUser
      * Parameters for NrMacSapUser::NotifyTxOpportunity
      *
      */
-    struct TxOpportunityParameters
+    struct NR_EXPORT TxOpportunityParameters
     {
         /**
-         * \brief TxOpportunityParameters constructor
-         * \param bytes Bytes
-         * \param layer Layer
-         * \param harqId HarqID
-         * \param ccId Component carrier ID
-         * \param rnti RNTI
-         * \param lcId Logical Channel ID
+         * @brief TxOpportunityParameters constructor
+         * @param bytes Bytes
+         * @param layer Layer
+         * @param harqId HarqID
+         * @param ccId Component carrier ID
+         * @param rnti RNTI
+         * @param lcId Logical Channel ID
          */
         TxOpportunityParameters(uint32_t bytes,
                                 uint8_t layer,
@@ -115,7 +117,7 @@ class NrMacSapUser
         }
 
         /**
-         * \brief TxOpportunityParameters default constructor (DEPRECATED)
+         * @brief TxOpportunityParameters default constructor (DEPRECATED)
          */
         TxOpportunityParameters()
         {
@@ -133,7 +135,7 @@ class NrMacSapUser
      * Called by the MAC to notify the RLC that the scheduler granted a
      * transmission opportunity to this RLC instance.
      *
-     * \param params the TxOpportunityParameters
+     * @param params the TxOpportunityParameters
      */
     virtual void NotifyTxOpportunity(TxOpportunityParameters params) = 0;
 
@@ -149,20 +151,20 @@ class NrMacSapUser
      * Parameters for NrMacSapUser::ReceivePdu
      *
      */
-    struct ReceivePduParameters
+    struct NR_EXPORT ReceivePduParameters
     {
         /**
-         * \brief ReceivePduParameters default constructor (DEPRECATED)
+         * @brief ReceivePduParameters default constructor (DEPRECATED)
          */
         ReceivePduParameters()
         {
         }
 
         /**
-         * \brief ReceivePduParameters constructor
-         * \param p Packet
-         * \param rnti RNTI
-         * \param lcid Logical Channel ID
+         * @brief ReceivePduParameters constructor
+         * @param p Packet
+         * @param rnti RNTI
+         * @param lcid Logical Channel ID
          */
         ReceivePduParameters(const Ptr<Packet>& p, uint16_t rnti, uint8_t lcid)
         {
@@ -179,7 +181,7 @@ class NrMacSapUser
     /**
      * Called by the MAC to notify the RLC of the reception of a new PDU
      *
-     * \param params the ReceivePduParameters
+     * @param params the ReceivePduParameters
      */
     virtual void ReceivePdu(ReceivePduParameters params) = 0;
 };
@@ -192,13 +194,13 @@ class GnbMacMemberNrMacSapProvider : public NrMacSapProvider
     /**
      * Constructor
      *
-     * \param mac the MAC class
+     * @param mac the MAC class
      */
     GnbMacMemberNrMacSapProvider(C* mac);
 
     // inherited from NrMacSapProvider
     void TransmitPdu(TransmitPduParameters params) override;
-    void ReportBufferStatus(ReportBufferStatusParameters params) override;
+    void BufferStatusReport(BufferStatusReportParameters params) override;
 
   private:
     C* m_mac; ///< the MAC class
@@ -219,9 +221,9 @@ GnbMacMemberNrMacSapProvider<C>::TransmitPdu(TransmitPduParameters params)
 
 template <class C>
 void
-GnbMacMemberNrMacSapProvider<C>::ReportBufferStatus(ReportBufferStatusParameters params)
+GnbMacMemberNrMacSapProvider<C>::BufferStatusReport(BufferStatusReportParameters params)
 {
-    m_mac->DoReportBufferStatus(params);
+    m_mac->DoTransmitBufferStatusReport(params);
 }
 
 } // namespace ns3

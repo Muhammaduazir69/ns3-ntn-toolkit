@@ -1,0 +1,17 @@
+diagram {
+   edge_length = 300;
+   Mme; Sgw;
+
+   === Session creation (attach) ===
+   Mme ->> Sgw [label="Create Session Request"]
+   Mme <<- Sgw [label="Create Session Response"]
+
+   === Path switch (handover) ===
+   Mme ->> Sgw [label="Modify Flow Request"]
+   Mme <<- Sgw [label="Modify Flow Response"]
+
+   === Flow release ===
+   Mme ->> Sgw [label="Delete Flow Command"]
+   Mme <<- Sgw [label="Delete Flow Request"]
+   Mme ->> Sgw [label="Delete Flow Response"]
+}

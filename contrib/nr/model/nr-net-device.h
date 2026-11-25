@@ -7,37 +7,39 @@
 
 #include "nr-phy.h"
 
-#include <ns3/net-device.h>
-#include <ns3/traced-callback.h>
+#include "ns3/net-device.h"
+#include "ns3/nr-export.h"
+#include "ns3/traced-callback.h"
 
 namespace ns3
 {
 
+class ErrorModel;
 class Node;
 class Packet;
 
 /**
- * \ingroup ue
- * \ingroup gnb
- * \brief The NrNetDevice class
+ * @ingroup ue
+ * @ingroup gnb
+ * @brief The NrNetDevice class
  *
  * This is the base class for NrUeNetDevice and NrGnbNetDevice.
  */
-class NrNetDevice : public NetDevice
+class NR_EXPORT NrNetDevice : public NetDevice
 {
   public:
     /**
-     * \brief GetTypeId
-     * \return the object type id
+     * @brief GetTypeId
+     * @return the object type id
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief NrNetDevice
+     * @brief NrNetDevice
      */
     NrNetDevice();
     /**
-     * \brief ~NrNetDevice
+     * @brief ~NrNetDevice
      */
     ~NrNetDevice() override;
 
@@ -75,14 +77,34 @@ class NrNetDevice : public NetDevice
     void DoDispose() override;
 
     TracedCallback<Ptr<const Packet>, const Address&>
-        m_txTrace;                               ///< Traced Callback for transmitted packets
-    TracedCallback<Ptr<const Packet>> m_rxTrace; ///< Traced Callback for received packets
+        m_txTrace;                                 ///< Traced Callback for transmitted packets
+    TracedCallback<Ptr<const Packet>> m_rxTrace;   ///< Traced Callback for received packets
+    TracedCallback<Ptr<const Packet>> m_dropTrace; ///< Traced Callback for dropped packets
     NetDevice::ReceiveCallback m_rxCallback;
+    Ptr<ErrorModel> m_receiveErrorModel; ///< Error model for receive packet events
 
     virtual bool DoSend(Ptr<Packet> packet, const Address& dest, uint16_t protocolNumber) = 0;
 
+    /**
+     * @brief Handle a received packet that is neither IPv4 nor IPv6.
+     *
+     * The default drops and traces the packet. A device that carries protocols
+     * other than IP overrides this to hand the packet up.
+     *
+     * @param p the packet
+     */
+    virtual void ForwardUnclassifiedUp(Ptr<Packet> p);
+
+    /**
+     * @brief Hand a received packet up to the node.
+     *
+     * @param p the packet
+     * @param protocolNumber the network layer protocol of the packet
+     */
+    void ForwardUp(Ptr<Packet> p, uint16_t protocolNumber);
+
   private:
-    Mac48Address m_macaddress;
+    Mac48Address m_macAddress;
     Ptr<Node> m_node;
     mutable uint16_t m_mtu;
     bool m_linkUp;

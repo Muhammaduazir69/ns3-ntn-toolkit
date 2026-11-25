@@ -10,6 +10,7 @@
 #define ONOE_WIFI_MANAGER_H
 
 #include "ns3/traced-value.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-remote-station-manager.h"
 
 namespace ns3
@@ -18,10 +19,10 @@ namespace ns3
 struct OnoeWifiRemoteStation;
 
 /**
- * \brief an implementation of the rate control algorithm developed
+ * @brief an implementation of the rate control algorithm developed
  *        by Atsushi Onoe
  *
- * \ingroup wifi
+ * @ingroup wifi
  *
  * This algorithm is well known because it has been used as the default
  * rate control algorithm for the madwifi driver. I am not aware of
@@ -32,12 +33,12 @@ struct OnoeWifiRemoteStation;
  * exit if the user tries to configure this RAA with a Wi-Fi MAC
  * that supports 802.11n or higher.
  */
-class OnoeWifiManager : public WifiRemoteStationManager
+class WIFI_EXPORT OnoeWifiManager : public WifiRemoteStationManager
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     OnoeWifiManager();
@@ -67,13 +68,13 @@ class OnoeWifiManager : public WifiRemoteStationManager
     /**
      * Update the number of retry (both short and long).
      *
-     * \param station the ONOE wifi remote station
+     * @param station the ONOE wifi remote station
      */
     void UpdateRetry(OnoeWifiRemoteStation* station);
     /**
      * Update the mode.
      *
-     * \param station the ONOE wifi remote station
+     * @param station the ONOE wifi remote station
      */
     void UpdateMode(OnoeWifiRemoteStation* station);
 

@@ -25,9 +25,19 @@
 #include "ns3/yans-wifi-channel.h"
 #include "ns3/yans-wifi-helper.h"
 
+/**
+ * @file
+ * @ingroup wifi
+ * WiFi multirate experiment.
+ */
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("multirate");
+
+/** Unnamed namespace, to disambiguate class Experiment. */
+namespace
+{
 
 /**
  * WiFi multirate experiment class.
@@ -69,19 +79,19 @@ class Experiment
   public:
     Experiment();
     /**
-     * \brief Construct a new Experiment object
+     * @brief Construct a new Experiment object
      *
-     * \param name The name of the experiment.
+     * @param name The name of the experiment.
      */
     Experiment(std::string name);
     /**
      * Run an experiment.
-     * \param wifi The WifiHelper class.
-     * \param wifiPhy The YansWifiPhyHelper class.
-     * \param wifiMac The WifiMacHelper class.
-     * \param wifiChannel The YansWifiChannelHelper class.
-     * \param mobility The MobilityHelper class.
-     * \return a 2D dataset of the experiment data.
+     * @param wifi The WifiHelper class.
+     * @param wifiPhy The YansWifiPhyHelper class.
+     * @param wifiMac The WifiMacHelper class.
+     * @param wifiChannel The YansWifiChannelHelper class.
+     * @param mobility The MobilityHelper class.
+     * @return a 2D dataset of the experiment data.
      */
     Gnuplot2dDataset Run(const WifiHelper& wifi,
                          const YansWifiPhyHelper& wifiPhy,
@@ -90,18 +100,18 @@ class Experiment
                          const MobilityHelper& mobility);
 
     /**
-     * \brief Setup the experiment from the command line arguments.
+     * @brief Setup the experiment from the command line arguments.
      *
-     * \param argc The argument count.
-     * \param argv The argument vector.
-     * \return true
+     * @param argc The argument count.
+     * @param argv The argument vector.
+     * @return true
      */
     bool CommandSetup(int argc, char** argv);
 
     /**
-     * \brief Check if routing is enabled.
+     * @brief Check if routing is enabled.
      *
-     * \return true if routing is enabled.
+     * @return true if routing is enabled.
      */
     bool IsRouting() const
     {
@@ -109,9 +119,9 @@ class Experiment
     }
 
     /**
-     * \brief Check if mobility is enabled.
+     * @brief Check if mobility is enabled.
      *
-     * \return true if mobility is enabled.
+     * @return true if mobility is enabled.
      */
     bool IsMobility() const
     {
@@ -119,9 +129,9 @@ class Experiment
     }
 
     /**
-     * \brief Get the Scenario number.
+     * @brief Get the Scenario number.
      *
-     * \return the scenario number.
+     * @return the scenario number.
      */
     uint32_t GetScenario() const
     {
@@ -129,9 +139,9 @@ class Experiment
     }
 
     /**
-     * \brief Get the RTS Threshold.
+     * @brief Get the RTS Threshold.
      *
-     * \return the RTS Threshold.
+     * @return the RTS Threshold.
      */
     std::string GetRtsThreshold() const
     {
@@ -139,9 +149,9 @@ class Experiment
     }
 
     /**
-     * \brief Get the Output File Name.
+     * @brief Get the Output File Name.
      *
-     * \return the Output File Name.
+     * @return the Output File Name.
      */
     std::string GetOutputFileName() const
     {
@@ -149,9 +159,9 @@ class Experiment
     }
 
     /**
-     * \brief Get the Rate Manager.
+     * @brief Get the Rate Manager.
      *
-     * \return the Rate Manager.
+     * @return the Rate Manager.
      */
     std::string GetRateManager() const
     {
@@ -160,34 +170,34 @@ class Experiment
 
   private:
     /**
-     * \brief Setup the receiving socket.
+     * @brief Setup the receiving socket.
      *
-     * \param node The receiving node.
-     * \return the Rx socket.
+     * @param node The receiving node.
+     * @return the Rx socket.
      */
     Ptr<Socket> SetupPacketReceive(Ptr<Node> node);
     /**
      * Generate 1-hop and 2-hop neighbors of a node in grid topology
-     * \param c The node container.
-     * \param senderId The sender ID.
-     * \return the neighbor nodes.
+     * @param c The node container.
+     * @param senderId The sender ID.
+     * @return the neighbor nodes.
      */
     NodeContainer GenerateNeighbors(NodeContainer c, uint32_t senderId);
 
     /**
-     * \brief Setup the application in the nodes.
+     * @brief Setup the application in the nodes.
      *
-     * \param client Client node.
-     * \param server Server node.
-     * \param start Start time.
-     * \param stop Stop time.
+     * @param client Client node.
+     * @param server Server node.
+     * @param start Start time.
+     * @param stop Stop time.
      */
     void ApplicationSetup(Ptr<Node> client, Ptr<Node> server, double start, double stop);
     /**
      * Take the grid map, divide it into 4 quadrants
      * Assign all nodes from each quadrant to a specific container
      *
-     * \param c The node container.
+     * @param c The node container.
      */
     void AssignNeighbors(NodeContainer c);
     /**
@@ -195,25 +205,25 @@ class Experiment
      * may be the source for multiple destinations and a node maybe a destination
      * for multiple sources.
      *
-     * \param c The node container.
+     * @param c The node container.
      */
     void SelectSrcDest(NodeContainer c);
     /**
-     * \brief Receive a packet.
+     * @brief Receive a packet.
      *
-     * \param socket The receiving socket.
+     * @param socket The receiving socket.
      */
     void ReceivePacket(Ptr<Socket> socket);
     /**
-     * \brief Calculate the throughput.
+     * @brief Calculate the throughput.
      */
     void CheckThroughput();
     /**
      * A sender node will  set up a flow to each of the its neighbors
      * in its quadrant randomly.  All the flows are exponentially distributed.
      *
-     * \param sender The sender node.
-     * \param c The node neighbors.
+     * @param sender The sender node.
+     * @param c The node neighbors.
      */
     void SendMultiDestinations(Ptr<Node> sender, NodeContainer c);
 
@@ -425,11 +435,11 @@ Experiment::SendMultiDestinations(Ptr<Node> sender, NodeContainer c)
 /**
  * Print the position of two nodes.
  *
- * \param client Client node.
- * \param server Server node.
- * \return a string with the nodes data and positions
+ * @param client Client node.
+ * @param server Server node.
+ * @return a string with the nodes data and positions
  */
-static inline std::string
+inline std::string
 PrintPosition(Ptr<Node> client, Ptr<Node> server)
 {
     Vector serverPos = server->GetObject<MobilityModel>()->GetPosition();
@@ -679,6 +689,8 @@ Experiment::CommandSetup(int argc, char** argv)
     cmd.Parse(argc, argv);
     return true;
 }
+
+} // unnamed namespace
 
 int
 main(int argc, char* argv[])

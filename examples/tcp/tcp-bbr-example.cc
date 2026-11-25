@@ -59,7 +59,7 @@ std::ofstream throughput;
 std::ofstream queueSize;
 
 uint32_t prev = 0;
-Time prevTime = Seconds(0);
+Time prevTime;
 
 // Calculate throughput
 static void
@@ -221,7 +221,7 @@ main(int argc, char* argv[])
     // Install application on the receiver
     PacketSinkHelper sink("ns3::TcpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
     ApplicationContainer sinkApps = sink.Install(receiver.Get(0));
-    sinkApps.Start(Seconds(0.0));
+    sinkApps.Start(Seconds(0));
     sinkApps.Stop(stopTime);
 
     // Create a new directory to store the output of the program

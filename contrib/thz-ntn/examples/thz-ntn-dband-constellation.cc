@@ -24,6 +24,7 @@
  * ~6921 km for a 550 km orbit) via NtnEnuProjectionMobilityModel.
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
 #include <ns3/mobility-module.h>
@@ -35,6 +36,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -279,6 +281,10 @@ main(int argc, char* argv[])
 
     double totalCapacity = 0.0;
     uint32_t servedTerminals = 0;
+    // ntn-dataset@1: the per-terminal table as a dataset (empty cells where a terminal has
+    // no satellite above 5 deg), so the run's results follow its parameters.
+    std::ofstream utCsv("thz-ntn-dband-constellation.csv");
+    utCsv << "ut,best_sat,elevation_deg,slant_km,fspl_db,snr_db,capacity_gbps,covered\n";
 
     for (uint32_t t = 0; t < numUts; t++)
     {
@@ -327,6 +333,9 @@ main(int argc, char* argv[])
                       << std::setw(12) << result.shannonCapacity_Gbps
                       << "\n";
 
+            utCsv << t << "," << bestSatId << "," << bestElev << "," << bestRangeKm << ","
+                  << result.fspl_dB << "," << result.snr_dB << ","
+                  << result.shannonCapacity_Gbps << ",1\n";
             totalCapacity += result.shannonCapacity_Gbps;
             servedTerminals++;
         }
@@ -341,6 +350,8 @@ main(int argc, char* argv[])
                       << std::setw(10) << "N/A"
                       << std::setw(12) << "No cover"
                       << "\n";
+            utCsv << t << "," << bestSatId << "," << bestElev << "," << bestRangeKm
+                  << ",,,,0\n";
         }
     }
 
@@ -386,7 +397,25 @@ main(int argc, char* argv[])
 
     // ---- Run simulation ----
     Simulator::Stop(Seconds(1.0));
+    // Globe scene of the analytic geometry: the SGP4 satellites and the terminals in the
+    // ENU frame the association table uses (the recorder maps it back onto the Earth).
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    utCsv.close();
+    ns3::ntnobs::WriteDatasetRecord(
+        ".",
+        "thz-ntn-dband-constellation",
+        "analytic",
+        argc,
+        argv,
+        {{"terminals_served", std::to_string(servedTerminals), "analytic"},
+         {"coverage_ratio", std::to_string(static_cast<double>(servedTerminals) / numUts), "analytic"},
+         {"total_capacity_gbps", std::to_string(totalCapacity), "analytic"},
+         {"mean_capacity_gbps",
+          std::to_string(servedTerminals > 0 ? totalCapacity / servedTerminals : 0.0),
+          "analytic"}});
     Simulator::Destroy();
 
     std::cout << "\n  Simulation complete.\n";

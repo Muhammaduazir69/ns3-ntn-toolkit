@@ -9,18 +9,19 @@
 #ifndef DSSS_PARAMETER_SET_H
 #define DSSS_PARAMETER_SET_H
 
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-information-element.h"
 
 namespace ns3
 {
 
 /**
- * \brief The DSSS Parameter Set
- * \ingroup wifi
+ * @brief The DSSS Parameter Set
+ * @ingroup wifi
  *
- * This class knows how to serialise and deserialise the DSSS Parameter Set.
+ * This class knows how to serialize and deserialize the DSSS Parameter Set.
  */
-class DsssParameterSet : public WifiInformationElement
+class WIFI_EXPORT DsssParameterSet : public WifiInformationElement
 {
   public:
     DsssParameterSet();
@@ -31,7 +32,7 @@ class DsssParameterSet : public WifiInformationElement
     /**
      * Set the Current Channel field in the DsssParameterSet information element.
      *
-     * \param currentChannel the CurrentChannel field in the DsssParameterSet information element
+     * @param currentChannel the CurrentChannel field in the DsssParameterSet information element
      */
     void SetCurrentChannel(uint8_t currentChannel);
 
@@ -39,6 +40,7 @@ class DsssParameterSet : public WifiInformationElement
     uint16_t GetInformationFieldSize() const override;
     void SerializeInformationField(Buffer::Iterator start) const override;
     uint16_t DeserializeInformationField(Buffer::Iterator start, uint16_t length) override;
+    void Print(std::ostream& os) const override;
 
     uint8_t m_currentChannel; ///< current channel number
 };

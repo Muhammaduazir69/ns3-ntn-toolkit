@@ -5,10 +5,10 @@
  *
  * Author:  Tom Henderson <thomas.r.henderson@boeing.com>
  */
-#include <ns3/log.h>
-#include <ns3/lr-wpan-spectrum-value-helper.h>
-#include <ns3/spectrum-value.h>
-#include <ns3/test.h>
+#include "ns3/log.h"
+#include "ns3/lr-wpan-spectrum-value-helper.h"
+#include "ns3/spectrum-value.h"
+#include "ns3/test.h"
 
 #include <cmath>
 
@@ -16,10 +16,10 @@ using namespace ns3;
 using namespace ns3::lrwpan;
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan SpectrumValue Helper TestSuite
+ * @brief LrWpan SpectrumValue Helper TestSuite
  */
 class LrWpanSpectrumValueHelperTestCase : public TestCase
 {
@@ -63,10 +63,10 @@ LrWpanSpectrumValueHelperTestCase::DoRun()
 }
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan SpectrumValue Helper TestSuite
+ * @brief LrWpan SpectrumValue Helper TestSuite
  */
 class LrWpanSpectrumValueHelperTestSuite : public TestSuite
 {

@@ -2,7 +2,22 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
-#include <ns3/nstime.h>
+/**
+ * @ingroup examples
+ * @file cttc-nr-3gpp-calibration.h
+ *
+ * @brief Declaration of the ns3::Parameters structure holding the full set of knobs of the NR
+ * outdoor calibration example (deployment geometry such as ISD and BS/UT heights, antenna array
+ * dimensions, ports and polarization, beamforming method, O2I penetration, UE mobility, MIMO,
+ * traffic model including 3GPP FTP M1, and REM generation), plus the entry points
+ * ChooseCalibrationScenario(), which overwrites those knobs with the 3GPP reference
+ * configurations (DenseA/DenseB/RuralA/RuralB and MIMO variants), and Nr3gppCalibration(), which
+ * runs the simulation. This header is shared with the cttc-nr-3gpp-calibration-user.cc main
+ * program that exposes the options on the command line.
+ */
+
+#include "ns3/nr-module.h"
+#include "ns3/nstime.h"
 
 #include <ostream>
 #include <string>
@@ -27,6 +42,7 @@ struct Parameters
     bool logging = false;
     bool basicTraces = false;
     bool extendedTraces = false;
+    bool attachRsrp = false;
     std::string simulator = "5GLENA";
     std::string scenario = "UMa";
     std::string radioNetwork = "";     // It must be set to NR
@@ -39,6 +55,8 @@ struct Parameters
     // milliseconds and integers to avoid representation errors.
     Time appGenerationTime = MilliSeconds(1000);
     Time udpAppStartTime = MilliSeconds(400);
+    // Add some extra time for the last generated packets to be received
+    Time appStopWindow = MilliSeconds(1000);
     std::string direction = "DL";
 
     // Spectrum parameters. We will take the input from the command line, and then
@@ -51,6 +69,33 @@ struct Parameters
 
     double gnbTxPower = 40;
     double ueTxPower = 23;
+    bool enableMimo = false;
+    NrHelper::MimoPmiParams mimoPmiParams;
+    NrHelper::InitialAssocParams initParams;
+
+    uint8_t numVPortsGnb = 2;
+    uint8_t numHPortsGnb = 2;
+    uint8_t numVPortsUe = 1;
+    uint8_t numHPortsUe = 1;
+
+    double polSlantAngleGnb = 0.0;
+    double polSlantAngleUe = 0.0;
+
+    bool dualPolarizedGnb = false;
+    bool dualPolarizedUe = false;
+
+    bool ftpM1Enabled = false;
+    uint16_t ftpPort = 2001;
+
+    double ftpLambda = 1.7;
+    uint32_t ftpFileSize = 512000; // in bytes
+
+    uint32_t ftpClientAppStartTimeMs = 400;
+    uint32_t ftpServerAppStartTimeMs = 400;
+
+    bool enableSubbandScheluder = false;
+    bool m_subbandCqiClamping = true;
+    EnumValue<NrMacSchedulerUeInfo::McsCsiSource> m_mcsCsiSource;
 
     double isd = 1732;
     double bsHeight = 30.0;
@@ -64,12 +109,14 @@ struct Parameters
         1.0; // shows the percentage of low losses. Default value is 100% low
     bool linkO2iConditionToAntennaHeight = false;
 
-    double speed = 0;
+    double indoorUeSpeed = 0;
+    double outdoorUeSpeed = 0;
 
     double maxUeClosestSiteDistance = 1000;
 
     // Where we will store the output files.
     std::string simTag = "default";
+    std::string dbName = "default";
     std::string outputDir = "./";
 
     // Error models
@@ -109,7 +156,7 @@ struct Parameters
     uint32_t remSector = 0;
     bool useLastUeForRem = false;
 
-    Time progressInterval = Seconds(1);
+    Time progressInterval = Seconds(30); // each half a minute is enough
 
     // Antenna Parameters
     uint32_t gnbNumRows = 4;
@@ -139,6 +186,7 @@ struct Parameters
     bool ueEnable3gppElement = false;
 
     bool checkUeMobility = false;
+    bool enableWraparound = false;
 };
 
 extern void Nr3gppCalibration(Parameters& params);

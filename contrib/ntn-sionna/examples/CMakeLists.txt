@@ -46,6 +46,7 @@ build_lib_example(
   NAME mmimo-vs-codebook-leo
   SOURCE_FILES mmimo-vs-codebook-leo.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-sionna}
     ${libntn-cho}
     ${libntn-constellation}
@@ -81,6 +82,7 @@ build_lib_example(
   NAME city-block-4ue-cache
   SOURCE_FILES city-block-4ue-cache.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-sionna}
     ${libntn-cho}
     ${libntn-constellation}
@@ -94,6 +96,7 @@ build_lib_example(
   NAME sionna-calibration-harness
   SOURCE_FILES sionna-calibration-harness.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-sionna}
     ${libntn-cho}
     ${libntn-constellation}

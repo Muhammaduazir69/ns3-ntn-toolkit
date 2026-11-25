@@ -1,0 +1,283 @@
+// Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+//
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Author: Nicola Baldo <nbaldo@cttc.es>
+
+#ifndef NR_QOS_FLOW
+#define NR_QOS_FLOW
+
+#include "ns3/nr-export.h"
+#include "ns3/object-base.h"
+#include "ns3/uinteger.h"
+
+#include <unordered_map>
+
+namespace ns3
+{
+
+/**
+ * 3GPP TS 38.413 9.3.1.10 GBR QoS Information
+ *
+ */
+struct NR_EXPORT NrGbrQosInformation
+{
+    /**
+     * Default constructor, initializes member variables to zero or equivalent
+     */
+    NrGbrQosInformation();
+
+    uint64_t gbrDl; /**< Guaranteed Bit Rate (bit/s) in downlink */
+    uint64_t gbrUl; /**< Guaranteed Bit Rate (bit/s) in uplink */
+    uint64_t mbrDl; /**< Maximum Bit Rate (bit/s) in downlink */
+    uint64_t mbrUl; /**< Maximum Bit Rate (bit/s) in uplink */
+};
+
+/**
+ * 3GPP 23.203 Section 6.1.7.3 Allocation and Retention Priority characteristics
+ *
+ */
+struct NR_EXPORT NrAllocationRetentionPriority
+{
+    /**
+     * Default constructor, initializes member variables to zero or equivalent
+     */
+    NrAllocationRetentionPriority();
+    uint8_t priorityLevel;        ///< 1-15; 1 = highest
+    bool preemptionCapability;    ///< true if flow can preempt others
+    bool preemptionVulnerability; ///< true if flow can be preempted by others
+};
+
+/**
+ * @brief This class contains the specification of QoS flows.
+ *
+ * See the following references:  3GPP TS 24.501, Rel. 19, Sec. 6.2.5.1.1.4;
+ * TS 23.501, Rel. 19, Table 5.7.4-1.
+ *
+ */
+class NR_EXPORT NrQosFlow : public ObjectBase
+{
+  public:
+    /**
+     * @brief Get the type ID.
+     * @return the object TypeId
+     */
+    static TypeId GetTypeId();
+
+    TypeId GetInstanceTypeId() const override;
+
+    /**
+     * 5QI values. See 3GPP 23.501 Table 5.7.4-1 for standard values.
+     *
+     * TODO: Check that the below are still consistent with 23.501, Table 5.7.4-1.
+     */
+    enum FiveQi : uint8_t
+    {
+        GBR_CONV_VOICE = 1,        ///< GBR Conversational Voice
+        GBR_CONV_VIDEO = 2,        ///< GBR Conversational Video (Live streaming)
+        GBR_GAMING = 3,            ///< GBR Real Time Gaming
+        GBR_NON_CONV_VIDEO = 4,    ///< GBR Non-Conversational Video (Buffered Streaming)
+        GBR_MC_PUSH_TO_TALK = 65,  ///< GBR Mission Critical User Plane Push To Talk voice
+        GBR_NMC_PUSH_TO_TALK = 66, ///< GBR Non-Mission-Critical User Plane Push To Talk voice
+        GBR_MC_VIDEO = 67,         ///< GBR Mission Critical Video User Plane
+        GBR_V2X = 75,              ///< GBR V2X Messages
+        GBR_LIVE_UL_71 = 71,       ///< GBR Live UL streaming
+        GBR_LIVE_UL_72 = 72,       ///< GBR Live UL streaming
+        GBR_LIVE_UL_73 = 73,       ///< GBR Live UL streaming
+        GBR_LIVE_UL_74 = 74,       ///< GBR Live UL streaming
+        GBR_LIVE_UL_76 = 76,       ///< GBR Live UL streaming
+        NGBR_IMS = 5,              ///< Non-GBR IMS Signalling
+        NGBR_VIDEO_TCP_OPERATOR =
+            6, ///< Non-GBR TCP-based Video (Buffered Streaming, e.g., www, e-mail...)
+        NGBR_VOICE_VIDEO_GAMING = 7, ///< Non-GBR Voice, Video, Interactive Streaming
+        NGBR_VIDEO_TCP_PREMIUM =
+            8, ///< Non-GBR TCP-based Video (Buffered Streaming, e.g., www, e-mail...)
+        NGBR_VIDEO_TCP_DEFAULT =
+            9, ///< Non-GBR TCP-based Video (Buffered Streaming, e.g., www, e-mail...)
+        NGBR_MC_DELAY_SIGNAL =
+            69,            ///< Non-GBR Mission Critical Delay Sensitive Signalling (e.g., MC-PTT)
+        NGBR_MC_DATA = 70, ///< Non-GBR Mission Critical Data
+        NGBR_V2X = 79,     ///< Non-GBR V2X Messages
+        NGBR_LOW_LAT_EMBB = 80, ///< Non-GBR Low Latency eMBB applications
+        DGBR_DISCRETE_AUT_SMALL =
+            82, ///< Delay-Critical GBR Discrete Automation Small Packets (TS 22.261)
+        DGBR_DISCRETE_AUT_LARGE =
+            83,        ///< Delay-Critical GBR Discrete Automation Large Packets (TS 22.261)
+        DGBR_ITS = 84, ///< Delay-Critical GBR Intelligent Transport Systems (TS 22.261)
+        DGBR_ELECTRICITY =
+            85,        ///< Delay-Critical GBR Electricity Distribution High Voltage (TS 22.261)
+        DGBR_V2X = 86, ///< Delay-Critical GBR V2X Messages (TS 23.501)
+        DGBR_INTER_SERV_87 =
+            87, ///< Delay-Critical GBR Interactive Service - Motion tracking data (TS 23.501)
+        DGBR_INTER_SERV_88 =
+            88, ///< Delay-Critical GBR Interactive Service - Motion tracking data (TS 23.501)
+        DGBR_VISUAL_CONTENT_89 =
+            89, ///< Delay-Critical GBR Visual Content for cloud/edge/split rendering (TS 23.501)
+        DGBR_VISUAL_CONTENT_90 =
+            90, ///< Delay-Critical GBR Visual Content for cloud/edge/split rendering (TS 23.501)
+    };
+
+    FiveQi fiveQi; ///< Qos class indicator
+
+    NrGbrQosInformation gbrQosInfo;    ///< GBR QOS information
+    NrAllocationRetentionPriority arp; ///< allocation retention priority
+
+    /**
+     * Default constructor. 5QI will be initialized to NGBR_VIDEO_TCP_DEFAULT
+     *
+     */
+    NrQosFlow();
+
+    /**
+     *
+     * @param x the QoS Class Indicator
+     *
+     */
+    NrQosFlow(FiveQi x);
+
+    /**
+     *
+     * @param x the 5G QoS Identifier (5QI)
+     * @param y the NrGbrQosInformation
+     *
+     */
+    NrQosFlow(FiveQi x, NrGbrQosInformation y);
+
+    /**
+     * @brief NrQosFlow copy constructor
+     * @param o other instance
+     */
+    NrQosFlow(const NrQosFlow& o);
+
+    /**
+     * @brief Deconstructor
+     */
+    ~NrQosFlow() override
+    {
+    }
+
+    /**
+     *
+     * @return the resource type (NON-GBR, GBR, DC-GBR) of the selected 5QI
+     */
+    uint8_t GetResourceType() const;
+
+    /**
+     *
+     * @return the priority associated with the 5QI of this flow as per 3GPP 23.203
+     * Section 6.1.7.2
+     */
+    uint8_t GetPriority() const;
+
+    /**
+     *
+     *
+     *
+     * @return the packet delay budget associated with the 5QI of this flow as per 3GPP 23.203
+     * Section 6.1.7.2
+     */
+    uint16_t GetPacketDelayBudgetMs() const;
+
+    /**
+     *
+     *
+     *
+     * @return the packet error loss rate associated with the 5QI of this flow as per 3GPP 23.203
+     * Section 6.1.7.2
+     */
+    double GetPacketErrorLossRate() const;
+
+  private:
+    /**
+     * @brief Map between 5QI and characteristics
+     *
+     * The tuple is formed by: resource type, priority, packet delay budget, packet error rate,
+     *  default maximum data burst, default averaging window (0 when does not apply)
+     */
+    using FiveQiCharacteristicsMap =
+        std::unordered_map<FiveQi,
+                           std::tuple<uint8_t, uint8_t, uint16_t, double, uint32_t, uint32_t>>;
+
+    /**
+     * @brief Get the resource type (NON-GBR, GBR, DC-GBR) of the selected 5QI
+     * @param map Map between 5QI and characteristics
+     * @param fiveQi 5QI to look for
+     * @return the resource type (NON-GBR, GBR, DC-GBR) of the selected 5QI
+     */
+    static uint8_t GetResourceType(const FiveQiCharacteristicsMap& map, FiveQi fiveQi)
+    {
+        return std::get<0>(map.at(fiveQi));
+    }
+
+    /**
+     * @brief Get priority for the selected 5QI
+     * @param map Map between 5QI and characteristics
+     * @param fiveQi 5QI to look for
+     * @return priority for the selected 5QI
+     */
+    static uint8_t GetPriority(const FiveQiCharacteristicsMap& map, FiveQi fiveQi)
+    {
+        return std::get<1>(map.at(fiveQi));
+    }
+
+    /**
+     * @brief Get packet delay in ms for the selected 5QI
+     * @param map Map between 5QI and characteristics
+     * @param fiveQi 5QI to look for
+     * @return packet delay in ms for the selected 5QI
+     */
+    static uint16_t GetPacketDelayBudgetMs(const FiveQiCharacteristicsMap& map, FiveQi fiveQi)
+    {
+        return std::get<2>(map.at(fiveQi));
+    }
+
+    /**
+     * @brief Get packet error rate for the selected 5QI
+     * @param map Map between 5QI and characteristics
+     * @param fiveQi 5QI to look for
+     * @return packet error rate for the selected 5QI
+     */
+    static double GetPacketErrorLossRate(const FiveQiCharacteristicsMap& map, FiveQi fiveQi)
+    {
+        return std::get<3>(map.at(fiveQi));
+    }
+
+    /**
+     * @brief Get maximum data burst for the selected 5QI
+     * @param map Map between 5QI and characteristics
+     * @param fiveQi 5QI to look for
+     * @return maximum data burst for the selected 5QI
+     */
+    static uint32_t GetMaxDataBurst(const FiveQiCharacteristicsMap& map, FiveQi fiveQi)
+    {
+        return std::get<4>(map.at(fiveQi));
+    }
+
+    /**
+     * @brief Get default averaging window for the selected 5QI
+     * @param map Map between 5QI and characteristics
+     * @param fiveQi 5QI to look for
+     * @return default averaging window for the selected 5QI
+     */
+    static uint32_t GetAvgWindow(const FiveQiCharacteristicsMap& map, FiveQi fiveQi)
+    {
+        return std::get<5>(map.at(fiveQi));
+    }
+
+    /**
+     * @brief Retrieve characteristics for Rel. 19
+     * @return the FiveQiCharacteristicsMap for Release 19
+     */
+    static const FiveQiCharacteristicsMap& GetCharacteristicsRel19();
+
+    /**
+     * @brief QoS characteristics map to resolve 5QI to characteristics
+     *
+     * It will point to a static map.
+     */
+    FiveQiCharacteristicsMap m_characteristics;
+};
+
+} // namespace ns3
+
+#endif // NR_QOS_FLOW

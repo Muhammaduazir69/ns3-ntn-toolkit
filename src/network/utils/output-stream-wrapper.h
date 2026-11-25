@@ -44,14 +44,14 @@ namespace ns3
  * the Ptr<>, we don't bother and just expect the user to Get a saved pointer
  * to an ostream and dereference it him or herself.  As in:
  *
- * \code{.cpp}
+ * @code{.cpp}
  * void
  * TraceSink(Ptr<OutputStreamWrapper> streamWrapper, Ptr<const Packet> packet)
  * {
  *     std::ostream *stream = streamWrapper->GetStream();
  *     *stream << "got packet" << std::endl;
  * }
- * \endcode
+ * @endcode
  *
  *
  * This class uses a basic ns-3 reference counting base class but is not
@@ -62,13 +62,13 @@ class OutputStreamWrapper : public SimpleRefCount<OutputStreamWrapper>
   public:
     /**
      * Constructor
-     * \param filename file name
-     * \param filemode std::ios::openmode flags
+     * @param filename file name
+     * @param filemode std::ios::openmode flags
      */
     OutputStreamWrapper(std::string filename, std::ios::openmode filemode);
     /**
      * Constructor
-     * \param os output stream
+     * @param os output stream
      */
     OutputStreamWrapper(std::ostream* os);
     ~OutputStreamWrapper();
@@ -76,9 +76,9 @@ class OutputStreamWrapper : public SimpleRefCount<OutputStreamWrapper>
     /**
      * Return a pointer to an ostream previously set in the wrapper.
      *
-     * \see SetStream
+     * @see SetStream
      *
-     * \returns a pointer to the encapsulated std::ostream
+     * @returns a pointer to the encapsulated std::ostream
      */
     std::ostream* GetStream();
 

@@ -12,6 +12,7 @@
 #include "sta-wifi-mac.h"
 #include "wifi-phy.h"
 
+#include "ns3/boolean.h"
 #include "ns3/channel.h"
 #include "ns3/eht-configuration.h"
 #include "ns3/he-configuration.h"
@@ -44,19 +45,11 @@ WifiNetDevice::GetTypeId()
                           UintegerValue(MAX_MSDU_SIZE - LLC_SNAP_HEADER_LENGTH),
                           MakeUintegerAccessor(&WifiNetDevice::SetMtu, &WifiNetDevice::GetMtu),
                           MakeUintegerChecker<uint16_t>(1, MAX_MSDU_SIZE - LLC_SNAP_HEADER_LENGTH))
-            .AddAttribute("Channel",
-                          "The channel attached to this device",
-                          PointerValue(),
-                          MakePointerAccessor(&WifiNetDevice::GetChannel),
-                          MakePointerChecker<Channel>(),
-                          TypeId::DEPRECATED,
-                          "class WifiNetDevice; use the Channel "
-                          "attribute of WifiPhy")
             .AddAttribute("Phy",
                           "The PHY layer attached to this device.",
                           PointerValue(),
-                          MakePointerAccessor((Ptr<WifiPhy>(WifiNetDevice::*)() const) &
-                                                  WifiNetDevice::GetPhy,
+                          MakePointerAccessor(static_cast<Ptr<WifiPhy> (WifiNetDevice::*)() const>(
+                                                  &WifiNetDevice::GetPhy),
                                               &WifiNetDevice::SetPhy),
                           MakePointerChecker<WifiPhy>())
             .AddAttribute(
@@ -70,14 +63,14 @@ WifiNetDevice::GetTypeId()
                           PointerValue(),
                           MakePointerAccessor(&WifiNetDevice::GetMac, &WifiNetDevice::SetMac),
                           MakePointerChecker<WifiMac>())
-            .AddAttribute(
-                "RemoteStationManager",
-                "The station manager attached to this device.",
-                PointerValue(),
-                MakePointerAccessor(&WifiNetDevice::SetRemoteStationManager,
-                                    (Ptr<WifiRemoteStationManager>(WifiNetDevice::*)() const) &
-                                        WifiNetDevice::GetRemoteStationManager),
-                MakePointerChecker<WifiRemoteStationManager>())
+            .AddAttribute("RemoteStationManager",
+                          "The station manager attached to this device.",
+                          PointerValue(),
+                          MakePointerAccessor(
+                              &WifiNetDevice::SetRemoteStationManager,
+                              static_cast<Ptr<WifiRemoteStationManager> (WifiNetDevice::*)() const>(
+                                  &WifiNetDevice::GetRemoteStationManager)),
+                          MakePointerChecker<WifiRemoteStationManager>())
             .AddAttribute("RemoteStationManagers",
                           "The remote station managers attached to this device (11be multi-link "
                           "devices only).",
@@ -104,7 +97,11 @@ WifiNetDevice::GetTypeId()
                           "The EhtConfiguration object.",
                           PointerValue(),
                           MakePointerAccessor(&WifiNetDevice::GetEhtConfiguration),
-                          MakePointerChecker<EhtConfiguration>());
+                          MakePointerChecker<EhtConfiguration>())
+            .AddTraceSource("MacRxDrop",
+                            "A packet has been dropped because no protocol handler consumed it.",
+                            MakeTraceSourceAccessor(&WifiNetDevice::m_macRxDropTrace),
+                            "ns3::Packet::TracedCallback");
     return tid;
 }
 
@@ -397,6 +394,14 @@ WifiNetDevice::GetAddress() const
     return m_mac->GetAddress();
 }
 
+Address
+WifiNetDevice::GetAddressFor(const Address& remoteAddr) const
+{
+    const auto macAddr = Mac48Address::ConvertFrom(remoteAddr);
+    NS_ABORT_MSG_IF(macAddr.IsGroup(), "Did not expect a group address " << macAddr);
+    return m_mac->GetLocalAddress(macAddr);
+}
+
 bool
 WifiNetDevice::SetMtu(const uint16_t mtu)
 {
@@ -514,7 +519,7 @@ WifiNetDevice::ForwardUp(Ptr<const Packet> packet, Mac48Address from, Mac48Addre
     {
         type = NetDevice::PACKET_MULTICAST;
     }
-    else if (to == GetAddress())
+    else if (to == GetAddress() || to == m_mac->GetLocalAddress(from))
     {
         type = NetDevice::PACKET_HOST;
     }
@@ -528,7 +533,11 @@ WifiNetDevice::ForwardUp(Ptr<const Packet> packet, Mac48Address from, Mac48Addre
     {
         m_mac->NotifyRx(packet);
         copy->RemoveHeader(llc);
-        m_forwardUp(this, copy, llc.GetType(), from);
+        if (!m_forwardUp(this, copy, llc.GetType(), from))
+        {
+            NS_LOG_INFO("Drop packet due to no protocol handler");
+            m_macRxDropTrace(copy);
+        }
     }
     else
     {
@@ -545,14 +554,18 @@ WifiNetDevice::ForwardUp(Ptr<const Packet> packet, Mac48Address from, Mac48Addre
 void
 WifiNetDevice::LinkUp()
 {
+    NS_LOG_FUNCTION(this);
     m_linkUp = true;
+    NS_LOG_INFO("Link is UP");
     m_linkChanges();
 }
 
 void
 WifiNetDevice::LinkDown()
 {
+    NS_LOG_FUNCTION(this);
     m_linkUp = false;
+    NS_LOG_INFO("Link is DOWN");
     m_linkChanges();
 }
 
@@ -661,6 +674,22 @@ Ptr<EhtConfiguration>
 WifiNetDevice::GetEhtConfiguration() const
 {
     return (m_standard >= WIFI_STANDARD_80211be ? m_ehtConfiguration : nullptr);
+}
+
+bool
+WifiNetDevice::IsEmlsrActivated() const
+{
+    if (!m_ehtConfiguration)
+    {
+        return false;
+    }
+
+    BooleanValue emlsrActivated;
+    if (!m_ehtConfiguration->GetAttributeFailSafe("EmlsrActivated", emlsrActivated))
+    {
+        return false;
+    }
+    return emlsrActivated.Get();
 }
 
 } // namespace ns3

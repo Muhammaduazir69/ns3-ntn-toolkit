@@ -22,8 +22,8 @@ namespace ns3
 {
 
 /**
- * \ingroup mobility
- * \brief Random direction mobility model.
+ * @ingroup mobility
+ * @brief Random direction mobility model.
  *
  * The movement of objects is based on random directions: each object
  * pauses for a specific delay, chooses a random direction and speed and
@@ -36,11 +36,17 @@ class RandomDirection2dMobilityModel : public MobilityModel
   public:
     /**
      * Register this type with the TypeId system.
-     * \return the object TypeId
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     RandomDirection2dMobilityModel();
     ~RandomDirection2dMobilityModel() override;
+
+    // Inherited from MobilityModel
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<RandomDirection2dMobilityModel>(*this);
+    }
 
   private:
     /**
@@ -53,7 +59,7 @@ class RandomDirection2dMobilityModel : public MobilityModel
     void BeginPause();
     /**
      * Set new velocity and direction, and schedule next pause event
-     * \param direction (radians)
+     * @param direction (radians)
      */
     void SetDirectionAndSpeed(double direction);
     /**

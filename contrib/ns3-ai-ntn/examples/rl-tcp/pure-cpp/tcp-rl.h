@@ -39,7 +39,6 @@ class TcpSocketDerived : public TcpSocketBase
 {
   public:
     static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
 
     TcpSocketDerived();
     ~TcpSocketDerived() override;

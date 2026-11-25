@@ -28,6 +28,11 @@ class UavWaypointMobilityModel : public MobilityModel
 {
   public:
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<UavWaypointMobilityModel>(*this);
+    }
     UavWaypointMobilityModel();
     ~UavWaypointMobilityModel() override;
 
@@ -67,6 +72,11 @@ class UavPatrolMobilityModel : public MobilityModel
 {
   public:
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<UavPatrolMobilityModel>(*this);
+    }
     UavPatrolMobilityModel();
     ~UavPatrolMobilityModel() override;
 
@@ -106,6 +116,11 @@ class UavSearchPatternMobilityModel : public MobilityModel
 {
   public:
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<UavSearchPatternMobilityModel>(*this);
+    }
     UavSearchPatternMobilityModel();
     ~UavSearchPatternMobilityModel() override;
 

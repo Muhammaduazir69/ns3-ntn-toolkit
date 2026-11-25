@@ -4,7 +4,10 @@
 
 #include "nr-eesm-ir.h"
 
-#include <ns3/log.h>
+#include "ns3/boolean.h"
+#include "ns3/log.h"
+
+#include <algorithm>
 
 namespace ns3
 {
@@ -25,7 +28,16 @@ NrEesmIr::~NrEesmIr()
 TypeId
 NrEesmIr::GetTypeId()
 {
-    static TypeId tid = TypeId("ns3::NrEesmIr").SetParent<NrEesmErrorModel>();
+    static TypeId tid =
+        TypeId("ns3::NrEesmIr")
+            .SetParent<NrEesmErrorModel>()
+            .AddAttribute("CreditRateBelowModulationFloor",
+                          "If true, the effective code rate of the combined transmissions "
+                          "below the lowest code rate of their modulation order is credited "
+                          "as a repetition gain of the effective SINR",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&NrEesmIr::m_creditRateBelowModulationFloor),
+                          MakeBooleanChecker());
     return tid;
 }
 
@@ -67,7 +79,28 @@ NrEesmIr::ComputeSINR(const SpectrumValue& sinr,
 
     // compute effective SINR with expSINR_previousTx and mapSumSize
     double expSINR_previousTx = DynamicCast<NrEesmErrorModelOutput>(sinrHistory.back())->m_sinrExp;
-    return SinrEff(sinr, map, mcs, expSINR_previousTx, mapSumSize);
+    double sinrEff = SinrEff(sinr, map, mcs, expSINR_previousTx, mapSumSize);
+
+    // GetMcsEq() cannot go below the lowest code rate of the modulation order of the
+    // transmission. The coded bits beyond that rate still carry energy, which is credited
+    // as a repetition (Chase) gain, a lower bound of their incremental redundancy gain.
+    if (m_creditRateBelowModulationFloor)
+    {
+        const uint8_t modOrder = GetMcsMTable()->at(mcs);
+        double floorEcr = GetMcsEcrTable()->at(mcs);
+        for (uint8_t i = 0; i < mcs; ++i)
+        {
+            if (GetMcsMTable()->at(i) == modOrder)
+            {
+                floorEcr = std::min(floorEcr, GetMcsEcrTable()->at(i));
+            }
+        }
+        if (m_Reff < floorEcr)
+        {
+            sinrEff *= floorEcr / m_Reff;
+        }
+    }
+    return sinrEff;
 }
 
 double

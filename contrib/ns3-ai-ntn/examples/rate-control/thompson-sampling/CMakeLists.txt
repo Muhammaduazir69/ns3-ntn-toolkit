@@ -16,5 +16,7 @@ target_link_libraries(ns3ai_ratecontrol_ts_py PRIVATE
         ${libflow-monitor})
 
 # Build Python interface along with C++ lib
-add_dependencies(ns3ai_ratecontrol_ts ns3ai_ratecontrol_ts_py)
+if(TARGET ns3ai_ratecontrol_ts)
+  add_dependencies(ns3ai_ratecontrol_ts ns3ai_ratecontrol_ts_py)
+endif()
 

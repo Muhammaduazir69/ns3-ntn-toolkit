@@ -17,9 +17,9 @@ namespace ns3
 {
 
 /**
- * \ingroup recoveryOps
+ * @ingroup recoveryOps
  *
- * \brief An implementation of PRR
+ * @brief An implementation of PRR
  *
  * PRR is an algorithm that determines TCP's sending rate in fast
  * recovery. PRR avoids excessive window reductions and aims for
@@ -32,8 +32,8 @@ class TcpPrrRecovery : public TcpClassicRecovery
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -43,8 +43,8 @@ class TcpPrrRecovery : public TcpClassicRecovery
     TcpPrrRecovery();
 
     /**
-     * \brief Copy constructor
-     * \param sock the object to copy
+     * @brief Copy constructor
+     * @param sock the object to copy
      */
     TcpPrrRecovery(const TcpPrrRecovery& sock);
 
@@ -55,7 +55,8 @@ class TcpPrrRecovery : public TcpClassicRecovery
     void EnterRecovery(Ptr<TcpSocketState> tcb,
                        uint32_t dupAckCount,
                        uint32_t unAckDataCount,
-                       uint32_t deliveredBytes) override;
+                       uint32_t deliveredBytes,
+                       uint32_t bytesSacked) override;
 
     void DoRecovery(Ptr<TcpSocketState> tcb, uint32_t deliveredBytes, bool isDupAck) override;
 
@@ -68,7 +69,8 @@ class TcpPrrRecovery : public TcpClassicRecovery
   private:
     uint32_t m_prrDelivered{0};       //!< total bytes delivered during recovery phase
     uint32_t m_prrOut{0};             //!< total bytes sent during recovery phase
-    uint32_t m_recoveryFlightSize{0}; //!< value of bytesInFlight at the start of recovery phase
+    uint32_t m_recoveryFlightSize{0}; //!< FlightSize (SND.NXT - SND.UNA) at the start of recovery
+                                      //!< phase (RFC 9937 RecoverFS)
 };
 } // namespace ns3
 

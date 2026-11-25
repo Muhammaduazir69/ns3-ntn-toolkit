@@ -13,12 +13,12 @@
 #include "spectrum-phy.h"
 #include "spectrum-value.h"
 
-#include <ns3/event-id.h>
-#include <ns3/mobility-model.h>
-#include <ns3/net-device.h>
-#include <ns3/nstime.h>
-#include <ns3/packet.h>
-#include <ns3/trace-source-accessor.h>
+#include "ns3/event-id.h"
+#include "ns3/mobility-model.h"
+#include "ns3/net-device.h"
+#include "ns3/nstime.h"
+#include "ns3/packet.h"
+#include "ns3/trace-source-accessor.h"
 
 namespace ns3
 {
@@ -26,7 +26,7 @@ namespace ns3
 class AntennaModel;
 
 /**
- * \ingroup spectrum
+ * @ingroup spectrum
  *
  * Simple SpectrumPhy implementation that sends customizable waveform.
  * The generated waveforms have a given Spectrum Power Density and
@@ -45,8 +45,8 @@ class WaveformGenerator : public SpectrumPhy
     ~WaveformGenerator() override;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -97,7 +97,7 @@ class WaveformGenerator : public SpectrumPhy
     /**
      * set the AntennaModel to be used
      *
-     * \param a the Antenna Model
+     * @param a the Antenna Model
      */
     void SetAntenna(Ptr<AntennaModel> a);
 

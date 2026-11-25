@@ -21,9 +21,9 @@
 using namespace ns3;
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Pie Queue Disc Test Item
+ * @brief Pie Queue Disc Test Item
  */
 class PieQueueDiscTestItem : public QueueDiscItem
 {
@@ -31,9 +31,9 @@ class PieQueueDiscTestItem : public QueueDiscItem
     /**
      * Constructor
      *
-     * \param p the packet
-     * \param addr the address
-     * \param ecnCapable ECN capable flag
+     * @param p the packet
+     * @param addr the address
+     * @param ecnCapable ECN capable flag
      */
     PieQueueDiscTestItem(Ptr<Packet> p, const Address& addr, bool ecnCapable);
 
@@ -86,9 +86,9 @@ PieQueueDiscTestItem::Mark()
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Pie Queue Disc Test Case
+ * @brief Pie Queue Disc Test Case
  */
 class PieQueueDiscTestCase : public TestCase
 {
@@ -99,10 +99,10 @@ class PieQueueDiscTestCase : public TestCase
   private:
     /**
      * Enqueue function
-     * \param queue the queue disc
-     * \param size the size
-     * \param nPkt the number of packets
-     * \param testAttributes attributes for testing
+     * @param queue the queue disc
+     * @param size the size
+     * @param nPkt the number of packets
+     * @param testAttributes attributes for testing
      */
     void Enqueue(Ptr<PieQueueDisc> queue,
                  uint32_t size,
@@ -110,10 +110,10 @@ class PieQueueDiscTestCase : public TestCase
                  Ptr<PieQueueDiscTestItem> testAttributes);
     /**
      * Enqueue with delay function
-     * \param queue the queue disc
-     * \param size the size
-     * \param nPkt the number of packets
-     * \param testAttributes attributes for testing
+     * @param queue the queue disc
+     * @param size the size
+     * @param nPkt the number of packets
+     * @param testAttributes attributes for testing
      */
     void EnqueueWithDelay(Ptr<PieQueueDisc> queue,
                           uint32_t size,
@@ -121,38 +121,38 @@ class PieQueueDiscTestCase : public TestCase
                           Ptr<PieQueueDiscTestItem> testAttributes);
     /**
      * Dequeue function
-     * \param queue the queue disc
-     * \param nPkt the number of packets
+     * @param queue the queue disc
+     * @param nPkt the number of packets
      */
     void Dequeue(Ptr<PieQueueDisc> queue, uint32_t nPkt);
     /**
      * Dequeue with delay function
-     * \param queue the queue disc
-     * \param delay the delay
-     * \param nPkt the number of packets
+     * @param queue the queue disc
+     * @param delay the delay
+     * @param nPkt the number of packets
      */
     void DequeueWithDelay(Ptr<PieQueueDisc> queue, double delay, uint32_t nPkt);
     /**
      * Run test function
-     * \param mode the test mode
+     * @param mode the test mode
      */
     void RunPieTest(QueueSizeUnit mode);
     /**
-     * \brief Check Drop Probability
-     * \param queue the queue disc
-     * \param testAttributes attributes for testing
+     * @brief Check Drop Probability
+     * @param queue the queue disc
+     * @param testAttributes attributes for testing
      */
     void CheckDropProb(Ptr<PieQueueDisc> queue, Ptr<PieQueueDiscTestItem> testAttributes);
     /**
-     * \brief Check Accumulated Drop Probability
-     * \param queue the queue disc
-     * \param testAttributes attributes for testing
+     * @brief Check Accumulated Drop Probability
+     * @param queue the queue disc
+     * @param testAttributes attributes for testing
      */
     void CheckAccuProb(Ptr<PieQueueDisc> queue, Ptr<PieQueueDiscTestItem> testAttributes);
     /**
-     * \brief Check Maximum Accumulated Drop Probability
-     * \param queue the queue disc
-     * \param testAttributes attributes for testing
+     * @brief Check Maximum Accumulated Drop Probability
+     * @param queue the queue disc
+     * @param testAttributes attributes for testing
      */
     void CheckMaxAccuProb(Ptr<PieQueueDisc> queue, Ptr<PieQueueDiscTestItem> testAttributes);
 };
@@ -291,7 +291,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     queue->Initialize();
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.012, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     QueueDisc::Stats st = queue->GetStats();
     uint32_t test2 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -324,7 +324,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     queue->Initialize();
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.012, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test3 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -357,7 +357,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     queue->Initialize();
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.015, 400); // delay between two successive dequeue events is increased
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test4 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -390,7 +390,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     queue->Initialize();
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.015, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test5 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -414,7 +414,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     queue->Initialize();
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test6 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -438,7 +438,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     testAttributes->m_checkProb = true;
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test7 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -465,7 +465,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     testAttributes->m_checkProb = true;
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test8 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -495,7 +495,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     queue->Initialize();
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test9 = st.GetNMarkedPackets(PieQueueDisc::UNFORCED_MARK);
@@ -525,7 +525,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     testAttributes->m_ecnCapable = true;
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test10 = st.GetNMarkedPackets(PieQueueDisc::UNFORCED_MARK);
@@ -556,7 +556,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     testAttributes->m_checkProb = true;
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test11 = st.GetNMarkedPackets(PieQueueDisc::UNFORCED_MARK);
@@ -589,7 +589,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     testAttributes->m_checkAccuProb = true;
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test12 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -619,7 +619,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     testAttributes->m_setAccuProb = -0.16;
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test13 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -636,7 +636,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
         queue->SetAttributeFailSafe("MaxSize", QueueSizeValue(QueueSize(mode, qSize))),
         true,
         "Verify that we can actually set the attribute MaxSize");
-    NS_TEST_ASSERT_MSG_EQ(queue->SetAttributeFailSafe("MaxBurstAllowance", TimeValue(Seconds(0.0))),
+    NS_TEST_ASSERT_MSG_EQ(queue->SetAttributeFailSafe("MaxBurstAllowance", TimeValue(Seconds(0))),
                           true,
                           "Verify that we can actually set the attribute MaxBurstAllowance");
     NS_TEST_ASSERT_MSG_EQ(queue->SetAttributeFailSafe("UseDerandomization", BooleanValue(true)),
@@ -650,7 +650,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
     testAttributes->m_setAccuProb = 8.6;
     EnqueueWithDelay(queue, pktSize, 400, testAttributes);
     DequeueWithDelay(queue, 0.014, 400);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test14 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -673,7 +673,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
 
     EnqueueWithDelay(queue, pktSize, 100, testAttributes);
     DequeueWithDelay(queue, 0.02, 100);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test15 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -693,7 +693,7 @@ PieQueueDiscTestCase::RunPieTest(QueueSizeUnit mode)
 
     EnqueueWithDelay(queue, pktSize, 100, testAttributes);
     DequeueWithDelay(queue, 0.02, 100);
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
     st = queue->GetStats();
     uint32_t test16 = st.GetNDroppedPackets(PieQueueDisc::UNFORCED_DROP);
@@ -786,11 +786,10 @@ PieQueueDiscTestCase::EnqueueWithDelay(Ptr<PieQueueDisc> queue,
                                        uint32_t nPkt,
                                        Ptr<PieQueueDiscTestItem> testAttributes)
 {
-    Address dest;
     double delay = 0.01; // enqueue packets with delay
     for (uint32_t i = 0; i < nPkt; i++)
     {
-        Simulator::Schedule(Time(Seconds((i + 1) * delay)),
+        Simulator::Schedule(Seconds((i + 1) * delay),
                             &PieQueueDiscTestCase::Enqueue,
                             this,
                             queue,
@@ -814,7 +813,7 @@ PieQueueDiscTestCase::DequeueWithDelay(Ptr<PieQueueDisc> queue, double delay, ui
 {
     for (uint32_t i = 0; i < nPkt; i++)
     {
-        Simulator::Schedule(Time(Seconds((i + 1) * delay)),
+        Simulator::Schedule(Seconds((i + 1) * delay),
                             &PieQueueDiscTestCase::Dequeue,
                             this,
                             queue,
@@ -831,9 +830,9 @@ PieQueueDiscTestCase::DoRun()
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Pie Queue Disc Test Suite
+ * @brief Pie Queue Disc Test Suite
  */
 static class PieQueueDiscTestSuite : public TestSuite
 {

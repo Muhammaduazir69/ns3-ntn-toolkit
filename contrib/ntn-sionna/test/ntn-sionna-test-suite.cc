@@ -2931,7 +2931,7 @@ class DopplerSynthBasicTest : public TestCase
 {
   public:
     DopplerSynthBasicTest()
-        : TestCase("CIR Doppler: per-tap rotation matches v·k/λ (4.2.11)")
+        : TestCase("CIR Doppler: per-tap rotation matches v·k-λ (4.2.11)")
     {
     }
 

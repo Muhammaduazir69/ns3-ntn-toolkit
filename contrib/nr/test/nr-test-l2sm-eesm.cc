@@ -2,29 +2,34 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
-#include <ns3/enum.h>
-#include <ns3/nr-eesm-cc-t1.h>
-#include <ns3/nr-eesm-cc-t2.h>
-#include <ns3/nr-eesm-error-model.h>
-#include <ns3/nr-eesm-ir-t1.h>
-#include <ns3/nr-eesm-ir-t2.h>
-#include <ns3/test.h>
+#include "ns3/boolean.h"
+#include "ns3/enum.h"
+#include "ns3/nr-eesm-cc-t1.h"
+#include "ns3/nr-eesm-cc-t2.h"
+#include "ns3/nr-eesm-error-model.h"
+#include "ns3/nr-eesm-ir-t1.h"
+#include "ns3/nr-eesm-ir-t2.h"
+#include "ns3/test.h"
+
+#include <cmath>
+#include <vector>
 
 /**
- * \file nr-test-l2sm-eesm.cc
- * \ingroup test
+ * @file nr-test-l2sm-eesm.cc
+ * @ingroup test
  *
- * \brief This test validates specific functions of the NR PHY abstraction model.
- * The test checks two issues: 1) LDPC base graph (BG) selection works properly, and 2)
+ * @brief This test validates specific functions of the NR PHY abstraction model.
+ * The test checks three issues: 1) LDPC base graph (BG) selection works properly, 2)
  * BLER values are properly obtained from the BLER-SINR look up tables for different
- * block sizes, MCS Tables, BG types, and SINR values.
+ * block sizes, MCS Tables, BG types, and SINR values, and 3) the HARQ-IR combining is not
+ * worse than the HARQ-CC combining.
  *
  */
 namespace ns3
 {
 
 /**
- * \brief NrL2smEesm testcase
+ * @brief NrL2smEesm testcase
  */
 class NrL2smEesmTestCase : public TestCase
 {
@@ -35,7 +40,7 @@ class NrL2smEesmTestCase : public TestCase
     }
 
     /**
-     * \brief Destroy the object instance
+     * @brief Destroy the object instance
      */
     ~NrL2smEesmTestCase() override
     {
@@ -279,6 +284,117 @@ NrL2smEesmTestCase::DoRun()
     TestEesmIrTable2();
 }
 
+/**
+ * @ingroup test
+ *
+ * @brief Test of the HARQ-IR combining of NrEesmIrT1 against the HARQ-CC combining of NrEesmCcT1.
+ *
+ * The effective code rate of HARQ-IR is mapped to the MCSs of the modulation order of the
+ * transmission, so it stops falling at the lowest code rate of that order: without the rate
+ * credit (attribute CreditRateBelowModulationFloor), the 3rd and 4th transmissions of a block
+ * gained nothing, and none gained anything when the block started at the lowest MCS of its
+ * modulation order, so HARQ-IR was worse than HARQ-CC, while incremental redundancy is never
+ * worse than Chase combining. With the same SINR on every RB and every transmission, the test
+ * checks that the credit is enabled by default, that it makes the retransmissions decode where
+ * they did not without it, and that HARQ-IR is never worse than HARQ-CC for the 16-QAM and
+ * 64-QAM MCSs. The QPSK MCSs are excluded: their SINR-BLER curves are closer to each other
+ * than their code rates, so the credit falls short of Chase combining there.
+ */
+class NrL2smEesmIrCreditTestCase : public TestCase
+{
+  public:
+    NrL2smEesmIrCreditTestCase()
+        : TestCase("HARQ-IR with the rate credit is not worse than HARQ-CC")
+    {
+    }
+
+  private:
+    void DoRun() override;
+
+    /**
+     * TBLER of each of 4 transmissions of a transport block with the same SINR on every RB.
+     *
+     * @param em the error model
+     * @param mcs the MCS of the transport block (Table 1)
+     * @param sinrDb the SINR of every RB and transmission [dB]
+     * @return the TBLER after the 1st to the 4th transmission
+     */
+    static std::vector<double> Tbler(Ptr<NrEesmErrorModel> em, uint8_t mcs, double sinrDb);
+};
+
+std::vector<double>
+NrL2smEesmIrCreditTestCase::Tbler(Ptr<NrEesmErrorModel> em, uint8_t mcs, double sinrDb)
+{
+    const uint32_t nRb = 26;
+    std::vector<int> map(nRb);
+    std::vector<double> freqs(nRb);
+    for (uint32_t i = 0; i < nRb; ++i)
+    {
+        map[i] = i;
+        freqs[i] = 4e9 + i * 360e3;
+    }
+    SpectrumValue sinr(Create<SpectrumModel>(freqs));
+    sinr = std::pow(10.0, sinrDb / 10);
+    const uint32_t tbBytes = em->GetPayloadSize(12 * 11, mcs, 1, nRb, NrErrorModel::DL);
+
+    std::vector<double> tbler;
+    NrErrorModel::NrErrorModelHistory history;
+    for (int tx = 0; tx < 4; ++tx)
+    {
+        auto output = em->GetTbDecodificationStats(sinr, map, tbBytes, mcs, history);
+        tbler.push_back(output->m_tbler);
+        history.push_back(output);
+    }
+    return tbler;
+}
+
+void
+NrL2smEesmIrCreditTestCase::DoRun()
+{
+    Ptr<NrEesmErrorModel> ir = CreateObject<NrEesmIrT1>();
+    Ptr<NrEesmErrorModel> irNoCredit = CreateObject<NrEesmIrT1>();
+    irNoCredit->SetAttribute("CreditRateBelowModulationFloor", BooleanValue(false));
+    Ptr<NrEesmErrorModel> cc = CreateObject<NrEesmCcT1>();
+
+    BooleanValue credit;
+    ir->GetAttribute("CreditRateBelowModulationFloor", credit);
+    NS_TEST_ASSERT_MSG_EQ(credit.Get(), true, "the rate credit must be enabled by default");
+
+    // MCS 17, the lowest 64-QAM MCS: at 9 dB the first transmission fails; without the credit
+    // no retransmission gains anything, with it the second one decodes.
+    auto withCredit = Tbler(ir, 17, 9);
+    auto withoutCredit = Tbler(irNoCredit, 17, 9);
+    NS_TEST_ASSERT_MSG_GT(withCredit[0], 0.9, "MCS 17 at 9 dB: the first transmission fails");
+    NS_TEST_ASSERT_MSG_LT(withCredit[1], 0.1, "MCS 17 at 9 dB: the credit decodes the 2nd one");
+    NS_TEST_ASSERT_MSG_GT(withoutCredit[3], 0.9, "MCS 17 at 9 dB: no gain without the credit");
+
+    // MCS 22 at 10 dB: the second transmission reaches the floor of 64-QAM and fails; the
+    // credit makes the third one decode, while without it the third and fourth gain nothing.
+    withCredit = Tbler(ir, 22, 10);
+    withoutCredit = Tbler(irNoCredit, 22, 10);
+    NS_TEST_ASSERT_MSG_GT(withCredit[1], 0.9, "MCS 22 at 10 dB: the 2nd transmission fails");
+    NS_TEST_ASSERT_MSG_LT(withCredit[2], 0.1, "MCS 22 at 10 dB: the credit decodes the 3rd one");
+    NS_TEST_ASSERT_MSG_GT(withoutCredit[3], 0.9, "MCS 22 at 10 dB: no gain without the credit");
+
+    // HARQ-IR is never worse than HARQ-CC for the 16-QAM and 64-QAM MCSs.
+    for (uint8_t mcs = 10; mcs <= ir->GetMaxMcs(); ++mcs)
+    {
+        for (double sinrDb = -10; sinrDb <= 30; sinrDb += 0.5)
+        {
+            auto irTbler = Tbler(ir, mcs, sinrDb);
+            auto ccTbler = Tbler(cc, mcs, sinrDb);
+            for (size_t tx = 0; tx < irTbler.size(); ++tx)
+            {
+                NS_TEST_ASSERT_MSG_LT_OR_EQ(irTbler[tx],
+                                            ccTbler[tx] + 1e-9,
+                                            "HARQ-IR worse than HARQ-CC at MCS "
+                                                << +mcs << ", " << sinrDb << " dB, transmission "
+                                                << tx + 1);
+            }
+        }
+    }
+}
+
 class NrTestL2smEesm : public TestSuite
 {
   public:
@@ -286,6 +402,7 @@ class NrTestL2smEesm : public TestSuite
         : TestSuite("nr-test-l2sm-eesm", Type::UNIT)
     {
         AddTestCase(new NrL2smEesmTestCase("First test"), Duration::QUICK);
+        AddTestCase(new NrL2smEesmIrCreditTestCase(), Duration::QUICK);
     }
 };
 

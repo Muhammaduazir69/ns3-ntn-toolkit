@@ -10,14 +10,15 @@
 #define AARF_WIFI_MANAGER_H
 
 #include "ns3/traced-value.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-remote-station-manager.h"
 
 namespace ns3
 {
 
 /**
- * \brief AARF Rate control algorithm
- * \ingroup wifi
+ * @brief AARF Rate control algorithm
+ * @ingroup wifi
  *
  * This class implements the AARF rate control algorithm which
  * was initially described in <i>IEEE 802.11 Rate Adaptation:
@@ -28,12 +29,12 @@ namespace ns3
  * exit if the user tries to configure this RAA with a Wi-Fi MAC
  * that supports 802.11n or higher.
  */
-class AarfWifiManager : public WifiRemoteStationManager
+class WIFI_EXPORT AarfWifiManager : public WifiRemoteStationManager
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     AarfWifiManager();

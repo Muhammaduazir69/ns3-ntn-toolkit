@@ -323,34 +323,34 @@ For reference, :numref:`fig-nr-gnb` and :numref:`fig-nr-ue` are also provided as
 packet being processed by each actor of the RAN, i.e., gNB and UE, respectively.
 
 This tutorial will walk through each step of the way, starting with the entry point for these packets in the RAN-- the
-``EpcGnbApplication``.
+``NrEpcGnbApplication``.
 
-EpcGnbApplication
-=================
-The ``EpcGnbApplication`` is installed on the gNB. It is responsible for receiving packets tunneled through the EPC
+NrEpcGnbApplication
+===================
+The ``NrEpcGnbApplication`` is installed on the gNB. It is responsible for receiving packets tunneled through the EPC
 model and sending them into the ``NrGnbNetDevice``.  Conceptually, this is just an application-level relay function.
-It is possible to run the ``cttc-nr-demo`` scenario by enabling the ``EpcGnbApplication`` log component, which can also
+It is possible to run the ``cttc-nr-demo`` scenario by enabling the ``NrEpcGnbApplication`` log component, which can also
 be configured to print messages at INFO level and prefix the message by stating the time of the simulation, the node ID
 of interest, and the routine that prints that message. In this way, with the following command
 
 .. sourcecode:: bash
 
-  $ NS_LOG="EpcGnbApplication=info|prefix_all" ./ns3 run 'cttc-nr-demo' > log.out 2>&1
+  $ NS_LOG="NrEpcGnbApplication=info|prefix_all" ./ns3 run 'cttc-nr-demo' > log.out 2>&1
 
 one can observe this relay function on the first packet, as follows:
 
 .. sourcecode:: text
 
-  +0.400000282s 0 EpcGnbApplication:RecvFromS1uSocket(): [INFO ] Received packet from S1-U interface with GTP TEID: 2
-  +0.400000282s 0 EpcGnbApplication:SendToNrSocket(): [INFO ] Add NrEpsBearerTag with RNTI 2 and bearer ID 2
-  +0.400000282s 0 EpcGnbApplication:SendToNrSocket(): [INFO ] Forward packet from gNB's S1-U to NR stack via IPv4 socket.
+  +0.400000282s 0 NrEpcGnbApplication:RecvFromS1uSocket(): [INFO ] Received packet from S1-U interface with GTP TEID: 2
+  +0.400000282s 0 NrEpcGnbApplication:SendToNrSocket(): [INFO ] Add NrEpsBearerTag with RNTI 2 and bearer ID 2
+  +0.400000282s 0 NrEpcGnbApplication:SendToNrSocket(): [INFO ] Forward packet from gNB's S1-U to NR stack via IPv4 socket.
 
-The file ``model/epc-gnb-application.cc`` contains the source code.
+The file ``model/nr-epc-gnb-application.cc`` contains the source code.
 
-The ``EpcGnbApplication`` adds the cell-specific UE ID (RNTI) and BID as tags through ``NrEpsBearerTag``.
+The ``NrEpcGnbApplication`` adds the cell-specific UE ID (RNTI) and BID as tags through ``NrEpsBearerTag``.
 This greatly simplifies packet processing in later sections.
 The application is able to find the right RNTI and BID given the TEID present on the GTP-U header of the received
-packet structure. This process can be found at ``EpcGnbApplication::RecvFromS1uSocket()`` source code:
+packet structure. This process can be found at ``NrEpcGnbApplication::RecvFromS1uSocket()`` source code:
 
 .. sourcecode:: cpp
 
@@ -371,7 +371,7 @@ packet structure. This process can be found at ``EpcGnbApplication::RecvFromS1uS
 
 .. TODO:
 
-  Add to EpcGnbApplication:
+  Add to NrEpcGnbApplication:
   NS_LOG_INFO("Mapped TEID "<< teid << " to RNTI "<< it->second.m_rnti << " and BID " << it->second.m_bid << " and sent to NR socket");
   so that the code listing here can be removed and the description can be greatly simplified.
 
@@ -387,13 +387,13 @@ whereas green ones are the added portions.
    :align: center
    :scale: 100%
 
-   Structure of the packet handled by ``EpcGnbApplication``
+   Structure of the packet handled by ``NrEpcGnbApplication``
 
 There is also a byte tag to trace the packet for flow statistics, which are bound to `Flow Monitor`_ and are relevant to the final results that are printed by the scenario.
 
 .. TODO  This byte tag is linked to the packet byte range ``[32-140]``. It is possible to see that such range changes at the second inspection, as the packet structure is modified, i.e., GTP-U header is removed.
 
-The new modified packet is finally sent to ``EpcGnbApplication::SendToNrSocket()``, which distinguishes the packet to
+The new modified packet is finally sent to ``NrEpcGnbApplication::SendToNrSocket()``, which distinguishes the packet to
 be sent according to its L3 type, in this case IPv4.
 
 As a final remark, the following traces can be used to track incoming and outgoing packets from this application:
@@ -406,20 +406,20 @@ As a final remark, the following traces can be used to track incoming and outgoi
 
 Packet latency
 ##############
-Packets cannot incur latency in the ``EpcGnbApplication``.
+Packets cannot incur latency in the ``NrEpcGnbApplication``.
 
 Packet drops
 ############
 Packets can be dropped if there is no association between GTP-U TEID and gNB-UE link's RNTI and BID.
 
-.. _`ns-3 manual`: https://www.nsnam.org/docs/release/3.39/models/html/packets.html
+.. _`ns-3 manual`: https://www.nsnam.org/docs/release/3.44/models/html/packets.html
 .. _`EpsFlowId_t data structure`: https://cttc-lena.gitlab.io/nr/html/structns3_1_1_nr_epc_gnb_application_1_1_eps_flow_id__t.html
-.. _`Flow Monitor`: https://www.nsnam.org/docs/release/3.39/models/html/flow-monitor.html
+.. _`Flow Monitor`: https://www.nsnam.org/docs/release/3.44/models/html/flow-monitor.html
 
 NrGnbNetDevice
 ==============
 
-After the ``EpcGnbApplication`` sends a packet, it is immediately received on the ``NrGnbNetDevice::DoSend()`` method.
+After the ``NrEpcGnbApplication`` sends a packet, it is immediately received on the ``NrGnbNetDevice::DoSend()`` method.
 We can observe this in the logs:
 
 .. sourcecode:: bash
@@ -684,9 +684,9 @@ As it can be deduced, the RLC SDU is received at ``NrRlcUm::DoTransmitPdcpPdu()`
       m_txDropTrace(p);
   }
 
-  /** Report Buffer Status */
-  DoReportBufferStatus();
-  m_rbsTimer.Cancel();
+  /** Transmit Buffer Status Report */
+  DoTransmitBufferStatusReport();
+  m_bsrTimer.Cancel();
 
 The packet remains unchanged, if not for a new tag managed by ``NrRlcSduStatusTag``, which keeps track of the
 fragmentation status of the packet done by the RLC layer. Given that ``DoTransmitPdcpPdu()`` does not fragment the
@@ -696,7 +696,7 @@ The packet is then appended to a buffer called ``m_txBuffer``, which is a ``vect
 structure containing (i) a pointer to the packet, and (ii) the time when the packet has been added to the buffer, as
 dictated by the ``Simulator::Now()`` call in ``m_txBuffer.emplace_back()`` instruction.
 
-At the end of the procedure, ``DoReportBufferStatus()`` is called to alert the queue size at the MAC layer, handled by
+At the end of the procedure, ``DoTransmitBufferStatusReport()`` is called to alert the queue size at the MAC layer, handled by
 ``NrMacSapProvider``. The buffer report focuses on reporting the queue size and its HOL delay, together with the RNTI
 and LCID of reference, as it can be noticed by the following excerpt of the said method:
 
@@ -713,7 +713,7 @@ and LCID of reference, as it can be noticed by the following excerpt of the said
           m_txBufferSize + 2 * m_txBuffer.size(); // Data in tx queue + estimated headers size
   }
 
-  NrMacSapProvider::ReportBufferStatusParameters r;
+  NrMacSapProvider::BufferStatusReportParameters r;
   r.rnti = m_rnti;
   r.lcid = m_lcid;
   r.txQueueSize = queueSize;
@@ -722,8 +722,8 @@ and LCID of reference, as it can be noticed by the following excerpt of the said
   r.retxQueueHolDelay = 0;
   r.statusPduSize = 0;
 
-  NS_LOG_LOGIC("Send ReportBufferStatus = " << r.txQueueSize << ", " << r.txQueueHolDelay);
-  m_macSapProvider->ReportBufferStatus(r);
+  NS_LOG_LOGIC("Send BufferStatusReport = " << r.txQueueSize << ", " << r.txQueueHolDelay);
+  m_macSapProvider->BufferStatusReport(r);
 
 There is no mention of the actual ``m_txBuffer``, which is kept at the RLC layer, until a transmission opportunity is
 found at the MAC layer, for which there is an upcall to ``NrRlcUm::DoNotifyTxOpportunity()`` done by the MAC scheduler.
@@ -891,13 +891,13 @@ At first glance, it is possible to note that these logs present two key informat
 These can be used as contextual information to better follow the traffic served by a certain cell on a BWP.
 To learn more how these IDs work, please refer to Section 2.2 of the `NR manual`_.
 
-Once the RLC transmission buffer is updated, the ``NrGnbMac::DoReportBufferStatus()`` intermediates with the MAC
+Once the RLC transmission buffer is updated, the ``NrGnbMac::DoTransmitBufferStatusReport()`` intermediates with the MAC
 scheduler SAP to report the buffer status:
 
 .. sourcecode:: text
 
-  +0.400000282s 0  [ CellId 2, bwpId 0] NrGnbMac:DoReportBufferStatus(): [INFO ] Reporting RLC buffer status update to MAC Scheduler for RNTI=2, LCID=4, Transmission Queue HOL Delay=0, Transmission Queue Size=132, Retransmission Queue HOL delay=0, Retransmission Queue Size=0, PDU Size=0
-  +0.400002262s 0  [ CellId 3, bwpId 1] NrGnbMac:DoReportBufferStatus(): [INFO ] Reporting RLC buffer status update to MAC Scheduler for RNTI=1, LCID=4, Transmission Queue HOL Delay=0, Transmission Queue Size=1284, Retransmission Queue HOL delay=0, Retransmission Queue Size=0, PDU Size=0
+  +0.400000282s 0  [ CellId 2, bwpId 0] NrGnbMac:DoTransmitBufferStatusReport(): [INFO ] Reporting RLC buffer status update to MAC Scheduler for RNTI=2, LCID=4, Transmission Queue HOL Delay=0, Transmission Queue Size=132, Retransmission Queue HOL delay=0, Retransmission Queue Size=0, PDU Size=0
+  +0.400002262s 0  [ CellId 3, bwpId 1] NrGnbMac:DoTransmitBufferStatusReport(): [INFO ] Reporting RLC buffer status update to MAC Scheduler for RNTI=1, LCID=4, Transmission Queue HOL Delay=0, Transmission Queue Size=1284, Retransmission Queue HOL delay=0, Retransmission Queue Size=0, PDU Size=0
 
 By following these messages it is possible to track the ``Transmission Queue Size``, which is filled by incoming RLC
 PDUs and emptied by the scheduled transmissions.

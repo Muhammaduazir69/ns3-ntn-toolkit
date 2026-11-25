@@ -5,6 +5,9 @@ build_lib_example(
             use-msg/cqi-dl-env.cc
             use-msg/my-rr-sched.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
+    ${libntn-constellation}
+    ${libntn-cho}
             ${libns3-ai-ntn}
             ${libcore}
             ${libpoint-to-point}
@@ -23,7 +26,9 @@ set_target_properties(ns3ai_ltecqi_py PROPERTIES
 target_link_libraries(ns3ai_ltecqi_py PRIVATE ${libns3-ai-ntn})
 
 # Build Python interface along with C++ lib
-add_dependencies(ns3ai_ltecqi_msg ns3ai_ltecqi_py)
+if(TARGET ns3ai_ltecqi_msg)
+  add_dependencies(ns3ai_ltecqi_msg ns3ai_ltecqi_py)
+endif()
 
 # Check if libtensorflow exists, if true, enable the pure C++ example
 if(NS3AI_LIBTENSORFLOW_EXAMPLES)

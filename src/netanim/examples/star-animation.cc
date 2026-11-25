@@ -43,8 +43,8 @@ main(int argc, char* argv[])
     uint32_t nSpokes = 8;
     std::string animFile = "star-animation.xml";
     uint8_t useIpv6 = 0;
-    Ipv6Address ipv6AddressBase = Ipv6Address("2001::");
-    Ipv6Prefix ipv6AddressPrefix = Ipv6Prefix(64);
+    auto ipv6AddressBase = Ipv6Address("2001::");
+    auto ipv6AddressPrefix = Ipv6Prefix(64);
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("nSpokes", "Number of spoke nodes to place in the star", nSpokes);
@@ -89,8 +89,8 @@ main(int argc, char* argv[])
     }
     PacketSinkHelper packetSinkHelper("ns3::TcpSocketFactory", hubLocalAddress);
     ApplicationContainer hubApp = packetSinkHelper.Install(star.GetHub());
-    hubApp.Start(Seconds(1.0));
-    hubApp.Stop(Seconds(10.0));
+    hubApp.Start(Seconds(1));
+    hubApp.Stop(Seconds(10));
 
     //
     // Create OnOff applications to send TCP to the hub, one on each spoke node.
@@ -115,8 +115,8 @@ main(int argc, char* argv[])
         onOffHelper.SetAttribute("Remote", remoteAddress);
         spokeApps.Add(onOffHelper.Install(star.GetSpokeNode(i)));
     }
-    spokeApps.Start(Seconds(1.0));
-    spokeApps.Stop(Seconds(10.0));
+    spokeApps.Start(Seconds(1));
+    spokeApps.Stop(Seconds(10));
 
     NS_LOG_INFO("Enable static global routing.");
     //

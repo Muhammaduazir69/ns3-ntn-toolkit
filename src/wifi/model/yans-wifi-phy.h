@@ -13,14 +13,16 @@
 
 #include "wifi-phy.h"
 
+#include "ns3/wifi-export.h"
+
 namespace ns3
 {
 
 class YansWifiChannel;
 
 /**
- * \brief 802.11 PHY layer model
- * \ingroup wifi
+ * @brief 802.11 PHY layer model
+ * @ingroup wifi
  *
  * This PHY implements a model of 802.11a. The model
  * implemented here is based on the model described
@@ -33,12 +35,12 @@ class YansWifiChannel;
  * and ns3::PropagationDelayModel classes, both of which are
  * members of the ns3::YansWifiChannel class.
  */
-class YansWifiPhy : public WifiPhy
+class WIFI_EXPORT YansWifiPhy : public WifiPhy
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -58,7 +60,7 @@ class YansWifiPhy : public WifiPhy
     /**
      * Set the YansWifiChannel this YansWifiPhy is to be connected to.
      *
-     * \param channel the YansWifiChannel this YansWifiPhy is to be connected to
+     * @param channel the YansWifiChannel this YansWifiPhy is to be connected to
      */
     void SetChannel(const Ptr<YansWifiChannel> channel);
 
@@ -66,18 +68,18 @@ class YansWifiPhy : public WifiPhy
      * Logs the arrival of a PPDU, including its power and duration.
      * This will also trace PPDUs below WifiPhy::RxSensitivity
      *
-     * \param [in] ppdu The PPDU being traced upon its arrival.
-     * \param [in] rxPowerDbm The received power of the PPDU in dBm.
-     * \param [in] duration The duration of the PPDU signal.
+     * @param [in] ppdu The PPDU being traced upon its arrival.
+     * @param [in] rxPowerDbm The received power of the PPDU in dBm.
+     * @param [in] duration The duration of the PPDU signal.
      */
     void TraceSignalArrival(Ptr<const WifiPpdu> ppdu, double rxPowerDbm, Time duration);
 
     /**
      * Callback invoked when the PHY model starts to process a signal
      *
-     * \param ppdu The PPDU being processed
-     * \param rxPowerDbm received signal power (dBm)
-     * \param duration Signal duration
+     * @param ppdu The PPDU being processed
+     * @param rxPowerDbm received signal power (dBm)
+     * @param duration Signal duration
      */
     typedef void (*SignalArrivalCallback)(Ptr<const WifiPpdu> ppdu,
                                           double rxPowerDbm,

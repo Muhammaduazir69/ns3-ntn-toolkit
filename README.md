@@ -4,7 +4,7 @@
 <h1 align="center">ns3-ntn-toolkit</h1>
 
 <p align="center">
-  <strong>A pre-integrated ns-3.43 simulation platform for 6G non-terrestrial networks:
+  <strong>A pre-integrated ns-3.49 simulation platform for 6G non-terrestrial networks:
   LEO satellite constellations, 3GPP NR-NTN protocol stacks, O-RAN control loops,
   terahertz links and reinforcement-learning agents, in one tree that clones, builds and runs.</strong>
 </p>
@@ -37,7 +37,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-Rel--17%20%2F%2018%20%2F%2019%20NTN-orange.svg" alt="3GPP Rel-17/18/19 NTN"/>
   <img src="https://img.shields.io/badge/O--RAN-E2%20%C2%B7%20A1%20%C2%B7%20KPM%20%C2%B7%20RC-purple.svg" alt="O-RAN E2 A1 KPM RC"/>
@@ -73,7 +73,7 @@ A channel model written for a terrestrial street canyon. A control framework tha
 expects a terrestrial gNB to be sitting still.
 
 This toolkit is that assembly, done once and kept honest. It is a fork of
-**ns-3.43** carrying **14 custom modules** and three vendored upstreams, wired so
+**ns-3.49** (with 5G-LENA v5.2) carrying **14 custom modules** and three vendored upstreams, wired so
 that a satellite's propagated position drives a real NR spectrum PHY, a real handover
 decision rides a real Xn interface with a real propagation delay, and every KPI a
 scenario prints came off a packet that actually crossed the air interface.
@@ -95,7 +95,7 @@ contribution than on the integration.
 
 ### Docker, no build required
 
-The whole toolkit, prebuilt: ns-3.43, all 14 modules, the SNS3 `satellite` stack,
+The whole toolkit, prebuilt: ns-3.49, all 14 modules, the SNS3 `satellite` stack,
 the mmWave and 5G-LENA `nr` NR stacks, the Python tooling and the digital-twin
 server.
 
@@ -296,7 +296,7 @@ Small Cell Forum FAPI 222.10.02.
 
 ## Keywords
 
-6G, non-terrestrial network, NTN simulator, ns-3, ns-3.43, LEO satellite
+6G, non-terrestrial network, NTN simulator, ns-3, ns-3.49, LEO satellite
 constellation, satellite communication, satellite network simulation, 3GPP
 Release 17, Release 18, Release 19, NR-NTN, 5G NR, 5G-LENA, mmWave, SGP4,
 Walker-Delta, two-line element, orbital propagation, conditional handover, CHO,

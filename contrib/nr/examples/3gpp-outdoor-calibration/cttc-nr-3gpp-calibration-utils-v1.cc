@@ -2,6 +2,20 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file cttc-nr-3gpp-calibration-utils-v1.cc
+ *
+ * @brief Implementation of the LenaV1Utils class, used when the calibration example is run with
+ * the LENA v1 (LTE module) simulator as a baseline. SetLenaV1SimulatorParameters() creates the
+ * LteHelper/EPC and sets the 3GPP pathloss model matching the scenario, the configurable gNB/UE
+ * transmit powers and noise figures, optional shadowing, PF or RR scheduler, and the per-sector
+ * EARFCN assignment derived from the configured starting frequency, then installs the per-sector
+ * eNB and UE devices. It also connects the LteUePhy "ReportCurrentCellRsrpSinr" trace to
+ * SinrOutputStats and the "ReportPowerSpectralDensity" trace to PowerOutputStats, so LTE runs
+ * fill the same SQLite tables as the NR runs.
+ */
+
 #include "cttc-nr-3gpp-calibration-utils-v1.h"
 
 #include "cttc-nr-3gpp-calibration-utils-v2.h"
@@ -163,7 +177,8 @@ LenaV1Utils::SetLenaV1SimulatorParameters(const double sector0AngleRad,
     Config::SetDefault("ns3::LteUePhy::TxPower", DoubleValue(ueTxPower));
     Config::SetDefault("ns3::LteEnbPhy::NoiseFigure", DoubleValue(gnbNoiseFigure));
     Config::SetDefault("ns3::LteUePhy::NoiseFigure", DoubleValue(ueNoiseFigure));
-    Config::SetDefault("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
+    // ntn: the toolkit builds the mmWave LTE fork, which has no RLF detection attribute.
+    Config::SetDefaultFailSafe("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
     Config::SetDefault("ns3::LteAmc::AmcModel", EnumValue(LteAmc::PiroEW2010));
     lteHelper->SetAttribute("PathlossModel",
                             StringValue(pathlossModel)); // for each band the same pathloss model

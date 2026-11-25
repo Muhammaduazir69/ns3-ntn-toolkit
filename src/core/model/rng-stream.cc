@@ -13,12 +13,11 @@
 #include "fatal-error.h"
 #include "log.h"
 
-#include <cstdlib>
 #include <iostream>
 
 /**
- * \file
- * \ingroup rngimpl
+ * @file
+ * @ingroup rngimpl
  * ns3::RngStream and MRG32k3a implementations.
  */
 
@@ -33,7 +32,7 @@ NS_LOG_COMPONENT_DEFINE("RngStream");
 } // namespace ns3
 
 /**
- * \ingroup rngimpl
+ * @ingroup rngimpl
  * @{
  */
 /** Namespace for MRG32k3a implementation details. */
@@ -98,7 +97,7 @@ const Matrix A2p0 = {
  * \param [in] s Second multiplicative argument.
  * \param [in] c Additive argument.
  * \param [in] m Modulus.
- * \returns <tt>(a*s +c) MOD m</tt>
+ * \returns ``(a*s +c) MOD m``
  */
 double MultModM (double a, double s, double c, double m)
 {

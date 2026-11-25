@@ -54,6 +54,15 @@ CapabilityInformation::SetCfPollable()
     Set(2);
 }
 
+void
+CapabilityInformation::SetCriticalUpdate(bool flag)
+{
+    if (flag)
+    {
+        Set(6);
+    }
+}
+
 bool
 CapabilityInformation::IsEss() const
 {
@@ -82,6 +91,12 @@ bool
 CapabilityInformation::IsCfPollable() const
 {
     return Is(2);
+}
+
+bool
+CapabilityInformation::IsCriticalUpdate() const
+{
+    return Is(6);
 }
 
 void
@@ -114,14 +129,14 @@ CapabilityInformation::GetSerializedSize() const
 Buffer::Iterator
 CapabilityInformation::Serialize(Buffer::Iterator start) const
 {
-    start.WriteHtolsbU16(m_capability);
+    start.WriteU16(m_capability);
     return start;
 }
 
 Buffer::Iterator
 CapabilityInformation::Deserialize(Buffer::Iterator start)
 {
-    m_capability = start.ReadLsbtohU16();
+    m_capability = start.ReadU16();
     return start;
 }
 

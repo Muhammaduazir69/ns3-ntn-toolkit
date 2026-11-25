@@ -9,27 +9,29 @@
 
 #include "nr-rrc-sap.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 /**
- * \brief Service Access Point (SAP) offered by the handover algorithm instance
- *        to the eNodeB RRC instance.
+ * @brief Service Access Point (SAP) offered by the handover algorithm instance
+ *        to the gNB RRC instance.
  *
  * This is the *Handover Management SAP Provider*, i.e., the part of the SAP
- * that contains the handover algorithm methods called by the eNodeB RRC
+ * that contains the handover algorithm methods called by the gNB RRC
  * instance.
  */
-class NrHandoverManagementSapProvider
+class NR_EXPORT NrHandoverManagementSapProvider
 {
   public:
     virtual ~NrHandoverManagementSapProvider() = default;
 
     /**
-     * \brief Send a UE measurement report to handover algorithm.
-     * \param rnti Radio Network Temporary Identity, an integer identifying the UE
+     * @brief Send a UE measurement report to handover algorithm.
+     * @param rnti Radio Network Temporary Identity, an integer identifying the UE
      *             where the report originates from
-     * \param measResults a single report of one measurement identity
+     * @param measResults a single report of one measurement identity
      *
      * The received measurement report is a result of the UE measurement
      * configuration previously configured by calling
@@ -41,41 +43,41 @@ class NrHandoverManagementSapProvider
 }; // end of class NrHandoverManagementSapProvider
 
 /**
- * \brief Service Access Point (SAP) offered by the eNodeB RRC instance to the
+ * @brief Service Access Point (SAP) offered by the gNB RRC instance to the
  *        handover algorithm instance.
  *
  * This is the *Handover Management SAP User*, i.e., the part of the SAP that
- * contains the eNodeB RRC methods called by the handover algorithm instance.
+ * contains the gNB RRC methods called by the handover algorithm instance.
  */
-class NrHandoverManagementSapUser
+class NR_EXPORT NrHandoverManagementSapUser
 {
   public:
     virtual ~NrHandoverManagementSapUser() = default;
 
     /**
-     * \brief Request a certain reporting configuration to be fulfilled by the UEs
-     *        attached to the eNodeB entity.
-     * \param reportConfig the UE measurement reporting configuration
-     * \return the measurement identities associated with this newly added
+     * @brief Request a certain reporting configuration to be fulfilled by the UEs
+     *        attached to the gNB entity.
+     * @param reportConfig the UE measurement reporting configuration
+     * @return the measurement identities associated with this newly added
      *         reporting configuration
      *
-     * The eNodeB RRC entity is expected to configure the same reporting
+     * The gNB RRC entity is expected to configure the same reporting
      * configuration in each of the attached UEs. When later in the simulation a
      * UE measurement report is received from a UE as a result of this
-     * configuration, the eNodeB RRC entity shall forward this report to the
+     * configuration, the gNB RRC entity shall forward this report to the
      * handover algorithm through the NrHandoverManagementSapProvider::ReportUeMeas
      * SAP function.
      *
-     * \note This function is only valid before the simulation begins.
+     * @note This function is only valid before the simulation begins.
      */
     virtual std::vector<uint8_t> AddUeMeasReportConfigForHandover(
         NrRrcSap::ReportConfigEutra reportConfig) = 0;
 
     /**
-     * \brief Instruct the eNodeB RRC entity to prepare a handover.
-     * \param rnti Radio Network Temporary Identity, an integer identifying the
+     * @brief Instruct the eNodeB RRC entity to prepare a handover.
+     * @param rnti Radio Network Temporary Identity, an integer identifying the
      *             UE which shall perform the handover
-     * \param targetCellId the cell ID of the target eNodeB
+     * @param targetCellId the cell ID of the target eNodeB
      *
      * This function is used by the handover algorithm entity when a handover
      * decision has been reached.
@@ -89,7 +91,7 @@ class NrHandoverManagementSapUser
 }; // end of class NrHandoverManagementSapUser
 
 /**
- * \brief Template for the implementation of the NrHandoverManagementSapProvider
+ * @brief Template for the implementation of the NrHandoverManagementSapProvider
  *        as a member of an owner class of type C to which all methods are
  *        forwarded.
  */
@@ -100,7 +102,7 @@ class MemberNrHandoverManagementSapProvider : public NrHandoverManagementSapProv
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrHandoverManagementSapProvider(C* owner);
 
@@ -130,7 +132,7 @@ MemberNrHandoverManagementSapProvider<C>::ReportUeMeas(uint16_t rnti,
 }
 
 /**
- * \brief Template for the implementation of the NrHandoverManagementSapUser
+ * @brief Template for the implementation of the NrHandoverManagementSapUser
  *        as a member of an owner class of type C to which all methods are
  *        forwarded.
  */
@@ -141,7 +143,7 @@ class MemberNrHandoverManagementSapUser : public NrHandoverManagementSapUser
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrHandoverManagementSapUser(C* owner);
 

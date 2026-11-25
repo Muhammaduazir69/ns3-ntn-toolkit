@@ -4,9 +4,9 @@
 
 /**
  *
- * \file cttc-3gpp-channel-nums-fdm.cc
- * \ingroup examples
- * \brief Frequency division multiplexing example, with TDD and FDD
+ * @file cttc-3gpp-channel-nums-fdm.cc
+ * @ingroup examples
+ * @brief Frequency division multiplexing example, with TDD and FDD
  *
  * The example is showing how to configure multiple bandwidth parts, in which
  * some of them form a FDD configuration, while others uses TDD. The user
@@ -116,8 +116,6 @@ main(int argc, char* argv[])
 
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
 
-    int64_t randomStream = 1;
-
     GridScenarioHelper gridScenario;
     gridScenario.SetRows(gNbNum / 2);
     gridScenario.SetColumns(gNbNum);
@@ -130,20 +128,24 @@ main(int argc, char* argv[])
     gridScenario.SetUtNumber(ueNum);
     gridScenario.SetScenarioHeight(3); // Create a 3x3 scenario where the UE will
     gridScenario.SetScenarioLength(3); // be distributed.
-    randomStream += gridScenario.AssignStreams(randomStream);
     gridScenario.CreateScenario();
 
     /*
      * TODO: Add a print, or a plot, that shows the scenario.
      */
-
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
 
     // Put the pointers inside nrHelper
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
+    // Create the spectrum channel
+    channelHelper->ConfigureFactories("UMi", "Default", "ThreeGpp");
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
     BandwidthPartInfoPtrVector allBwps;
     CcBwpCreator ccBwpCreator;
@@ -151,18 +153,19 @@ main(int argc, char* argv[])
 
     CcBwpCreator::SimpleOperationBandConf bandConfTdd(centralFrequencyBand1,
                                                       bandwidthBand1,
-                                                      numCcPerBand,
-                                                      BandwidthPartInfo::UMi_StreetCanyon);
+                                                      numCcPerBand);
+
     CcBwpCreator::SimpleOperationBandConf bandConfFdd(centralFrequencyBand2,
                                                       bandwidthBand2,
-                                                      numCcPerBand,
-                                                      BandwidthPartInfo::UMi_StreetCanyon);
+                                                      numCcPerBand);
 
     bandConfFdd.m_numBwp = 2; // Here, bandFdd will have 2 BWPs
 
     // By using the configuration created, it is time to make the operation bands
     OperationBandInfo bandTdd = ccBwpCreator.CreateOperationBandContiguousCc(bandConfTdd);
     OperationBandInfo bandFdd = ccBwpCreator.CreateOperationBandContiguousCc(bandConfFdd);
+    // Create the same spectrum channel for both bands with different frequencies
+    channelHelper->AssignChannelsToBands({bandTdd, bandFdd});
 
     /*
      * The configured spectrum division is:
@@ -172,19 +175,7 @@ main(int argc, char* argv[])
      *
      * We will configure BWP0 as TDD, BWP1 as FDD-DL, BWP2 as FDD-UL.
      */
-
-    /*
-     * Attributes of ThreeGppChannelModel still cannot be set in our way.
-     * TODO: Coordinate with Tommaso
-     */
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    nrHelper->InitializeOperationBand(&bandTdd);
-    nrHelper->InitializeOperationBand(&bandFdd);
     allBwps = CcBwpCreator::GetAllBwps({bandTdd, bandFdd});
-
     // Beamforming method
     idealBeamformingHelper->SetAttribute("BeamformingMethod",
                                          TypeIdValue(DirectPathBeamforming::GetTypeId()));
@@ -214,168 +205,126 @@ main(int argc, char* argv[])
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("GBR_CONV_VIDEO", UintegerValue(bwpIdForVideo));
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("GBR_GAMING", UintegerValue(bwpIdForGaming));
 
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForVoice));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("GBR_CONV_VIDEO", UintegerValue(bwpIdForVideo));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("GBR_GAMING", UintegerValue(bwpIdForGaming));
+    // The UE BWP manager mapping and the UL pairing of the FDD carriers are
+    // learned by the UE from the gNB's dedicated RRC configuration
 
     NetDeviceContainer gnbNetDev =
         nrHelper->InstallGnbDevice(gridScenario.GetBaseStations(), allBwps);
     NetDeviceContainer ueNetDev =
         nrHelper->InstallUeDevice(gridScenario.GetUserTerminals(), allBwps);
 
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+    nrHelper->AssignStreams({.scenario = &gridScenario, .gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     NS_ASSERT(gnbNetDev.GetN() == 4);
 
     // -------------- First GNB:
 
     // BWP0, the TDD one
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Numerology", UintegerValue(0));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Numerology", UintegerValue(0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("Pattern", StringValue("F|F|F|F|F|F|F|F|F|F|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("TxPower", DoubleValue(4.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("TxPower", DoubleValue(4.0));
 
     // BWP1, FDD-DL
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("Numerology", UintegerValue(0));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("Numerology", UintegerValue(0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
         ->SetAttribute("Pattern", StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("TxPower", DoubleValue(4.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("TxPower", DoubleValue(4.0));
 
     // BWP2, FDD-UL
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Numerology", UintegerValue(0));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Numerology", UintegerValue(0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
         ->SetAttribute("Pattern", StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("TxPower", DoubleValue(0.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("TxPower", DoubleValue(0.0));
 
     // Link the two FDD BWP:
-    nrHelper->GetBwpManagerGnb(gnbNetDev.Get(0))->SetOutputLink(2, 1);
+    NrHelper::GetBwpManagerGnb(gnbNetDev.Get(0))->SetOutputLink(2, 1);
 
     // -------------- Second GNB:
 
     // BWP0, the TDD one
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 0)->SetAttribute("Numerology", UintegerValue(1));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 0)->SetAttribute("Numerology", UintegerValue(1));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 0)
         ->SetAttribute("Pattern", StringValue("F|F|F|F|F|F|F|F|F|F|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 0)->SetAttribute("TxPower", DoubleValue(4.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 0)->SetAttribute("TxPower", DoubleValue(4.0));
 
     // BWP1, FDD-DL
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 1)->SetAttribute("Numerology", UintegerValue(1));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 1)->SetAttribute("Numerology", UintegerValue(1));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 1)
         ->SetAttribute("Pattern", StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 1)->SetAttribute("TxPower", DoubleValue(4.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 1)->SetAttribute("TxPower", DoubleValue(4.0));
 
     // BWP2, FDD-UL
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 2)->SetAttribute("Numerology", UintegerValue(1));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 2)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 2)->SetAttribute("Numerology", UintegerValue(1));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 2)
         ->SetAttribute("Pattern", StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(1), 2)->SetAttribute("TxPower", DoubleValue(0.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(1), 2)->SetAttribute("TxPower", DoubleValue(0.0));
 
     // Link the two FDD BWP:
-    nrHelper->GetBwpManagerGnb(gnbNetDev.Get(1))->SetOutputLink(2, 1);
+    NrHelper::GetBwpManagerGnb(gnbNetDev.Get(1))->SetOutputLink(2, 1);
 
     // -------------- Third GNB:
 
     // BWP0, the TDD one
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 0)->SetAttribute("Numerology", UintegerValue(2));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 0)->SetAttribute("Numerology", UintegerValue(2));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 0)
         ->SetAttribute("Pattern", StringValue("F|F|F|F|F|F|F|F|F|F|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 0)->SetAttribute("TxPower", DoubleValue(4.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 0)->SetAttribute("TxPower", DoubleValue(4.0));
 
     // BWP1, FDD-DL
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 1)->SetAttribute("Numerology", UintegerValue(2));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 1)->SetAttribute("Numerology", UintegerValue(2));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 1)
         ->SetAttribute("Pattern", StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 1)->SetAttribute("TxPower", DoubleValue(4.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 1)->SetAttribute("TxPower", DoubleValue(4.0));
 
     // BWP2, FDD-UL
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 2)->SetAttribute("Numerology", UintegerValue(2));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 2)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 2)->SetAttribute("Numerology", UintegerValue(2));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 2)
         ->SetAttribute("Pattern", StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(2), 2)->SetAttribute("TxPower", DoubleValue(0.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(2), 2)->SetAttribute("TxPower", DoubleValue(0.0));
 
     // Link the two FDD BWP:
-    nrHelper->GetBwpManagerGnb(gnbNetDev.Get(2))->SetOutputLink(2, 1);
+    NrHelper::GetBwpManagerGnb(gnbNetDev.Get(2))->SetOutputLink(2, 1);
 
     // -------------- Fourth GNB:
 
     // BWP0, the TDD one
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 0)->SetAttribute("Numerology", UintegerValue(3));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 0)->SetAttribute("Numerology", UintegerValue(3));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 0)
         ->SetAttribute("Pattern", StringValue("F|F|F|F|F|F|F|F|F|F|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 0)->SetAttribute("TxPower", DoubleValue(4.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 0)->SetAttribute("TxPower", DoubleValue(4.0));
 
     // BWP1, FDD-DL
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 1)->SetAttribute("Numerology", UintegerValue(3));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 1)->SetAttribute("Numerology", UintegerValue(3));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 1)
         ->SetAttribute("Pattern", StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 1)->SetAttribute("TxPower", DoubleValue(4.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 1)->SetAttribute("TxPower", DoubleValue(4.0));
 
     // BWP2, FDD-UL
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 2)->SetAttribute("Numerology", UintegerValue(3));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 2)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 2)->SetAttribute("Numerology", UintegerValue(3));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 2)
         ->SetAttribute("Pattern", StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(3), 2)->SetAttribute("TxPower", DoubleValue(0.0));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(3), 2)->SetAttribute("TxPower", DoubleValue(0.0));
 
     // Link the two FDD BWP:
-    nrHelper->GetBwpManagerGnb(gnbNetDev.Get(3))->SetOutputLink(2, 1);
+    NrHelper::GetBwpManagerGnb(gnbNetDev.Get(3))->SetOutputLink(2, 1);
 
-    // Set the UE routing:
-
-    for (uint32_t i = 0; i < ueNetDev.GetN(); i++)
-    {
-        nrHelper->GetBwpManagerUe(ueNetDev.Get(i))->SetOutputLink(1, 2);
-    }
-
-    // When all the configuration is done, explicitly call UpdateConfig ()
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
+    // No explicit UE routing: the gNB advertises the FDD pairing (inverted
+    // from its own output links) and its QoS flow to BWP mapping in dedicated
+    // RRC configuration, from which the UE derives its own routing
 
     // From here, it is standard NS3. In the future, we will create helpers
     // for this part as well.
 
-    // create the internet and install the IP stack on the UEs
-    // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
+
     internet.Install(gridScenario.GetUserTerminals());
 
     Ipv4InterfaceContainer ueIpIface =
         nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < gridScenario.GetUserTerminals().GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(
-            gridScenario.GetUserTerminals().Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // Fix the attachment of the UEs: UE_i attached to GNB_i
     for (uint32_t i = 0; i < ueNetDev.GetN(); ++i)
@@ -415,55 +364,52 @@ main(int argc, char* argv[])
      * Low-Latency configuration and object creation:
      */
     UdpClientHelper dlClientVideo;
-    dlClientVideo.SetAttribute("RemotePort", UintegerValue(dlPortVideo));
     dlClientVideo.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientVideo.SetAttribute("PacketSize", UintegerValue(udpPacketSizeVideo));
     dlClientVideo.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaVideo)));
 
-    // The bearer that will carry low latency traffic
-    NrEpsBearer videoBearer(NrEpsBearer::GBR_CONV_VIDEO);
+    // The QoS flow that will carry low latency traffic
+    NrQosFlow videoFlow(NrQosFlow::GBR_CONV_VIDEO);
 
     // The filter for the low-latency traffic
-    Ptr<NrEpcTft> videoTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfVideo;
+    Ptr<NrQosRule> videoRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfVideo;
     dlpfVideo.localPortStart = dlPortVideo;
     dlpfVideo.localPortEnd = dlPortVideo;
-    videoTft->Add(dlpfVideo);
+    videoRule->Add(dlpfVideo);
 
     // Voice configuration and object creation:
     UdpClientHelper dlClientVoice;
-    dlClientVoice.SetAttribute("RemotePort", UintegerValue(dlPortVoice));
     dlClientVoice.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientVoice.SetAttribute("PacketSize", UintegerValue(udpPacketSizeVoice));
     dlClientVoice.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaVoice)));
 
     // The bearer that will carry voice traffic
-    NrEpsBearer voiceBearer(NrEpsBearer::GBR_CONV_VOICE);
+    NrQosFlow voiceFlow(NrQosFlow::GBR_CONV_VOICE);
 
     // The filter for the voice traffic
-    Ptr<NrEpcTft> voiceTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfVoice;
+    Ptr<NrQosRule> voiceRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfVoice;
     dlpfVoice.localPortStart = dlPortVoice;
     dlpfVoice.localPortEnd = dlPortVoice;
-    voiceTft->Add(dlpfVoice);
+    voiceRule->Add(dlpfVoice);
 
     // Gaming configuration and object creation:
     UdpClientHelper ulClientGaming;
-    ulClientGaming.SetAttribute("RemotePort", UintegerValue(ulPortGaming));
     ulClientGaming.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     ulClientGaming.SetAttribute("PacketSize", UintegerValue(udpPacketSizeGaming));
     ulClientGaming.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaGaming)));
 
     // The bearer that will carry gaming traffic
-    NrEpsBearer gamingBearer(NrEpsBearer::GBR_GAMING);
+    NrQosFlow gamingFlow(NrQosFlow::GBR_GAMING);
 
     // The filter for the gaming traffic
-    Ptr<NrEpcTft> gamingTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter ulpfGaming;
+    Ptr<NrQosRule> gamingRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter ulpfGaming;
     ulpfGaming.remotePortStart = ulPortGaming;
     ulpfGaming.remotePortEnd = ulPortGaming;
-    ulpfGaming.direction = NrEpcTft::UPLINK;
-    gamingTft->Add(ulpfGaming);
+    ulpfGaming.direction = NrQosRule::UPLINK;
+    gamingRule->Add(ulpfGaming);
 
     /*
      * Let's install the applications!
@@ -480,18 +426,22 @@ main(int argc, char* argv[])
         // with destination address set to the address of the UE
         if (enableVoice)
         {
-            dlClientVoice.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+            dlClientVoice.SetAttribute(
+                "Remote",
+                AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortVoice)));
             clientApps.Add(dlClientVoice.Install(remoteHost));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, voiceBearer, voiceTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, voiceFlow, voiceRule);
         }
 
         if (enableVideo)
         {
-            dlClientVideo.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+            dlClientVideo.SetAttribute(
+                "Remote",
+                AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortVideo)));
             clientApps.Add(dlClientVideo.Install(remoteHost));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, videoBearer, videoTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, videoFlow, videoRule);
         }
 
         // For the uplink, the installation happens in the UE, and the remote address
@@ -499,11 +449,13 @@ main(int argc, char* argv[])
 
         if (enableGaming)
         {
-            ulClientGaming.SetAttribute("RemoteAddress",
-                                        AddressValue(internetIpIfaces.GetAddress(1)));
+            ulClientGaming.SetAttribute(
+                "Remote",
+                AddressValue(
+                    addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, ulPortGaming)));
             clientApps.Add(ulClientGaming.Install(ue));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, gamingBearer, gamingTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, gamingFlow, gamingRule);
         }
     }
 
@@ -556,9 +508,7 @@ main(int argc, char* argv[])
 
     outFile.setf(std::ios_base::fixed);
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;

@@ -8,7 +8,8 @@
 #ifndef NR_GNB_CMAC_SAP_H
 #define NR_GNB_CMAC_SAP_H
 
-#include <ns3/packet.h>
+#include "ns3/nr-export.h"
+#include "ns3/packet.h"
 
 namespace ns3
 {
@@ -22,7 +23,7 @@ class NrMacSapUser;
  * This is the MAC SAP Provider, i.e., the part of the SAP that contains the MAC methods called by
  * the RRC
  */
-class NrGnbCmacSapProvider
+class NR_EXPORT NrGnbCmacSapProvider
 {
   public:
     virtual ~NrGnbCmacSapProvider() = default;
@@ -37,14 +38,14 @@ class NrGnbCmacSapProvider
     /**
      * Add UE function
      *
-     * \param rnti
+     * @param rnti
      */
     virtual void AddUe(uint16_t rnti) = 0;
 
     /**
      * remove the UE, e.g., after handover or termination of the RRC connection
      *
-     * \param rnti
+     * @param rnti
      */
     virtual void RemoveUe(uint16_t rnti) = 0;
 
@@ -52,12 +53,12 @@ class NrGnbCmacSapProvider
      * Logical Channel information to be passed to CmacSapProvider::ConfigureLc
      *
      */
-    struct LcInfo
+    struct NR_EXPORT LcInfo
     {
         uint16_t rnti;        /**< C-RNTI identifying the UE */
         uint8_t lcId;         /**< logical channel identifier */
         uint8_t lcGroup;      /**< logical channel group */
-        uint8_t qci;          /**< QoS Class Identifier */
+        uint8_t fiveQi;       /**< 5G QoS Identifier */
         uint8_t resourceType; /**< 0 if the bearer is NON-GBR, 1 if the bearer
                                    is GBR, 2 if the bearer in DC-GBR */
         uint64_t mbrUl;       /**< maximum bitrate in uplink */
@@ -69,30 +70,30 @@ class NrGnbCmacSapProvider
     /**
      * Add a new logical channel
      *
-     * \param lcinfo
-     * \param msu
+     * @param lcinfo
+     * @param msu
      */
     virtual void AddLc(LcInfo lcinfo, NrMacSapUser* msu) = 0;
 
     /**
      * Reconfigure an existing logical channel
      *
-     * \param lcinfo
+     * @param lcinfo
      */
     virtual void ReconfigureLc(LcInfo lcinfo) = 0;
 
     /**
      * release an existing logical channel
      *
-     * \param rnti
-     * \param lcid
+     * @param rnti
+     * @param lcid
      */
     virtual void ReleaseLc(uint16_t rnti, uint8_t lcid) = 0;
 
     /**
-     * \brief Parameters for [re]configuring the UE
+     * @brief Parameters for [re]configuring the UE
      */
-    struct UeConfig
+    struct NR_EXPORT UeConfig
     {
         /**
          * UE id within this cell
@@ -107,7 +108,7 @@ class NrGnbCmacSapProvider
     /**
      * update the configuration of the UE
      *
-     * \param params
+     * @param params
      */
     virtual void UeUpdateConfigurationReq(UeConfig params) = 0;
 
@@ -115,7 +116,7 @@ class NrGnbCmacSapProvider
      * struct defining the RACH configuration of the MAC
      *
      */
-    struct RachConfig
+    struct NR_EXPORT RachConfig
     {
         uint8_t numberOfRaPreambles;  ///< number of RA preambles
         uint8_t preambleTransMax;     ///< preamble transmit maximum
@@ -125,15 +126,15 @@ class NrGnbCmacSapProvider
 
     /**
      *
-     * \return the current RACH configuration of the MAC
+     * @return the current RACH configuration of the MAC
      */
     virtual RachConfig GetRachConfig() = 0;
 
     /**
-     * \brief AllocateNcRaPreambleReturnValue structure
+     * @brief AllocateNcRaPreambleReturnValue structure
      *
      */
-    struct AllocateNcRaPreambleReturnValue
+    struct NR_EXPORT AllocateNcRaPreambleReturnValue
     {
         bool valid;               ///< true if a valid RA config was allocated, false otherwise
         uint8_t raPreambleId;     ///< random access preamble id
@@ -144,24 +145,17 @@ class NrGnbCmacSapProvider
      * Allocate a random access preamble for non-contention based random access (e.g., for
      * handover).
      *
-     * \param rnti the RNTI of the UE who will perform non-contention based random access
+     * @param rnti the RNTI of the UE who will perform non-contention based random access
      *
-     * \return  the newly allocated random access preamble
+     * @return  the newly allocated random access preamble
      */
     virtual AllocateNcRaPreambleReturnValue AllocateNcRaPreamble(uint16_t rnti) = 0;
 
     /**
-     * \brief Reserve on this MAC a non-contention RA preamble that another
-     * BWP MAC of the same cell allocated (ntn-patch 17). Under paired FDD the
-     * UE sends its PRACH on the UL BWP while the RRC allocates the dedicated
-     * preamble on the primary (DL) BWP; the UL BWP's MAC must recognize it, or
-     * it answers the handover RACH as a new contention-based access.
-     * \param rnti the RNTI the preamble is allocated to
-     * \param raPreambleId the allocated preamble
+     * @brief Check if all SRS periodicity is at the maximum allowed and all offsets have been used
+     * @return true if all SRS offsets have been used
      */
-    virtual void ShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId)
-    {
-    }
+    virtual bool IsMaxSrsReached() const = 0;
 };
 
 /**
@@ -171,7 +165,7 @@ class NrGnbCmacSapProvider
  * This is the MAC SAP User, i.e., the part of the SAP that contains the RRC methods called by the
  * MAC
  */
-class NrGnbCmacSapUser
+class NR_EXPORT NrGnbCmacSapUser
 {
   public:
     virtual ~NrGnbCmacSapUser() = default;
@@ -179,23 +173,23 @@ class NrGnbCmacSapUser
     /**
      * request the allocation of a Temporary C-RNTI
      *
-     * \return the T-C-RNTI
+     * @return the T-C-RNTI
      */
     virtual uint16_t AllocateTemporaryCellRnti() = 0;
 
     /**
      * notify the result of the last LC config operation
      *
-     * \param rnti the rnti of the user
-     * \param lcid the logical channel id
-     * \param success true if the operation was successful, false otherwise
+     * @param rnti the rnti of the user
+     * @param lcid the logical channel id
+     * @param success true if the operation was successful, false otherwise
      */
     virtual void NotifyLcConfigResult(uint16_t rnti, uint8_t lcid, bool success) = 0;
 
     /**
-     * \brief Parameters for [re]configuring the UE
+     * @brief Parameters for [re]configuring the UE
      */
-    struct UeConfig
+    struct NR_EXPORT UeConfig
     {
         /**
          * UE id within this cell
@@ -210,12 +204,12 @@ class NrGnbCmacSapUser
     /**
      * Notify the RRC of a UE config updated requested by the MAC (normally, by the scheduler)
      *
-     * \param params
+     * @param params
      */
     virtual void RrcConfigurationUpdateInd(UeConfig params) = 0;
 
     /**
-     * \brief Is random access completed function
+     * @brief Is random access completed function
      *
      * This method is executed to decide if the non contention based
      * preamble has to be reused or not upon preamble expiry. If the random access
@@ -223,8 +217,8 @@ class NrGnbCmacSapUser
      * If not, the same UE retains the preamble and other available preambles are
      * assigned to the required UEs.
      *
-     * \param rnti the C-RNTI identifying the user
-     * \return true if the random access in connected mode is completed
+     * @param rnti the C-RNTI identifying the user
+     * @return true if the random access in connected mode is completed
      */
     virtual bool IsRandomAccessCompleted(uint16_t rnti) = 0;
 };

@@ -354,7 +354,7 @@ class NtnTdlPowerConservationTest : public TestCase
 {
   public:
     NtnTdlPowerConservationTest()
-        : TestCase("TDL on a live channel: unit-power profile, mean PSD = TR 38.811 FSPL, delay = d/c")
+        : TestCase("TDL on a live channel: unit-power profile, mean PSD = TR 38.811 FSPL, delay = d-c")
     {
     }
 

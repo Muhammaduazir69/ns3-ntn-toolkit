@@ -6,8 +6,8 @@
  * Author: Benjamin Cizdziel <ben.cizdziel@gmail.com>
  */
 
-#include <ns3/random-variable-stream.h>
-#include <ns3/vector.h>
+#include "ns3/random-variable-stream.h"
+#include "ns3/vector.h"
 
 #ifndef GEOGRAPHIC_POSITIONS_H
 #define GEOGRAPHIC_POSITIONS_H
@@ -16,7 +16,7 @@ namespace ns3
 {
 
 /**
- * \ingroup mobility
+ * @ingroup mobility
  *
  * Consists of methods dealing with Earth geographic coordinates and locations.
  */
@@ -34,6 +34,10 @@ class GeographicPositions
      * Mapping Agency, 1 Jan. 2000.
      * <https://web.archive.org/web/20200729203634/https://earth-info.nga.mil/GandG/publications/tr8350.2/wgs84fin.pdf>.
      */
+
+    /// geocentric gravitational constant is 398600.7 KM^3/s^2
+    /// https://ntrs.nasa.gov/citations/19760058274 or 3.986007×10^14 m^3/s^2
+    static constexpr double LEO_EARTH_GGC = 3.986007e14;
 
     /// Earth's radius in meters if modeled as a perfect sphere
     static constexpr double EARTH_SPHERE_RADIUS = 6371e3;

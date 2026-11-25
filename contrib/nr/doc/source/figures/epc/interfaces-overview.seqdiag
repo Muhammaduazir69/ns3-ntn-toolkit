@@ -1,0 +1,47 @@
+diagram {
+   edge_length = 180;
+   Ue; SrcGnb; TgtGnb; Mme; Sgw; Pgw;
+
+   === Attach: S1-MME + S11 + S5 ===
+   Ue ->> SrcGnb [label="RRC setup (radio)"]
+   SrcGnb ->> Mme [label="[S1-MME] Initial UE Msg"]
+   Mme ->> Sgw [label="[S11] Create Session Req"]
+   Sgw ->> Pgw [label="[S5] Create Session Req"]
+   Sgw <<- Pgw [label="[S5] Create Session Rsp"]
+   Mme <<- Sgw [label="[S11] Create Session Rsp"]
+   SrcGnb <<- Mme [label="[S1-MME] Init Ctxt Setup"]
+   Ue <<- SrcGnb [label="RRC reconfig (radio)"]
+
+   === User plane: S1-U + S5-U (uplink and downlink) ===
+   Ue ->> SrcGnb [label="UL IP data (radio)"]
+   SrcGnb ->> Sgw [label="[S1-U] GTP-U (UL)"]
+   Sgw ->> Pgw [label="[S5-U] GTP-U (UL)"]
+   Sgw <<- Pgw [label="[S5-U] GTP-U (DL)"]
+   SrcGnb <<- Sgw [label="[S1-U] GTP-U (DL)"]
+   Ue <<- SrcGnb [label="DL IP data (radio)"]
+
+   === X2 handover: X2 + S1 path switch + S11/S5 ===
+   SrcGnb ->> TgtGnb [label="[X2-C] HO Request"]
+   SrcGnb <<- TgtGnb [label="[X2-C] HO Request Ack"]
+   Ue <<- SrcGnb [label="RRC reconfig = HO cmd"]
+   SrcGnb ->> TgtGnb [label="[X2-C] SN Status Xfer"]
+   SrcGnb ->> TgtGnb [label="[X2-U] DL forwarding"]
+   Ue ->> TgtGnb [label="RACH + reconfig done"]
+   TgtGnb ->> Mme [label="[S1-MME] Path Switch Req"]
+   Mme ->> Sgw [label="[S11] Modify Flow Req"]
+   Sgw ->> Pgw [label="[S5] Modify Flow Req"]
+   Sgw <<- Pgw [label="[S5] Modify Flow Rsp"]
+   Mme <<- Sgw [label="[S11] Modify Flow Rsp"]
+   TgtGnb <<- Mme [label="[S1-MME] Path Switch Ack"]
+   TgtGnb ->> SrcGnb [label="[X2-C] UE Ctxt Release"]
+
+   === Release: S1-MME + S11 + S5 ===
+   TgtGnb ->> Ue [label="RRC release (radio)"]
+   TgtGnb ->> Mme [label="[S1-MME] E-RAB Release"]
+   Mme ->> Sgw [label="[S11] Delete Flow Cmd"]
+   Sgw ->> Pgw [label="[S5] Delete Flow Cmd"]
+   Sgw <<- Pgw [label="[S5] Delete Flow Req"]
+   Mme <<- Sgw [label="[S11] Delete Flow Req"]
+   Mme ->> Sgw [label="[S11] Delete Flow Rsp"]
+   Sgw ->> Pgw [label="[S5] Delete Flow Rsp"]
+}

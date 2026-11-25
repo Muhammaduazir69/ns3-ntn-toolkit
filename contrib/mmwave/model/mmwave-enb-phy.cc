@@ -680,7 +680,9 @@ MmWaveEnbPhy::UpdateUeSinrEstimate()
                                                                                           ueMob,
                                                                                           enbMob,
                                                                                           txPam,
-                                                                                          rxPam);
+                                                                                          rxPam,
+                                                                                          txPam->GetBeamformingVector(),
+                                                                                          rxPam->GetBeamformingVector());
             rxPsd = rxParams->psd;
         }
 

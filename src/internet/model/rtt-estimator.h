@@ -19,9 +19,9 @@ namespace ns3
 {
 
 /**
- * \ingroup tcp
+ * @ingroup tcp
  *
- * \brief Base class for all RTT Estimators
+ * @brief Base class for all RTT Estimators
  *
  * The RTT Estimator class computes an estimate of the round trip time
  * observed in a series of Time measurements.  The estimate is provided in
@@ -32,42 +32,40 @@ class RttEstimator : public Object
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     RttEstimator();
     /**
-     * \brief Copy constructor
-     * \param r the object to copy
+     * @brief Copy constructor
+     * @param r the object to copy
      */
     RttEstimator(const RttEstimator& r);
 
     ~RttEstimator() override;
 
-    TypeId GetInstanceTypeId() const override;
-
     /**
-     * \brief Add a new measurement to the estimator. Pure virtual function.
-     * \param t the new RTT measure.
+     * @brief Add a new measurement to the estimator. Pure virtual function.
+     * @param t the new RTT measure.
      */
     virtual void Measurement(Time t) = 0;
 
     /**
-     * \brief Copy object (including current internal state)
-     * \returns a copy of itself
+     * @brief Copy object (including current internal state)
+     * @returns a copy of itself
      */
     virtual Ptr<RttEstimator> Copy() const = 0;
 
     /**
-     * \brief Resets the estimation to its initial state.
+     * @brief Resets the estimation to its initial state.
      */
     virtual void Reset();
 
     /**
-     * \brief gets the RTT estimate.
-     * \return The RTT estimate.
+     * @brief gets the RTT estimate.
+     * @return The RTT estimate.
      */
     Time GetEstimate() const;
 
@@ -76,14 +74,14 @@ class RttEstimator : public Object
      * the same units as the estimate.  Mean deviation or standard deviation
      * are example quantities that could be provided here.
      *
-     * \brief gets the RTT estimate variation.
-     * \return The RTT estimate variation.
+     * @brief gets the RTT estimate variation.
+     * @return The RTT estimate variation.
      */
     Time GetVariation() const;
 
     /**
-     * \brief gets the number of samples used in the estimates
-     * \return the number of samples used in the estimates
+     * @brief gets the number of samples used in the estimates
+     * @return the number of samples used in the estimates
      */
     uint32_t GetNSamples() const;
 
@@ -91,15 +89,17 @@ class RttEstimator : public Object
     Time m_initialEstimatedRtt; //!< Initial RTT estimation
 
   protected:
+    void NotifyConstructionCompleted() override;
+
     Time m_estimatedRtt;       //!< Current estimate
     Time m_estimatedVariation; //!< Current estimate variation
     uint32_t m_nSamples;       //!< Number of samples
 };
 
 /**
- * \ingroup tcp
+ * @ingroup tcp
  *
- * \brief The "Mean--Deviation" RTT estimator, as discussed by Van Jacobson
+ * @brief The "Mean--Deviation" RTT estimator, as discussed by Van Jacobson
  *
  * This class implements the "Mean--Deviation" RTT estimator, as discussed
  * by Van Jacobson and Michael J. Karels, in
@@ -113,31 +113,29 @@ class RttMeanDeviation : public RttEstimator
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     RttMeanDeviation();
 
     /**
-     * \brief Copy constructor
-     * \param r the object to copy
+     * @brief Copy constructor
+     * @param r the object to copy
      */
     RttMeanDeviation(const RttMeanDeviation& r);
 
-    TypeId GetInstanceTypeId() const override;
-
     /**
-     * \brief Add a new measurement to the estimator.
-     * \param measure the new RTT measure.
+     * @brief Add a new measurement to the estimator.
+     * @param measure the new RTT measure.
      */
     void Measurement(Time measure) override;
 
     Ptr<RttEstimator> Copy() const override;
 
     /**
-     * \brief Resets the estimator.
+     * @brief Resets the estimator.
      */
     void Reset() override;
 
@@ -149,8 +147,8 @@ class RttMeanDeviation : public RttEstimator
      * Values of 1/32, 1/16, 1/8, 1/4, and 1/2 (i.e., within the possible
      * range of experimentation for this estimator) are supported.
      *
-     * \param val value to check
-     * \return log base 2 (1/val) if reciprocal power of 2, or zero if not
+     * @param val value to check
+     * @return log base 2 (1/val) if reciprocal power of 2, or zero if not
      */
     uint32_t CheckForReciprocalPowerOfTwo(double val) const;
     /**
@@ -158,9 +156,9 @@ class RttMeanDeviation : public RttEstimator
      * arithmetic, used when the values of Alpha and Beta support the
      * integer conversion.
      *
-     * \param m time measurement
-     * \param rttShift value corresponding to log base 2 (1/alpha)
-     * \param variationShift value corresponding to log base 2 (1/beta)
+     * @param m time measurement
+     * @param rttShift value corresponding to log base 2 (1/alpha)
+     * @param variationShift value corresponding to log base 2 (1/beta)
      */
     void IntegerUpdate(Time m, uint32_t rttShift, uint32_t variationShift);
     /**
@@ -168,7 +166,7 @@ class RttMeanDeviation : public RttEstimator
      * point arithmetic, used when the values of Alpha and Beta are not
      * both a reciprocal power of two.
      *
-     * \param m time measurement
+     * @param m time measurement
      */
     void FloatingPointUpdate(Time m);
     double m_alpha; //!< Filter gain for average

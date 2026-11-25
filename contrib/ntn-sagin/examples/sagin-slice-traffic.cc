@@ -21,6 +21,7 @@
  *
  * Quick test:  --simSeconds=60 --dataRateMbps=5
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
@@ -40,9 +41,12 @@
 #include "ns3/multi-layer-router.h"
 #include "ns3/sagin-slice-router.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <string>
+#include <vector>
 
 using namespace ns3;
 
@@ -232,8 +236,32 @@ main(int argc, char* argv[])
     std::printf("#   slice→layer transitions (chosen by SaginSliceRouter on live geometry):\n");
 
     Simulator::Stop(Seconds(simSeconds + 0.1));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4). The router's layer
+    // models hang off no node, so device-less context nodes carry copies of them in the
+    // scenario's ENU frame (the LEO's sub-satellite point at t = 0): the gateway at the
+    // origin, the HAPS at its station-keeping center, the SGP4 LEO and the GEO at zenith.
+    // The copies leave the router's models, and so the slice decisions, untouched.
+    NodeContainer ctxNodes;
+    ctxNodes.Create(4);
+    Ptr<ConstantPositionMobilityModel> gCtx = CreateObject<ConstantPositionMobilityModel>();
+    gCtx->SetPosition(Vector(0, 0, 0));
+    ctxNodes.Get(0)->AggregateObject(gCtx);
+    Ptr<ConstantPositionMobilityModel> hapsCtx = CreateObject<ConstantPositionMobilityModel>();
+    hapsCtx->SetPosition(Vector(0, 0, hapsAltKm * 1000.0));
+    ctxNodes.Get(1)->AggregateObject(hapsCtx);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> leoCtxSgp4 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    leoCtxSgp4->SetElementsSgp4(satElements[0]);
+    Ptr<NtnEnuProjectionMobilityModel> leoCtx = CreateObject<NtnEnuProjectionMobilityModel>();
+    leoCtx->SetSource(leoCtxSgp4);
+    leoCtx->SetReference(leoSubLat, leoSubLon, 0.0);
+    ctxNodes.Get(2)->AggregateObject(leoCtx);
+    Ptr<ConstantPositionMobilityModel> geoCtx = CreateObject<ConstantPositionMobilityModel>();
+    geoCtx->SetPosition(Vector(0, 0, geoAltKm * 1000.0));
+    ctxNodes.Get(3)->AggregateObject(geoCtx);
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 
+    std::vector<ns3::ntnobs::DatasetMetric> metrics;
     std::printf("# === per-slice measured results (in-band header) ===\n");
     std::printf("# %-6s  %4s  %10s  %10s  %9s  %8s  %8s\n",
                 "slice", "5QI", "rxPackets", "meanDelay", "jitter", "loss", "Mbps");
@@ -246,8 +274,27 @@ main(int argc, char* argv[])
                         slices[i].name, fs.fiveQi, (unsigned long)fs.rxPackets,
                         fs.MeanDelayMs(), fs.jitterMs, fs.LossRatio(),
                         fs.ThroughputMbps());
+            std::string key = slices[i].name;
+            for (auto& ch : key)
+            {
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            }
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "%lu", (unsigned long)fs.rxPackets);
+            metrics.push_back({key + "_rx_packets", buf, "measured"});
+            std::snprintf(buf, sizeof(buf), "%.4f", fs.MeanDelayMs());
+            metrics.push_back({key + "_mean_delay_ms", buf, "measured"});
+            std::snprintf(buf, sizeof(buf), "%.4f", fs.jitterMs);
+            metrics.push_back({key + "_jitter_ms", buf, "measured"});
+            std::snprintf(buf, sizeof(buf), "%.6f", fs.LossRatio());
+            metrics.push_back({key + "_loss_ratio", buf, "measured"});
+            std::snprintf(buf, sizeof(buf), "%.4f", fs.ThroughputMbps());
+            metrics.push_back({key + "_throughput_mbps", buf, "measured"});
         }
     }
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "sagin-slice-traffic", "measured", argc, argv, metrics);
     Simulator::Destroy();
     return 0;
 }

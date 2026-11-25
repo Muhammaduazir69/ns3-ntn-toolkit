@@ -7,8 +7,12 @@
 
 #include "node-distribution-scenario-interface.h"
 
-#include <ns3/random-variable-stream.h>
-#include <ns3/vector.h>
+#include "ns3/nr-export.h"
+#include "ns3/random-variable-stream.h"
+#include "ns3/vector.h"
+#include "ns3/wraparound-model.h"
+
+#include <optional>
 
 namespace ns3
 {
@@ -18,31 +22,31 @@ namespace ns3
  *
  * TODO: Documentation, tests
  */
-class HexagonalGridScenarioHelper : public NodeDistributionScenarioInterface
+class NR_EXPORT HexagonalGridScenarioHelper : public NodeDistributionScenarioInterface
 {
   public:
     /*
-     * \brief Set results directory for the gnuplot file
+     * @brief Set results directory for the gnuplot file
      */
     void SetResultsDir(std::string resultsDir);
 
     /*
-     * \brief Set simTag for the gnuplot file
+     * @brief Set simTag for the gnuplot file
      */
     void SetSimTag(std::string simTag);
 
     /**
-     * \brief HexagonalGridScenarioHelper
+     * @brief HexagonalGridScenarioHelper
      */
     HexagonalGridScenarioHelper();
 
     /**
-     * \brief ~HexagonalGridScenarioHelper
+     * @brief ~HexagonalGridScenarioHelper
      */
     ~HexagonalGridScenarioHelper() override;
 
     /**
-     * \brief Sets the number of outer rings of sites around the central site
+     * @brief Sets the number of outer rings of sites around the central site
      *
      * Relation between the number of rings and the number of rings.
      *
@@ -72,45 +76,103 @@ class HexagonalGridScenarioHelper : public NodeDistributionScenarioInterface
     void SetNumRings(uint8_t numRings);
 
     /**
-     * \brief Gets the radius of the hexagonal cell
-     * \returns Cell radius in meters
+     * @brief Gets the radius of the hexagonal cell
+     * @returns Cell radius in meters
      */
     double GetHexagonalCellRadius() const;
 
     /**
-     * \brief Returns the cell center coordinates
-     * \param sitePos Site position coordinates
-     * \param cellId Cell Id
+     * @brief Returns the cell center coordinates
+     * @param sitePos Site position coordinates
+     * @param cellId Cell Id
      */
     Vector GetHexagonalCellCenter(const Vector& sitePos, uint16_t cellId) const;
+
+    /**
+     * @brief Method to enable/disable the wraparound model
+     * @param installWraparoundModel Whether to install the wraparound model on nodes
+     */
+    void InstallWraparound(bool installWraparoundModel);
 
     // inherited
     void CreateScenario() override;
 
     /**
-     * \brief This function can be used to create a scenario with
+     * @brief This function can be used to create a scenario with
      *        UEs with mobility and define a percentage of UEs, if needed,
      *        that will have a random antenna height > 1.5 m
-     * \param speed UE speed
-     * \param percentage Percentage (decimal) of UEs with random antenna height > 1.5 m
+     * @param indoorUespeed Indoor UE speed
+     * @param outdoorUeSpeed Outdoor UE speed
+     * @param percentage Percentage (decimal) of UEs with random antenna height > 1.5 m
+     * @param mobilityModel Mobility model to pass for the UE with speed, default value
+     * "ns3::ConstantVelocityMobilityModel"
      */
-    void CreateScenarioWithMobility(const Vector& speed, double percentage);
+    void CreateScenarioWithMobility(
+        const Vector& indoorUespeed,
+        const Vector& outdoorUeSpeed,
+        double percentage,
+        const std::string& mobilityModel = "ns3::ConstantVelocityMobilityModel");
 
     /**
      * Assign a fixed random variable stream number to the random variables
      * used by this model.  Return the number of streams (possibly zero) that
      * have been assigned.
      *
-     * \param stream first stream index to use
-     * \return the number of stream indices assigned by this model
+     * @param stream first stream index to use
+     * @return the number of stream indices assigned by this model
      */
-    int64_t AssignStreams(int64_t stream);
+    int64_t AssignStreams(int64_t stream) override;
 
     /*
-     * \brief Sets the maximum distance between UE and the closest site.
+     * @brief Sets the maximum distance between UE and the closest site.
      * Note: used only in the function CreateScenarioWithMobility
      */
     void SetMaxUeDistanceToClosestSite(double maxUeDistanceToClosestSite);
+
+    /**
+     * @brief Retrieve associated wraparound model
+     * @return Associated wraparound model
+     */
+    Ptr<WraparoundModel> GetWraparoundModel() const;
+
+    void InstallPicoCells(bool installPicoCells);
+
+    /**
+     * @brief Restrict picocell deployment to ring-1 sites only.
+     *
+     * Follows the 3GPP TR 36.839 no-wraparound dense-A layout: with numRings >= 1,
+     * picocells are placed only around the 6 ring-1 sites (sites at distance ISD from
+     * the central site). The central site (ring 0) and ring-2 sites get no picos.
+     *
+     * @param ringOnePicosOnly true to restrict picos to ring-1 sites.
+     */
+    void SetRingOneOnlyPicos(bool ringOnePicosOnly);
+
+    /**
+     * @brief Restrict initial UE placement (and outdoor RandomDirection2d bounds) to a
+     *        disc centred on the central site.
+     *
+     * When set to a positive value, UEs are sampled uniformly within a disc of this
+     * radius around the central site instead of around their per-sector hexagons, and
+     * the outdoor mobility bounds are clamped to the circumscribing square of the disc.
+     * Set to 0 (default) to keep the legacy per-sector behavior.
+     *
+     * Note: ns-3's RandomDirection2dMobilityModel only supports rectangular bounds, so
+     * the outdoor confinement is approximated by the 2R x 2R square that circumscribes
+     * the disc. UEs can briefly enter the corners of that square; this is acceptable
+     * for TR 36.839-style handover calibration.
+     *
+     * @param radius UE disc radius in metres (0 disables disc-mode).
+     */
+    void SetUeDiscRadius(double radius);
+
+    /**
+     * @brief Number of "inner" sites (central + ring-1), i.e. sites at distance <= 1 ISD
+     *        from the central site. Used by the TR 36.839 no-wraparound layout where the
+     *        outermost sites act as interference-only and do not host any UEs.
+     * @return Inner-site count.
+     */
+    uint16_t GetNumInnerSites() const;
 
   private:
     uint8_t m_numRings{0}; //!< Number of outer rings of sites around the central site
@@ -128,6 +190,20 @@ class HexagonalGridScenarioHelper : public NodeDistributionScenarioInterface
 
     std::string m_resultsDir; //!< results directory for the gnuplot file
     std::string m_simTag;     //!< simTag for the gnuplot file
+
+    bool m_installWraparound{false};   //!< Whether to install wraparound model
+    Ptr<WraparoundModel> m_wraparound; //!< Pointer to wraparound model, if set
+
+    //!< Whether to install pico-cells according to TR 36.839, used for large-scale handover
+    //!< evaluation
+    bool m_installPicoCells{false};
+
+    //!< Whether to place picos only on the 6 ring-1 sites (TR 36.839 no-wraparound layout)
+    bool m_ringOnePicosOnly{false};
+
+    //!< When > 0, UEs are initially placed uniformly in a disc of this radius around the central
+    //!< site and outdoor mobility bounds are clamped to the disc's circumscribing square.
+    double m_ueDiscRadius{0.0};
 };
 
 } // namespace ns3

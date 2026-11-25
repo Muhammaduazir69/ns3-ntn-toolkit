@@ -25,8 +25,8 @@
 namespace ns3
 {
 
-static const double SNR_PRECISION = 2;                         //!< precision for SNR
-static const double TABLED_BASED_ERROR_MODEL_PRECISION = 1e-5; //!< precision for PER
+static const double SNR_PRECISION = 2;                        //!< precision for SNR
+static const double TABLE_BASED_ERROR_MODEL_PRECISION = 1e-5; //!< precision for PER
 
 NS_OBJECT_ENSURE_REGISTERED(TableBasedErrorRateModel);
 
@@ -70,7 +70,7 @@ TableBasedErrorRateModel::RoundSnr(dB_u snr, double precision) const
 {
     NS_LOG_FUNCTION(this << snr);
     const auto multiplier = std::round(std::pow(10.0, precision));
-    return std::floor(snr * multiplier + 0.5) / multiplier;
+    return dB_u{std::floor(snr * multiplier + 0.5) / multiplier};
 }
 
 std::optional<uint8_t>
@@ -232,7 +232,7 @@ TableBasedErrorRateModel::DoGetChunkSuccessRate(WifiMode mode,
         per = (1.0 - std::pow((1 - per), (static_cast<double>(size) / tableSize)));
     }
 
-    if (per < TABLED_BASED_ERROR_MODEL_PRECISION)
+    if (per < TABLE_BASED_ERROR_MODEL_PRECISION)
     {
         per = 0.0;
     }

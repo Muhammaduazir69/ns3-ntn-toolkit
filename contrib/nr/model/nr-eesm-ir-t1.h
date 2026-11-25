@@ -8,31 +8,33 @@
 #include "nr-eesm-ir.h"
 #include "nr-eesm-t1.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 /**
- * \ingroup error-models
- * \brief The NrEesmIrT1 class
+ * @ingroup error-models
+ * @brief The NrEesmIrT1 class
  *
  * Class that implements the IR-HARQ combining with Table 1. It can be used
  * directly in the code.
  */
-class NrEesmIrT1 : public NrEesmIr
+class NR_EXPORT NrEesmIrT1 : public NrEesmIr
 {
   public:
     /**
-     * \brief Get the type id of the object
-     * \return the type id of the object
+     * @brief Get the type id of the object
+     * @return the type id of the object
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief NrEesmIrT1 constructor
+     * @brief NrEesmIrT1 constructor
      */
     NrEesmIrT1();
     /**
-     * \brief ~NrEesmIrT1 deconstructor
+     * @brief ~NrEesmIrT1 deconstructor
      */
     ~NrEesmIrT1() override;
 

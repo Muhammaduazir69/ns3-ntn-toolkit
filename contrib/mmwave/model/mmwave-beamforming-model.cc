@@ -349,8 +349,13 @@ MmWaveSvdBeamforming::ComputeBeamformingVectors(
             std::complex<double> aSum(0, 0);
             for (uint16_t aIndex = 0; aIndex < aSize; aIndex++)
             {
-                aSum += std::conj(narrowbandChannel(aIndex, b1Index) *
-                                  narrowbandChannel(aIndex, b2Index));
+                // ntn: (H^H H)(b1, b2) = sum_a conj(H(a, b1)) H(a, b2). The former
+                // conj(H(a, b1) H(a, b2)) is not Hermitian, and its dominant eigenvector missed
+                // the right singular vector by 0.65 dB on average and up to 6.4 dB (Monte Carlo,
+                // 2x64 LOS + scatter), a channel-dependent loss that showed as SINR outliers and
+                // a pass-slope error in the TR 38.821 calibration.
+                aSum += std::conj(narrowbandChannel(aIndex, b1Index)) *
+                        narrowbandChannel(aIndex, b2Index);
             }
             bQ(b1Index, b2Index) += aSum;
         }
@@ -378,12 +383,13 @@ MmWaveSvdBeamforming::ComputeBeamformingVectors(
     }
 
     // calculate beamforming vector from spatial correlation matrix.
+    // ns-3.48 port: since ns-3.48 (#1314) ThreeGppSpectrumPropagationLossModel combines the u-side
+    // (receive) array with the CONJUGATE of its beamforming vector, w^H H. The u-side vector is
+    // therefore the eigenvector itself; the old explicit conjugation here (written for the earlier
+    // w^T H combining) now conjugated it twice and made the receive combining incoherent (measured:
+    // TR 38.821 calibration SINR 28.6 dB below the closed form, spread 14.6 dB). The resulting gain
+    // equals the ns-3.43 one exactly.
     PhasedArrayModel::ComplexVector aW = GetFirstEigenvector(aQ);
-
-    for (size_t i = 0; i < aW.GetSize(); ++i)
-    {
-        aW[i] = std::conj(aW[i]);
-    }
 
     return std::make_pair(bW, aW);
 }
@@ -663,7 +669,9 @@ MmWaveCodebookBeamforming::ComputeBeamformingCodebookMatrix(
                                                             thisMob,
                                                             otherMob,
                                                             m_antenna,
-                                                            otherAntenna);
+                                                            otherAntenna,
+                                                            m_antenna->GetBeamformingVector(),
+                                                            otherAntenna->GetBeamformingVector());
                 auto rxPsd = returnedRxParams->psd;
                 avgRxPsd = Sum(*rxPsd) / (rxPsd->GetSpectrumModel()->GetNumBands());
             }

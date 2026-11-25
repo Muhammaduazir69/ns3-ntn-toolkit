@@ -16,18 +16,18 @@ namespace tests
 {
 
 /**
- * \file
- * \ingroup core-tests
+ * @file
+ * @ingroup core-tests
  * SplitString test suite implementation.
  */
 
 /**
- * \ingroup core-tests
- * \defgroup environ-var-tests Environment variable caching tests
+ * @ingroup core-tests
+ * @defgroup environ-var-tests Environment variable caching tests
  */
 
 /**
- * \ingroup core-tests
+ * @ingroup core-tests
  *
  * SplitString tests.
  */
@@ -47,16 +47,17 @@ class SplitStringTestCase : public TestCase
     /**
      * Read \p str and check that it contains only the key,value pairs
      * from \p expect.
-     * \param where The test condition being checked.
-     * \param str The environment variable to parse and check.
-     * \param expect The set of key,values expected.
+     * @param where The test condition being checked.
+     * @param str The environment variable to parse and check.
+     * @param expect The set of key,values expected.
      */
     void Check(const std::string& where, const std::string& str, const StringVector& expect);
 
     /** Test suite delimiter. */
     const std::string m_delimiter{":|:"};
 
-}; // class SplitStringTestCase
+    // end of class SplitStringTestCase
+};
 
 SplitStringTestCase::SplitStringTestCase()
     : TestCase("split-string")
@@ -120,7 +121,7 @@ SplitStringTestCase::DoRun()
 }
 
 /**
- * \ingroup typeid-tests
+ * @ingroup typeid-tests
  *
  * TypeId test suites.
  */
@@ -137,7 +138,7 @@ SplitStringTestSuite::SplitStringTestSuite()
 }
 
 /**
- * \ingroup environ-var-tests
+ * @ingroup environ-var-tests
  * Static variable for test initialization.
  */
 static SplitStringTestSuite g_SplitStringTestSuite;

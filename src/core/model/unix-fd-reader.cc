@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2010 The Boeing Company
  *
@@ -10,7 +9,6 @@
 #include "fatal-error.h"
 #include "fd-reader.h"
 #include "log.h"
-#include "simple-ref-count.h"
 #include "simulator.h"
 
 #include <cerrno>
@@ -21,8 +19,8 @@
 #include <unistd.h> // close()
 
 /**
- * \file
- * \ingroup system
+ * @file
+ * @ingroup system
  * ns3::FdReader implementation.
  */
 

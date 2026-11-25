@@ -25,6 +25,11 @@ class HapsTrajectoryMobilityModel : public MobilityModel
 {
   public:
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<HapsTrajectoryMobilityModel>(*this);
+    }
     HapsTrajectoryMobilityModel();
     ~HapsTrajectoryMobilityModel() override = default;
 

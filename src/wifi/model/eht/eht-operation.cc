@@ -8,7 +8,7 @@
 
 #include "eht-operation.h"
 
-#include <ns3/assert.h>
+#include "ns3/assert.h"
 
 #include <algorithm>
 
@@ -18,28 +18,12 @@ namespace ns3
 void
 EhtOperation::Print(std::ostream& os) const
 {
-    os << "EHT Operation=" << +m_params.opInfoPresent << "|" << +m_params.disabledSubchBmPresent
-       << "|" << +m_params.defaultPeDur << "|" << +m_params.grpBuIndLimit << "|"
-       << +m_params.grpBuExp << "|[";
-    for (const auto& maxRxNss : m_mcsNssSet.maxRxNss)
-    {
-        os << +maxRxNss << "|";
-    }
-    os << "]|[";
-    for (const auto& maxTxNss : m_mcsNssSet.maxTxNss)
-    {
-        os << +maxTxNss << "|";
-    }
-    os << "]";
+    os << "EHT Operation=[";
     if (m_opInfo.has_value())
     {
-        os << "|" << +m_opInfo->control.channelWidth << "|" << +m_opInfo->ccfs0 << "|"
-           << +m_opInfo->ccfs1;
-        if (m_opInfo->disabledSubchBm.has_value())
-        {
-            os << "|" << m_opInfo->disabledSubchBm.value();
-        }
+        os << "Channel Width: " << +m_opInfo->control.channelWidth;
     }
+    os << "]";
 }
 
 void
@@ -64,10 +48,10 @@ EhtOperation::EhtOpParams::Deserialize(Buffer::Iterator start)
 
 /**
  * set the max Tx/Rx NSS for input MCS index range
- * \param vec vector of max NSS per MCS
- * \param maxNss max NSS for input MCS range
- * \param mcsStart MCS index start
- * \param mcsEnd MCS index end
+ * @param vec vector of max NSS per MCS
+ * @param maxNss max NSS for input MCS range
+ * @param mcsStart MCS index start
+ * @param mcsEnd MCS index end
  */
 void
 SetMaxNss(std::vector<uint8_t>& vec, uint8_t maxNss, uint8_t mcsStart, uint8_t mcsEnd)
@@ -83,10 +67,10 @@ SetMaxNss(std::vector<uint8_t>& vec, uint8_t maxNss, uint8_t mcsStart, uint8_t m
 
 /**
  * Get the max Tx/Rx NSS for input MCS index range
- * \param vec vector of max NSS per MCS
- * \param mcsStart MCS index start
- * \param mcsEnd MCS index end
- * \return max Rx NSS
+ * @param vec vector of max NSS per MCS
+ * @param mcsStart MCS index start
+ * @param mcsEnd MCS index end
+ * @return max Rx NSS
  */
 uint32_t
 GetMaxNss(const std::vector<uint8_t>& vec, uint8_t mcsStart, uint8_t mcsEnd)
@@ -111,13 +95,13 @@ EhtOperation::EhtBasicMcsNssSet::Serialize(Buffer::Iterator& start) const
                    (GetMaxNss(maxRxNss, 8, 9) << 8) | (GetMaxNss(maxTxNss, 8, 9) << 12) |
                    (GetMaxNss(maxRxNss, 10, 11) << 16) | (GetMaxNss(maxTxNss, 10, 11) << 20) |
                    (GetMaxNss(maxRxNss, 12, 13) << 24) | (GetMaxNss(maxTxNss, 12, 13) << 28);
-    start.WriteHtolsbU32(val);
+    start.WriteU32(val);
 }
 
 uint16_t
 EhtOperation::EhtBasicMcsNssSet::Deserialize(Buffer::Iterator start)
 {
-    auto subfield = start.ReadLsbtohU32();
+    auto subfield = start.ReadU32();
     auto rxNssMcs0_7 = subfield & 0xf; // Max Rx NSS MCS 0-7
     SetMaxNss(maxRxNss, rxNssMcs0_7, 0, 7);
     auto txNssMcs0_7 = (subfield >> 4) & 0xf; // Max Tx NSS MCS 0-7

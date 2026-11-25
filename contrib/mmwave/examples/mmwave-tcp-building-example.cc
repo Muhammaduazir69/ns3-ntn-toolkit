@@ -333,46 +333,46 @@ main(int argc, char* argv[])
     {
     case 1: {
         Ptr<Building> building;
-        building = Create<Building>();
+        building = CreateObject<Building>();
         building->SetBoundaries(Box(40.0, 60.0, 0.0, 6, 0.0, 15.0));
         break;
     }
     case 2: {
         Ptr<Building> building1;
-        building1 = Create<Building>();
+        building1 = CreateObject<Building>();
         building1->SetBoundaries(Box(60.0, 64.0, 0.0, 2.0, 0.0, 1.5));
 
         Ptr<Building> building2;
-        building2 = Create<Building>();
+        building2 = CreateObject<Building>();
         building2->SetBoundaries(Box(60.0, 64.0, 6.0, 8.0, 0.0, 15.0));
 
         Ptr<Building> building3;
-        building3 = Create<Building>();
+        building3 = CreateObject<Building>();
         building3->SetBoundaries(Box(60.0, 64.0, 10.0, 11.0, 0.0, 15.0));
         break;
     }
     case 3: {
         Ptr<Building> building1;
-        building1 = Create<Building>();
+        building1 = CreateObject<Building>();
         building1->SetBoundaries(Box(69.5, 70.0, 4.5, 5.0, 0.0, 1.5));
 
         Ptr<Building> building2;
-        building2 = Create<Building>();
+        building2 = CreateObject<Building>();
         building2->SetBoundaries(Box(60.0, 60.5, 9.5, 10.0, 0.0, 1.5));
 
         Ptr<Building> building3;
-        building3 = Create<Building>();
+        building3 = CreateObject<Building>();
         building3->SetBoundaries(Box(54.0, 54.5, 5.5, 6.0, 0.0, 1.5));
         Ptr<Building> building4;
-        building1 = Create<Building>();
+        building1 = CreateObject<Building>();
         building1->SetBoundaries(Box(60.0, 60.5, 6.0, 6.5, 0.0, 1.5));
 
         Ptr<Building> building5;
-        building2 = Create<Building>();
+        building2 = CreateObject<Building>();
         building2->SetBoundaries(Box(70.0, 70.5, 0.0, 0.5, 0.0, 1.5));
 
         Ptr<Building> building6;
-        building3 = Create<Building>();
+        building3 = CreateObject<Building>();
         building3->SetBoundaries(Box(50.0, 50.5, 4.0, 4.5, 0.0, 1.5));
         break;
         break;

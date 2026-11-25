@@ -35,7 +35,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-manager-example --wifiManager=Aarf --standard=802.11a --maxSlrc=1 --stepTime=0.1",
+        "wifi-manager-example --wifiManager=Aarf --standard=802.11a --maxRetryCount=1 --stepTime=0.1",
         "True",
         "True",
     ),
@@ -62,7 +62,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-manager-example --wifiManager=Aarfcd --standard=802.11a --maxSlrc=1 --stepTime=0.1",
+        "wifi-manager-example --wifiManager=Aarfcd --standard=802.11a --maxRetryCount=1 --stepTime=0.1",
         "True",
         "True",
     ),
@@ -93,7 +93,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-manager-example --wifiManager=Amrr --standard=802.11a --maxSlrc=1 --stepTime=0.1",
+        "wifi-manager-example --wifiManager=Amrr --standard=802.11a --maxRetryCount=1 --stepTime=0.1",
         "True",
         "True",
     ),
@@ -120,7 +120,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-manager-example --wifiManager=Arf --standard=802.11a --maxSlrc=1 --stepTime=0.1",
+        "wifi-manager-example --wifiManager=Arf --standard=802.11a --maxRetryCount=1 --stepTime=0.1",
         "True",
         "True",
     ),
@@ -147,7 +147,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-manager-example --wifiManager=Cara --standard=802.11a --maxSlrc=1 --stepTime=0.1",
+        "wifi-manager-example --wifiManager=Cara --standard=802.11a --maxRetryCount=1 --stepTime=0.1",
         "True",
         "True",
     ),
@@ -174,7 +174,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-manager-example --wifiManager=Onoe --standard=802.11a --maxSlrc=1 --stepTime=0.1",
+        "wifi-manager-example --wifiManager=Onoe --standard=802.11a --maxRetryCount=1 --stepTime=0.1",
         "True",
         "True",
     ),
@@ -201,7 +201,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-manager-example --wifiManager=Rraa --standard=802.11a --maxSlrc=1 --stepTime=0.1",
+        "wifi-manager-example --wifiManager=Rraa --standard=802.11a --maxRetryCount=1 --stepTime=0.1",
         "True",
         "True",
     ),
@@ -232,7 +232,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-manager-example --wifiManager=Minstrel --standard=802.11a --maxSlrc=1 --stepTime=0.1",
+        "wifi-manager-example --wifiManager=Minstrel --standard=802.11a --maxRetryCount=1 --stepTime=0.1",
         "True",
         "True",
     ),
@@ -2139,6 +2139,16 @@ cpp_examples = [
         "False",
     ),
     (
+        "wifi-manager-example --wifiManager=MinstrelHt --standard=802.11be-6GHz --serverChannelWidth=320 --clientChannelWidth=320 --serverShortGuardInterval=1600 --clientShortGuardInterval=1600 --serverNss=1 --clientNss=1 --stepTime=0.1",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-manager-example --wifiManager=Ideal --standard=802.11be-6GHz --serverChannelWidth=320 --clientChannelWidth=320 --serverShortGuardInterval=1600 --clientShortGuardInterval=1600 --serverNss=1 --clientNss=1 --stepTime=0.1",
+        "True",
+        "True",
+    ),
+    (
         "wifi-test-interference-helper --enableCapture=0 --txPowerA=5 --txPowerB=15 --delay=10us --txModeA=OfdmRate6Mbps --txModeB=OfdmRate6Mbps --checkResults=1 --expectRxASuccessful=0 --expectRxBSuccessful=0",
         "True",
         "True",
@@ -2164,22 +2174,22 @@ cpp_examples = [
         "False",
     ),
     (
-        "wifi-bianchi --validate --phyMode=OfdmRate54Mbps --nMinStas=5 --nMaxStas=10 --duration=5",
+        "wifi-bianchi --validate --phyMode=OfdmRate54Mbps --nMinStas=5 --nMaxStas=10 --duration=5 --RngSeed=10 --RngRun=15",
         "False",
         "False",
     ),  # TODO: run from N=5 to N=50 for 100s (TAKES_FOREVER) when issue #170 is fixed
     (
-        "wifi-bianchi --validate --phyMode=OfdmRate6Mbps --nMinStas=5 --nMaxStas=10 --duration=15",
+        "wifi-bianchi --validate --phyMode=OfdmRate6Mbps --nMinStas=5 --nMaxStas=10 --duration=15 --RngSeed=10 --RngRun=15",
         "True",
         "False",
     ),  # TODO: run from N=5 to N=50 for 400s (TAKES_FOREVER) when issue #170 is fixed
     (
-        "wifi-bianchi --validate --phyMode=OfdmRate54Mbps --nMinStas=5 --nMaxStas=10 --duration=5 --infra",
+        "wifi-bianchi --validate --phyMode=OfdmRate54Mbps --nMinStas=5 --nMaxStas=10 --duration=5 --infra --RngSeed=10 --RngRun=14",
         "False",
         "False",
     ),  # TODO: run from N=5 to N=50 for 100s (TAKES_FOREVER) when issue #170 is fixed
     (
-        "wifi-bianchi --validate --phyMode=OfdmRate6Mbps --nMinStas=5 --nMaxStas=10 --duration=20 --infra",
+        "wifi-bianchi --validate --phyMode=OfdmRate6Mbps --nMinStas=5 --nMaxStas=10 --duration=20 --infra --RngSeed=10 --RngRun=14",
         "False",
         "False",
     ),  # TODO: run from N=5 to N=50 for 600s (TAKES_FOREVER) when issue #170 is fixed

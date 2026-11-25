@@ -14,38 +14,38 @@
 namespace ns3
 {
 /**
- * \ingroup applications
- * \brief Header with a sequence, a timestamp, and a "size" attribute
+ * @ingroup applications
+ * @brief Header with a sequence, a timestamp, and a "size" attribute
  *
  * This header adds a size attribute to the sequence number and timestamp
  * of class \c SeqTsHeader.  The size attribute can be used to track
  * application data units for stream-based sockets such as TCP.
  *
- * \sa ns3::SeqTsHeader
+ * @sa ns3::SeqTsHeader
  */
 class SeqTsSizeHeader : public SeqTsHeader
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief constructor
+     * @brief constructor
      */
     SeqTsSizeHeader();
 
     /**
-     * \brief Set the size information that the header will carry
-     * \param size the size
+     * @brief Set the size information that the header will carry
+     * @param size the size
      */
     void SetSize(uint64_t size);
 
     /**
-     * \brief Get the size information that the header is carrying
-     * \return the size
+     * @brief Get the size information that the header is carrying
+     * @return the size
      */
     uint64_t GetSize() const;
 

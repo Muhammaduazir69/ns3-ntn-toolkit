@@ -9,30 +9,28 @@
 #ifndef WIFI_MAC_TRAILER_H
 #define WIFI_MAC_TRAILER_H
 
+#include "wifi-standard-constants.h"
+
 #include "ns3/trailer.h"
+#include "ns3/wifi-export.h"
 
 namespace ns3
 {
 
 /**
- * The length in octets of the IEEE 802.11 MAC FCS field
- */
-static const uint16_t WIFI_MAC_FCS_LENGTH = 4;
-
-/**
- * \ingroup wifi
+ * @ingroup wifi
  *
  * Implements the IEEE 802.11 MAC trailer
  */
-class WifiMacTrailer : public Trailer
+class WIFI_EXPORT WifiMacTrailer : public Trailer
 {
   public:
     WifiMacTrailer();
     ~WifiMacTrailer() override;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     TypeId GetInstanceTypeId() const override;

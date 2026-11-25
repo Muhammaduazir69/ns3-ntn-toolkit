@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -426,9 +427,20 @@ class Sgp4GeocentricContractTest : public TestCase
         // The elevation the channel model forms must be a real elevation.
         auto gs = CreateObject<GeocentricConstantPositionMobilityModel>();
         gs->SetGeographicPosition(Vector(45.0, 0.0, 0.0));
+        // Since ns-3.49 (#1308) the elevation is signed: negative below the horizon (the NTN
+        // loss models then return their defined large loss, #1354). Check it is a real angle and
+        // that its sign agrees with the geometry: the satellite is above the station's horizon
+        // iff (sat - gs) points away from the Earth at the station.
         const double elev = gs->GetElevationAngle(sat);
-        NS_TEST_ASSERT_MSG_GT(elev, 0.0, "elevation must be positive and finite");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(elev), true, "elevation must be finite");
+        NS_TEST_ASSERT_MSG_GT(elev, -90.001, "elevation cannot be below the nadir");
         NS_TEST_ASSERT_MSG_LT(elev, 90.001, "elevation cannot exceed the zenith");
+        const Vector pg = gs->GetGeocentricPosition();
+        const Vector ps = sat->GetGeocentricPosition();
+        const Vector d = ps - pg;
+        const double up = (pg.x * d.x + pg.y * d.y + pg.z * d.z);
+        NS_TEST_ASSERT_MSG_EQ((elev > 0.0), (up > 0.0),
+                              "the elevation sign must match the satellite's side of the horizon");
 
         Simulator::Destroy();
     }
@@ -2160,7 +2172,7 @@ class SatLinkErrorModelBlerTest : public TestCase
 {
   public:
     SatLinkErrorModelBlerTest()
-        : TestCase("NtnSatLinkErrorModel C/N0 -> BLER (replaces binary gate)")
+        : TestCase("NtnSatLinkErrorModel C-N0 -> BLER (replaces binary gate)")
     {
     }
 
@@ -3029,9 +3041,15 @@ class GeocentricAdapterElevationTest : public TestCase
         GlobalValue::Bind("GeocentricElevationModel", StringValue("Legacy"));
         NS_TEST_ASSERT_MSG_EQ_TOL(fixedUe, ref, 0.01, "elevation at the terminal");
         NS_TEST_ASSERT_MSG_EQ_TOL(fixedSat, ref, 0.01, "same value whichever end is asked");
-        NS_TEST_ASSERT_MSG_GT(std::abs(legacy - ref), 2.0,
-                              "the stock convention measures at the satellite here (documented "
-                              "reason for the opt-in patch)");
+        // ns-3.49 (#1308) measures the stock elevation at the lower terminal about its radial
+        // vertical (it measured at the satellite before, > 2 deg off here, the reason for the
+        // opt-in patch). What remains is the radial vs geodetic normal at 45 deg latitude
+        // (~0.19 deg); Wgs84LowerEnd removes it.
+        NS_TEST_ASSERT_MSG_LT(std::abs(legacy - ref), 0.5,
+                              "ns-3.49 stock elevation is measured at the terminal");
+        NS_TEST_ASSERT_MSG_LT(std::abs(fixedUe - ref),
+                              std::abs(legacy - ref),
+                              "the WGS-84 option is still the closer one");
     }
 };
 
@@ -3141,6 +3159,102 @@ class SatLinkAltitudeFrameCacheTest : public TestCase
     }
 };
 
+// ---------------------------------------------------------------------------
+// Plan item L5-11: orbit accuracy against an independent propagator. Reference
+// positions are Skyfield 1.54 (Rhodes) EarthSatellite.at(t).frame_xyz(itrs) for
+// four real element sets: a 360 km Starlink direct-to-cell satellite (high drag),
+// a sun-synchronous Kineis, an ORBCOMM and the geostationary GOES-16 (deep-space
+// SDP4 branch). Both sides run Vallado SGP4, so the residual is the TEME->Earth
+// frame step: the toolkit rotates by GMST(UTC) while Skyfield uses UT1 and the
+// full TEME->ITRS chain; the difference is the UT1-UTC rotation (|DUT1| < 0.9 s).
+// ---------------------------------------------------------------------------
+struct OrbitRefCase
+{
+    const char* name;
+    const char* l1;
+    const char* l2;
+    std::vector<std::pair<double, std::array<double, 3>>> ref; // (s after epoch, ITRS m)
+};
+
+class Sgp4VsSkyfieldTest : public TestCase
+{
+  public:
+    Sgp4VsSkyfieldTest()
+        : TestCase("SGP4 Earth-fixed positions agree with Skyfield (ITRS) for LEO, VLEO and GEO TLEs")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::vector<OrbitRefCase> cases = {
+    {"STARLINK-11072_[DTC]",
+     "1 58705U 24002A   26274.38140145  .00000999  00000+0  13100-4 0  9995",
+     "2 58705  53.1588 340.0291 0000987  74.8203 285.2924 15.69717839158747",
+     {
+            {0.0, {-6576148.526582162, -1470626.8330605861, 0.33809773168469764}},
+            {3600.0, {3942879.964982611, 3166052.415552968, -4460557.175237399}},
+            {21600.0, {601127.9941019526, 6270471.440365414, -2400588.523815956}},
+            {86400.0, {1346766.2206874418, 4080833.1173559227, -5196564.357985481}}
+     }},
+    {"KINEIS-1B",
+     "1 60079U 24114A   26302.32546623  .00000418  00000+0  61115-4 0  9998",
+     "2 60079  97.9758 325.8427 0003145  47.1480 312.9996 14.80803001127258",
+     {
+            {0.0, {-6920432.520878177, 1094482.513901695, 1.663346011640282}},
+            {3600.0, {4478596.360881778, -2709167.7485553804, -4668517.2736148825}},
+            {21600.0, {-1252264.5348114984, -1986384.2950846443, -6609469.927536158}},
+            {86400.0, {-2253738.436942306, -582949.3708724795, -6615554.983858859}}
+     }},
+    {"ORBCOMM_FM06",
+     "1 25118U 97084G   26302.24489054  .00000580  00000+0  19422-3 0  9997",
+     "2 25118  45.0115 127.2055 0000878 154.0685  15.9244 14.47831449513817",
+     {
+            {0.0, {-7022826.40453004, 687249.4425068351, 866041.8811145196}},
+            {3600.0, {6684154.4246403705, 734686.2672243121, 2305020.157790592}},
+            {21600.0, {2829481.6001006267, -5875256.825276647, 2827591.124605053}},
+            {86400.0, {6831746.294047951, -1635800.5559681454, -1113674.1749123672}}
+     }},
+    {"GOES_16",
+     "1 41866U 16071A   26327.49440405 -.00000069  00000+0  00000+0 0  9994",
+     "2 41866   0.7341  83.4098 0002964 175.4621 236.8917  1.00270500 36708",
+     {
+            {0.0, {-10742613.727401212, -40777932.025005504, 422094.8374559278}},
+            {3600.0, {-10743986.639918657, -40773747.97826192, 488721.21627792605}},
+            {21600.0, {-10728274.122964786, -40764756.7254064, 310081.04996032803}},
+            {86400.0, {-10743773.731962025, -40777354.77396207, 430843.0928049694}}
+     }}
+        };
+        for (const auto& c : cases)
+        {
+            ns3::ntncon::TleRecord rec;
+            rec.name = c.name;
+            rec.line1 = c.l1;
+            rec.line2 = c.l2;
+            Ptr<ns3::ntncon::Sgp4MobilityModel> m = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+            m->SetUseVallado(true);
+            NS_TEST_ASSERT_MSG_EQ(m->SetTle(rec), true, "TLE must parse: " << c.name);
+            NS_TEST_ASSERT_MSG_EQ(m->IsUsingSgp4(), true, "must run Vallado SGP4: " << c.name);
+            for (const auto& [dt, r] : c.ref)
+            {
+                Vector p, v;
+                m->GetEcefStateAt(Seconds(dt), p, v);
+                const double err = std::sqrt((p.x - r[0]) * (p.x - r[0]) + (p.y - r[1]) * (p.y - r[1]) +
+                                             (p.z - r[2]) * (p.z - r[2]));
+                const double radius = std::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+                // Measured 24 Nov 2026: 15-46 m (LEO), 262 m (GEO), a residual that scales with
+                // radius (about 6.3 urad: 0.09 s of Earth rotation, the size of UT1-UTC, which
+                // the toolkit does not apply). The bound, 0.15 s of rotation plus 20 m, keeps
+                // that margin and fails on any real regression (a frame, epoch or unit error).
+                const double tol = 0.15 * 7.2921159e-5 * radius + 20.0;
+                std::cout << "[sgp4-vs-skyfield] " << c.name << " t+" << dt << " s: |d| = " << err
+                          << " m (bound " << tol << " m)\n";
+                NS_TEST_ASSERT_MSG_LT(err, tol, c.name << " at t+" << dt << " s differs by " << err << " m");
+            }
+        }
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
@@ -3193,6 +3307,7 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new ContactSchedulerEventDrivenTransitionTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerIslCandidateTest, Duration::QUICK);
         AddTestCase(new SatLinkAltitudeFrameCacheTest, Duration::QUICK);
+        AddTestCase(new Sgp4VsSkyfieldTest, Duration::QUICK);
     }
 };
 

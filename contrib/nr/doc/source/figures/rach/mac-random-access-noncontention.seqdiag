@@ -1,0 +1,31 @@
+
+diagram {
+   UeRrc;  UeMac; UePhy; GnbRrc; GnbPhy; GnbMac; Sched;
+
+   GnbRrc ->> GnbRrc [label="AddUe"]
+   GnbRrc ->> GnbMac [label="ConfigureUe (C-RNTI = T-C-RNTI)"]
+   GnbMac ->> Sched  [label="CSCHED_UE_CONFIG_REQ"]
+   GnbMac <<- Sched  [label="CSCHED_UE_CONFIG_CNF"]
+   GnbMac ->> Sched  [label="CSCHED_LC_CONFIG_REQ (SRB1)"]
+   GnbMac <<- Sched  [label="CSCHED_LC_CONFIG_CNF"]
+   GnbMac <<- GnbRrc [label=" AllocateNcRaPreamble (T-C-RNTI)"]
+   GnbMac ->> GnbRrc [label="rach preamble id"]
+   UeRrc <<- GnbRrc [label="rach preamble id (e.g., within handoverCommand inside X2 HO REQ ACK"]
+   UeRrc ->> UeMac [label="StartNonContentionBasedRandomAccessProcedure"]
+   UeMac ->> UeMac [label="start RAR timeout"]
+   UeMac ->> UePhy [label="SendRachPreamble"]
+   UePhy ->> GnbPhy [label="NrRachPreambleMessage"]
+   GnbPhy ->> GnbMac [label="ReceiveRachPreamble (this UE)"]
+   GnbMac ->> GnbMac [label="add to list of received Rach preamble"]
+   GnbPhy ->> GnbMac [label="SlotUlIndication (ProcessRaPreambles)"]
+   GnbMac ->> GnbMac [label="preamble matches known T-C-RNTI"]
+   GnbMac ->> Sched [label="SCHED_DL_RACH_INFO_REQ (T-C-RNTI list)"]
+   GnbMac ->> Sched [label="SCHED_DL_TRIGGER_REQ"]
+   GnbMac <<- Sched  [label="SCHED_DL_CONFIG_IND (RAR list with UL grant per RNTI)"]
+   GnbMac ->> GnbMac [label="build RARs"]
+   GnbPhy <<- GnbMac [label="SendControlMessage (RARs)"]
+   UePhy <<- GnbPhy [label="RARs as NrRarMessage"]
+   UeMac <<- UePhy [label="ReceiveControlMessage (RARs)"]
+   UeMac ->> UeMac [label="RecvRaResponse"]
+   UeRrc <<- UeMac [label="NotifyRandomAccessSuccessful"]
+}

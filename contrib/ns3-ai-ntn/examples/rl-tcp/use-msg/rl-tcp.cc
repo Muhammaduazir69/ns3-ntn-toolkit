@@ -19,7 +19,7 @@
  * Modify: Pengyu Liu <eic_lpy@hust.edu.cn>
  *         Hao Yin <haoyin@uw.edu>
  *         Muyuan Shen <muyuan_shen@hust.edu.cn>
- * Topology:
+ * Topology (the bottleneck is a LEO bent-pipe hop, see ../leo-bottleneck.h):
  *
  *   Left Leafs (Clients)                       Right Leafs (Sinks)
  *           |            \                    /        |
@@ -30,6 +30,10 @@
  *
  */
 
+#include "../leo-bottleneck.h"
+
+#include "ns3/ntn-dataset-writer.h"
+#include <filesystem>
 #include "ns3/ns3-ai-ntn-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
@@ -58,6 +62,41 @@ static void
 CountRxPkts(uint32_t sinkId, Ptr<const Packet> packet, const Address& srcAddr)
 {
     rxPkts[sinkId]++;
+}
+
+static uint64_t g_retransmissions = 0;
+static double g_rttSumS = 0.0;
+static uint64_t g_rttSamples = 0;
+
+static void
+CountRetransmission(Ptr<const Packet>,
+                    const TcpHeader&,
+                    const Address&,
+                    const Address&,
+                    Ptr<const TcpSocketBase>)
+{
+    ++g_retransmissions;
+}
+
+static void
+RecordRtt(Time, Time rtt)
+{
+    if (rtt.IsStrictlyPositive())
+    {
+        g_rttSumS += rtt.GetSeconds();
+        ++g_rttSamples;
+    }
+}
+
+/// Connect the RTT and retransmission traces of the sender sockets of one left leaf.
+static void
+ConnectSenderTraces(uint32_t nodeId)
+{
+    const std::string base =
+        "/NodeList/" + std::to_string(nodeId) + "/$ns3::TcpL4Protocol/SocketList/*/";
+    Config::ConnectWithoutContextFailSafe(base + "LastRTT", MakeCallback(&RecordRtt));
+    Config::ConnectWithoutContextFailSafe(base + "Retransmission",
+                                          MakeCallback(&CountRetransmission));
 }
 
 static void
@@ -91,6 +130,9 @@ main(int argc, char* argv[])
     bool sack = true;
     std::string queue_disc_type = "ns3::PfifoFastQueueDisc";
     std::string recovery = "ns3::TcpClassicRecovery";
+    bool leo = true;
+    rltcpleo::LeoPathConfig leoCfg;
+    double leoUpdateMs = 100.0;
 
     CommandLine cmd;
     // seed related
@@ -120,6 +162,25 @@ main(int argc, char* argv[])
                  queue_disc_type);
     cmd.AddValue("sack", "Enable or disable SACK option", sack);
     cmd.AddValue("recovery", "Recovery algorithm type to use (e.g., ns3::TcpPrrRecovery", recovery);
+    cmd.AddValue("leo",
+                 "Bottleneck is a LEO bent-pipe hop whose delay follows the SGP4 slant range "
+                 "(false: the fixed bottleneck_delay of the original example)",
+                 leo);
+    cmd.AddValue("utLat", "User terminal (left router) latitude [deg]", leoCfg.utLatDeg);
+    cmd.AddValue("utLon", "User terminal (left router) longitude [deg]", leoCfg.utLonDeg);
+    cmd.AddValue("gwLat", "Feeder gateway (right router) latitude [deg]", leoCfg.gwLatDeg);
+    cmd.AddValue("gwLon", "Feeder gateway (right router) longitude [deg]", leoCfg.gwLonDeg);
+    cmd.AddValue("altKm", "Walker shell altitude [km]", leoCfg.altKm);
+    cmd.AddValue("inclinationDeg", "Walker shell inclination [deg]", leoCfg.inclinationDeg);
+    cmd.AddValue("numPlanes", "Walker shell orbital planes", leoCfg.numPlanes);
+    cmd.AddValue("satsPerPlane", "Walker shell satellites per plane", leoCfg.satsPerPlane);
+    cmd.AddValue("minElevationDeg",
+                 "Minimum elevation at the terminal and at the gateway [deg]",
+                 leoCfg.minElevationDeg);
+    cmd.AddValue("tleFile",
+                 "Real TLE set (CelesTrak 3-line format); replaces the Walker shell",
+                 leoCfg.tleFile);
+    cmd.AddValue("leoUpdateMs", "Refresh period of the bottleneck delay [ms]", leoUpdateMs);
     cmd.Parse(argc, argv);
 
     // There are two kinds of Tcp congestion control algorithm using RL:
@@ -203,6 +264,26 @@ main(int argc, char* argv[])
     Time access_d(access_delay);
     Time bottle_d(bottleneck_delay);
 
+    // LEO bottleneck: R0 is the user terminal, R1 the feeder gateway. The channel delay is
+    // driven by the serving satellite from here on; the queue is sized from the initial
+    // satellite delay instead of bottleneck_delay.
+    rltcpleo::LeoBentPipe leoPath;
+    if (leo)
+    {
+        leoCfg.updateInterval = MilliSeconds(leoUpdateMs);
+        Ptr<PointToPointChannel> bottleneckChannel =
+            DynamicCast<PointToPointChannel>(d.GetLeft()->GetDevice(0)->GetChannel());
+        NS_ABORT_MSG_IF(!bottleneckChannel, "bottleneck channel not found");
+        const double d0 =
+            leoPath.Install(leoCfg, d.GetLeft(), d.GetRight(), bottleneckChannel, stop_time);
+        NS_ABORT_MSG_IF(d0 < 0, "no satellite above " << leoCfg.minElevationDeg
+                                                     << " deg at both ground ends at t = 0");
+        bottle_d = Seconds(d0);
+        NS_LOG_UNCOND("LEO bottleneck: " << leoPath.GetNumSatellites() << " satellites ("
+                                         << leoPath.GetPropagatorName()
+                                         << "), initial one-way delay " << d0 * 1e3 << " ms");
+    }
+
     uint32_t size = static_cast<uint32_t>((std::min(access_b, bottle_b).GetBitRate() / 8) *
                                           ((access_d + bottle_d + access_d) * 2).GetSeconds());
 
@@ -278,6 +359,16 @@ main(int argc, char* argv[])
         pktSink->TraceConnectWithoutContext("Rx", MakeBoundCallback(&CountRxPkts, i));
     }
 
+    for (uint32_t i = 0; i < d.LeftCount(); ++i)
+    {
+        Simulator::Schedule(Seconds(start_time * i) + MilliSeconds(1),
+                            &ConnectSenderTraces,
+                            d.GetLeft(i)->GetId());
+    }
+
+    // Globe scene: the two ground ends and the serving satellites carry ECEF mobility.
+    ns3::ntnobs::StartSceneFromNodeList(".");
+
     Simulator::Stop(Seconds(stop_time));
     Simulator::Run();
 
@@ -287,6 +378,47 @@ main(int argc, char* argv[])
     }
 
     PrintRxCount();
+    // ntn-dataset@1: standard manifest + sim_health (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md)
+    uint64_t rxBytes = 0;
+    for (uint32_t i = 0; i < sinkApps.GetN(); ++i)
+    {
+        rxBytes += DynamicCast<PacketSink>(sinkApps.Get(i))->GetTotalRx();
+    }
+    const double activeS = std::max(1e-9, stop_time - 3 - start_time * (d.LeftCount() - 1));
+    const double thrMbps = rxBytes * 8.0 / activeS / 1e6;
+    const double meanRttMs = g_rttSamples > 0 ? 1e3 * g_rttSumS / g_rttSamples : 0.0;
+    NS_LOG_UNCOND("Goodput: " << thrMbps << " Mbps, mean RTT: " << meanRttMs
+                              << " ms, retransmissions: " << g_retransmissions);
+    std::vector<ns3::ntnobs::DatasetMetric> metrics = {
+        {"throughput_mbps", std::to_string(thrMbps), "measured"},
+        {"rx_bytes", std::to_string(rxBytes), "measured"},
+        {"mean_rtt_ms", std::to_string(meanRttMs), "measured"},
+        {"rtt_samples", std::to_string(g_rttSamples), "measured"},
+        {"retransmissions", std::to_string(g_retransmissions), "measured"}};
+    if (leo)
+    {
+        NS_LOG_UNCOND("LEO bottleneck one-way delay: mean "
+                      << leoPath.GetMeanDelayMs() << " ms, range " << leoPath.GetMinDelayMs()
+                      << " to " << leoPath.GetMaxDelayMs() << " ms, " << leoPath.GetHandovers()
+                      << " satellite changes");
+        metrics.push_back(
+            {"leo_mean_one_way_delay_ms", std::to_string(leoPath.GetMeanDelayMs()), "geometry"});
+        metrics.push_back(
+            {"leo_min_one_way_delay_ms", std::to_string(leoPath.GetMinDelayMs()), "geometry"});
+        metrics.push_back(
+            {"leo_max_one_way_delay_ms", std::to_string(leoPath.GetMaxDelayMs()), "geometry"});
+        metrics.push_back(
+            {"leo_satellite_changes", std::to_string(leoPath.GetHandovers()), "geometry"});
+        metrics.push_back(
+            {"leo_outage_s", std::to_string(leoPath.GetOutageSeconds()), "geometry"});
+        metrics.push_back({"leo_propagator", leoPath.GetPropagatorName(), "config"});
+    }
+    ns3::ntnobs::WriteDatasetRecord(".",
+                                    std::filesystem::path(argv[0]).filename().string(),
+                                    "measured",
+                                    argc,
+                                    argv,
+                                    metrics);
     Simulator::Destroy();
     return 0;
 }

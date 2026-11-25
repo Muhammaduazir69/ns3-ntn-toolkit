@@ -1,0 +1,16 @@
+diagram {
+   edge_length = 380;
+   Ue; SrcGnb; TgtGnb;
+
+   === Source gNB (state HANDOVER_LEAVING) ===
+   SrcGnb => SrcGnb [label="per AM DRB: GetStatus()\n-> {dlPdcpSn = txSn,\nulPdcpSn = rxSn}"]
+   SrcGnb ->> TgtGnb [label="X2 SN STATUS TRANSFER (AM DRBs only; UM gets none)"]
+   SrcGnb ->> TgtGnb [label="X2-U data forwarding (SendUeData, one per DL packet)"]
+
+   === Target gNB ===
+   TgtGnb => TgtGnb [label="recv SN status;\nSetStatus()\nrestores TX/RX SN"]
+   TgtGnb => TgtGnb [label="DoRecvUeData:\ninject forwarded\ndata to PDCP\n(else drop-trace)"]
+
+   === UE ===
+   Ue => Ue [label="recreate SRB1 + DRBs\n-> new NrPdcp,\nSN reset to 0"]
+}

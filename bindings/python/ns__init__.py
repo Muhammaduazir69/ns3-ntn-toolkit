@@ -8,6 +8,14 @@ from functools import lru_cache
 
 DEFAULT_INCLUDE_DIR = sysconfig.get_config_var("INCLUDEDIR")
 DEFAULT_LIB_DIR = sysconfig.get_config_var("LIBDIR")
+BUILD_TYPES = (
+    "debug",
+    "default",
+    "optimized",
+    "release",
+    "relwithdebinfo",
+    "minsizerel",
+)
 
 
 def find_ns3_lock() -> str:
@@ -115,7 +123,7 @@ def _search_libraries() -> dict:
             library_map[library_infix] = set()
 
         # Append the directory
-        library_map[library_infix].add(library)
+        library_map[library_infix].add(os.path.realpath(library))
 
     # Replace sets with lists
     for key, values in library_map.items():
@@ -169,7 +177,7 @@ def extract_linked_libraries(library_name: str, prefix: str) -> tuple:
     try:
         with open(os.path.abspath(library_path), "rb") as f:
             linked_libs = re.findall(
-                b"\x00(lib.*?.%b)" % LIBRARY_EXTENSION.encode("utf-8"), f.read()
+                b"\x00(lib[^\\x00]*?\\.%b)(?![\\w.])" % LIBRARY_EXTENSION.encode("utf-8"), f.read()
             )
     except Exception as e:
         print(f"Failed to extract libraries used by {library_path} with exception:{e}")
@@ -251,10 +259,18 @@ def find_ns3_from_lock_file(lock_file: str) -> (str, list, str):
             values["NS3_ENABLED_MODULES"] + values["NS3_ENABLED_CONTRIBUTED_MODULES"],
         )
     )
+
     prefix = values["out_dir"]
-    libraries = {
-        os.path.splitext(os.path.basename(x))[0]: x for x in os.listdir(os.path.join(prefix, "lib"))
-    }
+    path_to_lib = None
+    for variant in ["lib", "lib64"]:
+        path_candidate = os.path.join(prefix, variant)
+        if os.path.isdir(path_candidate):
+            path_to_lib = path_candidate
+            break
+    if path_to_lib is None:
+        raise Exception(f"Directory {prefix} does not contain subdirectory lib/ (nor lib64/).")
+    libraries = {os.path.splitext(os.path.basename(x))[0]: x for x in os.listdir(path_to_lib)}
+
     version = values["VERSION"]
 
     # Filter out test libraries and incorrect versions
@@ -305,14 +321,7 @@ def filter_module_name(library: str) -> str:
         components.pop(0)
 
     # Drop build profile suffix and test libraries
-    if components[-1] in [
-        "debug",
-        "default",
-        "optimized",
-        "release",
-        "relwithdebinfo",
-        "minsizerel",
-    ]:
+    if components[-1] in BUILD_TYPES:
         components.pop(-1)
     return "-".join(components)
 
@@ -342,6 +351,9 @@ def get_newest_version(versions: list) -> str:
 
 def find_ns3_from_search() -> (str, list, str):
     libraries = search_libraries("ns3")
+
+    # Filter in libraries prefixed with libns3
+    libraries = list(filter(lambda x: "libns3" in x, libraries))
 
     if not libraries:
         raise Exception("ns-3 libraries were not found.")
@@ -510,19 +522,28 @@ def load_modules():
                 if os.path.isdir(linked_lib_include_dir):
                     cppyy.add_include_path(linked_lib_include_dir)
 
-    for module in modules:
-        cppyy.include(f"ns3/{module}-module.h")
+    # Get build type
+    build_type = ""  # release
+    for type in BUILD_TYPES:
+        if type in libraries_to_load[-1]:
+            build_type = type
 
-    # After including all headers, we finally load the modules
+    # Load a module, then its module header
     for library in libraries_to_load:
         cppyy.load_library(library)
+        for module in modules:
+            library_name_from_module = (
+                f"{version}-{module}{'-' if len(build_type)>0 else ''}{build_type}."
+            )
+            if library_name_from_module in library:
+                cppyy.include(f"ns3/{module}-module.h")
+                break
 
     # We expose cppyy to consumers of this module as ns.cppyy
     setattr(cppyy.gbl.ns3, "cppyy", cppyy)
 
     # Set up a few tricks
-    cppyy.cppdef(
-        """
+    cppyy.cppdef("""
         using namespace ns3;
         bool Time_ge(Time& a, Time& b){ return a >= b;}
         bool Time_eq(Time& a, Time& b){ return a == b;}
@@ -530,8 +551,7 @@ def load_modules():
         bool Time_le(Time& a, Time& b){ return a <= b;}
         bool Time_gt(Time& a, Time& b){ return a > b;}
         bool Time_lt(Time& a, Time& b){ return a < b;}
-    """
-    )
+    """)
     cppyy.gbl.ns3.Time.__ge__ = cppyy.gbl.Time_ge
     cppyy.gbl.ns3.Time.__eq__ = cppyy.gbl.Time_eq
     cppyy.gbl.ns3.Time.__ne__ = cppyy.gbl.Time_ne
@@ -552,8 +572,7 @@ def load_modules():
 
     cppyy.gbl.ns3.Node.__del__ = Node_del
 
-    cppyy.cppdef(
-        """
+    cppyy.cppdef("""
         using namespace ns3;
         std::tuple<bool, TypeId> LookupByNameFailSafe(std::string name)
         {
@@ -561,8 +580,7 @@ def load_modules():
             bool ok = TypeId::LookupByNameFailSafe(name, &id);
             return std::make_tuple(ok, id);
         }
-    """
-    )
+    """)
     setattr(cppyy.gbl.ns3, "LookupByNameFailSafe", cppyy.gbl.LookupByNameFailSafe)
 
     return cppyy.gbl.ns3

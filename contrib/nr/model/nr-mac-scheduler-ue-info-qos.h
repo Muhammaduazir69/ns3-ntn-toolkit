@@ -6,27 +6,29 @@
 
 #include "nr-mac-scheduler-ue-info-rr.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 /**
- * \ingroup scheduler
- * \brief UE representation for a QoS-based scheduler
+ * @ingroup scheduler
+ * @brief UE representation for a QoS-based scheduler
  *
  * The representation stores the current throughput, the average throughput,
  * and the last average throughput, as well as providing comparison functions
- * to sort the UEs in case of a QoS scheduler, according to its QCI and priority.
+ * to sort the UEs in case of a QoS scheduler, according to its 5QI and priority.
  *
- * \see CompareUeWeightsDl
- * \see CompareUeWeightsUl
+ * @see CompareUeWeightsDl
+ * @see CompareUeWeightsUl
  */
-class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
+class NR_EXPORT NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
 {
   public:
     /**
-     * \brief NrMacSchedulerUeInfoQos constructor
-     * \param rnti RNTI of the UE
-     * \param beamId BeamId of the UE
-     * \param fn A function that tells how many RB per RBG
+     * @brief NrMacSchedulerUeInfoQos constructor
+     * @param rnti RNTI of the UE
+     * @param beamId BeamId of the UE
+     * @param fn A function that tells how many RB per RBG
      */
     NrMacSchedulerUeInfoQos(float alpha, uint16_t rnti, BeamId beamId, const GetRbPerRbgFn& fn)
         : NrMacSchedulerUeInfo(rnti, beamId, fn),
@@ -35,7 +37,7 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief Reset DL QoS scheduler info
+     * @brief Reset DL QoS scheduler info
      *
      * Set the last average throughput to the current average throughput,
      * and zeroes the average throughput as well as the current throughput.
@@ -45,14 +47,13 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     void ResetDlSchedInfo() override
     {
         m_lastAvgTputDl = m_avgTputDl;
-        m_avgTputDl = 0.0;
         m_currTputDl = 0.0;
         m_potentialTputDl = 0.0;
         NrMacSchedulerUeInfo::ResetDlSchedInfo();
     }
 
     /**
-     * \brief Reset UL QoS scheduler info
+     * @brief Reset UL QoS scheduler info
      *
      * Set the last average throughput to the current average throughput,
      * and zeroes the average throughput as well as the current throughput.
@@ -62,14 +63,13 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     void ResetUlSchedInfo() override
     {
         m_lastAvgTputUl = m_avgTputUl;
-        m_avgTputUl = 0.0;
         m_currTputUl = 0.0;
         m_potentialTputUl = 0.0;
         NrMacSchedulerUeInfo::ResetUlSchedInfo();
     }
 
     /**
-     * \brief Reset the DL avg Th to the last value
+     * @brief Reset the DL avg Th to the last value
      */
     void ResetDlMetric() override
     {
@@ -78,7 +78,7 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief Reset the UL avg Th to the last value
+     * @brief Reset the UL avg Th to the last value
      */
     void ResetUlMetric() override
     {
@@ -87,56 +87,46 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief Update the QoS metric for downlink
-     * \param totAssigned the resources assigned
-     * \param timeWindow the time window
-     * \param amc a pointer to the AMC
+     * @brief Update the QoS metric for downlink
+     * @param totAssigned the resources assigned
+     * @param timeWindow the time window
      *
      * Updates m_currTputDl and m_avgTputDl by keeping in consideration
      * the assigned resources (in form of TBS) and the time window.
      * It gets the tbSize by calling NrMacSchedulerUeInfo::UpdateDlMetric.
      */
-    void UpdateDlQosMetric(const NrMacSchedulerNs3::FTResources& totAssigned,
-                           double timeWindow,
-                           const Ptr<const NrAmc>& amc);
+    void UpdateDlQosMetric(const NrMacSchedulerNs3::FTResources& totAssigned, double timeWindow);
 
     /**
-     * \brief Update the QoS metric for uplink
-     * \param totAssigned the resources assigned
-     * \param timeWindow the time window
-     * \param amc a pointer to the AMC
+     * @brief Update the QoS metric for uplink
+     * @param totAssigned the resources assigned
+     * @param timeWindow the time window
      *
      * Updates m_currTputUl and m_avgTputUl by keeping in consideration
      * the assigned resources (in form of TBS) and the time window.
      * It gets the tbSize by calling NrMacSchedulerUeInfo::UpdateUlMetric.
      */
-    void UpdateUlQosMetric(const NrMacSchedulerNs3::FTResources& totAssigned,
-                           double timeWindow,
-                           const Ptr<const NrAmc>& amc);
+    void UpdateUlQosMetric(const NrMacSchedulerNs3::FTResources& totAssigned, double timeWindow);
 
     /**
-     * \brief Calculate the Potential throughput for downlink
-     * \param assignableInIteration resources assignable
-     * \param amc a pointer to the AMC
+     * @brief Calculate the Potential throughput for downlink
+     * @param assignableInIteration resources assignable
      */
-    void CalculatePotentialTPutDl(const NrMacSchedulerNs3::FTResources& assignableInIteration,
-                                  const Ptr<const NrAmc>& amc);
+    void CalculatePotentialTPutDl(const NrMacSchedulerNs3::FTResources& assignableInIteration);
 
     /**
-     * \brief Calculate the Potential throughput for uplink
-     * \param assignableInIteration resources assignable
-     * \param amc a pointer to the AMC
+     * @brief Calculate the Potential throughput for uplink
+     * @param assignableInIteration resources assignable
      */
-    void CalculatePotentialTPutUl(const NrMacSchedulerNs3::FTResources& assignableInIteration,
-                                  const Ptr<const NrAmc>& amc);
+    void CalculatePotentialTPutUl(const NrMacSchedulerNs3::FTResources& assignableInIteration);
 
     /**
-     * \brief comparison function object (i.e. an object that satisfies the
+     * @brief comparison function object (i.e. an object that satisfies the
      * requirements of Compare) which returns true if the first argument is less
      * than (i.e. is ordered before) the second.
-     * \param lue Left UE
-     * \param rue Right UE
-     * \return true if the QoS metric of the left UE is higher than the right UE
+     * @param lue Left UE
+     * @param rue Right UE
+     * @return true if the QoS metric of the left UE is higher than the right UE
      *
      * The QoS metric is calculated in CalculateDlWeight()
      */
@@ -153,14 +143,14 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief comparison function object (i.e. an object that satisfies the
+     * @brief comparison function object (i.e. an object that satisfies the
      * requirements of Compare) which returns true if the first argument is less
      * than (i.e. is ordered before) the second.
-     * \param lue Left UE
+     * @param lue Left UE
      * \f$ qosMetric_{i} = P * std::pow(potentialTPut_{i}, alpha) / std::max (1E-9, m_avgTput_{i})
      * \f$
      *
-     * Alpha is a fairness metric. P is the priority associated to the QCI.
+     * Alpha is a fairness metric. P is the priority associated to the 5QI.
      * Please note that the throughput is calculated in bit/symbol.
      */
     static double CalculateDlWeight(const NrMacSchedulerNs3::UePtrAndBufferReq& ue)
@@ -193,7 +183,7 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief This function calculates the Delay Budget Factor for the case of
+     * @brief This function calculates the Delay Budget Factor for the case of
      * DC-GBR LC. This value will then be used for the calculation of the QoS
      * metric (weight).
      * Notice that in order to avoid the case that a packet has not been dropped
@@ -201,9 +191,9 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
      * not implement packet drop by default), we give very high priority to this
      * packet. We do this by considering a very small value for the denominator
      * (i.e. (PDB - HOL) = 0.1).
-     * \param pdb The Packet Delay Budget associated to the QCI
-     * \param hol The HeadOfLine Delay of the transmission queue
-     * \return the delayBudgetFactor
+     * @param pdb The Packet Delay Budget associated to the 5QI
+     * @param hol The HeadOfLine Delay of the transmission queue
+     * @return the delayBudgetFactor
      */
     static double CalculateDelayBudgetFactor(uint64_t pdb, uint16_t hol)
     {
@@ -214,19 +204,19 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief comparison function object (i.e. an object that satisfies the
+     * @brief comparison function object (i.e. an object that satisfies the
      * requirements of Compare) which returns true if the first argument is less
      * than (i.e. is ordered before) the second.
-     * \param lue Left UE
-     * \param rue Right UE
-     * \return true if the QoS metric of the left UE is higher than the right UE
+     * @param lue Left UE
+     * @param rue Right UE
+     * @return true if the QoS metric of the left UE is higher than the right UE
      *
      * The QoS metric is calculated as following:
      *
      * \f$ qosMetric_{i} = P * std::pow(potentialTPut_{i}, alpha) / std::max (1E-9, m_avgTput_{i})
      * \f$
      *
-     * Alpha is a fairness metric. P is the priority associated to the QCI.
+     * Alpha is a fairness metric. P is the priority associated to the 5QI.
      * Please note that the throughput is calculated in bit/symbol.
      */
     static bool CompareUeWeightsUl(const NrMacSchedulerNs3::UePtrAndBufferReq& lue,
@@ -249,10 +239,10 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief This function calculates the min Priority for the DL.
-     * \param lue Left UE
-     * \param rue Right UE
-     * \return true if the Priority of lue is less than the Priority of rue
+     * @brief This function calculates the min Priority for the DL.
+     * @param lue Left UE
+     * @param rue Right UE
+     * @return true if the Priority of lue is less than the Priority of rue
      *
      * The ordering is made by considering the minimum Priority among all the
      * Priorities of all the LCs set for this UE.
@@ -276,22 +266,22 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
                     ueMinPriority = LCPtr->m_priority;
                 }
 
-                ue.first->PrintLcInfo(ue.first->m_rnti,
-                                      ueLcg.first,
-                                      lcId,
-                                      LCPtr->m_qci,
-                                      LCPtr->m_priority,
-                                      ueMinPriority);
+                ns3::NrMacSchedulerUeInfo::PrintLcInfo(ue.first->m_rnti,
+                                                       ueLcg.first,
+                                                       lcId,
+                                                       LCPtr->m_fiveQi,
+                                                       LCPtr->m_priority,
+                                                       ueMinPriority);
             }
         }
         return ueMinPriority;
     }
 
     /**
-     * \brief This function calculates the min Priority for the UL.
-     * \param lue Left UE
-     * \param rue Right UE
-     * \return true if the Priority of lue is less than the Priority of rue
+     * @brief This function calculates the min Priority for the UL.
+     * @param lue Left UE
+     * @param rue Right UE
+     * @return true if the Priority of lue is less than the Priority of rue
      *
      * The ordering is made by considering the minimum Priority among all the
      * Priorities of all the LCs set for this UE.
@@ -315,12 +305,12 @@ class NrMacSchedulerUeInfoQos : public NrMacSchedulerUeInfo
                     ueMinPriority = LCPtr->m_priority;
                 }
 
-                ue.first->PrintLcInfo(ue.first->m_rnti,
-                                      ueLcg.first,
-                                      lcId,
-                                      LCPtr->m_qci,
-                                      LCPtr->m_priority,
-                                      ueMinPriority);
+                ns3::NrMacSchedulerUeInfo::PrintLcInfo(ue.first->m_rnti,
+                                                       ueLcg.first,
+                                                       lcId,
+                                                       LCPtr->m_fiveQi,
+                                                       LCPtr->m_priority,
+                                                       ueMinPriority);
             }
         }
         return ueMinPriority;

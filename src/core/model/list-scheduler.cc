@@ -9,15 +9,13 @@
 #include "list-scheduler.h"
 
 #include "assert.h"
-#include "event-impl.h"
 #include "log.h"
 
 #include <string>
-#include <utility>
 
 /**
- * \file
- * \ingroup scheduler
+ * @file
+ * @ingroup scheduler
  * ns3::ListScheduler implementation.
  */
 

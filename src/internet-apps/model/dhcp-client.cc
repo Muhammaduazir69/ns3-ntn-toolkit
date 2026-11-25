@@ -145,8 +145,10 @@ int64_t
 DhcpClient::AssignStreams(int64_t stream)
 {
     NS_LOG_FUNCTION(this << stream);
-    m_ran->SetStream(stream);
-    return 1;
+    auto currentStream = stream;
+    m_ran->SetStream(currentStream++);
+    currentStream += Application::AssignStreams(currentStream);
+    return (currentStream - stream);
 }
 
 void
@@ -164,12 +166,12 @@ DhcpClient::StartApplication()
     // Moreover, the length is always 16, because chaddr is 16 bytes.
     Address myAddress = m_device->GetAddress();
     NS_LOG_INFO("My address is " << myAddress);
-    uint8_t addr[Address::MAX_SIZE];
-    std::memset(addr, 0, Address::MAX_SIZE);
-    uint32_t len = myAddress.CopyTo(addr);
-    NS_ASSERT_MSG(len <= 16, "DHCP client can not handle a chaddr larger than 16 bytes");
-    m_chaddr.CopyFrom(addr, 16);
-    NS_LOG_INFO("My m_chaddr is " << m_chaddr);
+    NS_ASSERT_MSG(myAddress.GetLength() <= 16,
+                  "DHCP client can not handle a chaddr larger than 16 bytes");
+
+    m_chaddr.fill(0);
+    myAddress.CopyTo(m_chaddr.data());
+    NS_LOG_INFO("My Chaddr is " << DhcpChaddrToString(m_chaddr));
 
     bool found = false;
     for (uint32_t i = 0; i < ipv4->GetNAddresses(ifIndex); i++)
@@ -379,9 +381,9 @@ DhcpClient::Select()
 
     DhcpHeader header = m_offerList.front();
     m_offerList.pop_front();
-    m_lease = Time(Seconds(header.GetLease()));
-    m_renew = Time(Seconds(header.GetRenew()));
-    m_rebind = Time(Seconds(header.GetRebind()));
+    m_lease = Seconds(header.GetLease());
+    m_renew = Seconds(header.GetRenew());
+    m_rebind = Seconds(header.GetRebind());
     m_offeredAddress = header.GetYiaddr();
     m_myMask = Ipv4Mask(header.GetMask());
     m_server = header.GetDhcps();

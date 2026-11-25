@@ -6,19 +6,21 @@
 
 #include "ns3/test.h"
 
+#include <map>
+
 using namespace ns3;
 
 /**
- * \file nr-system-test-schedulers-ofdma-pf.cc
- * \ingroup test
+ * @file nr-system-test-schedulers-ofdma-pf.cc
+ * @ingroup test
  *
- * \brief System test for OFDMA - Proportional Fair scheduler. It checks that all the
+ * @brief System test for OFDMA - Proportional Fair scheduler. It checks that all the
  * packets sent are delivered correctly.
  */
 
 /**
- * \brief The OFDMA PF scheduler system test suite
- * \ingroup test
+ * @brief The OFDMA PF scheduler system test suite
+ * @ingroup test
  *
  * It will check OFDMA PF with:
  *
@@ -31,7 +33,7 @@ class NrSystemTestSchedulerOfdmaPfSuite : public TestSuite
 {
   public:
     /**
-     * \brief constructor
+     * @brief constructor
      */
     NrSystemTestSchedulerOfdmaPfSuite();
 };
@@ -52,6 +54,12 @@ NrSystemTestSchedulerOfdmaPfSuite::NrSystemTestSchedulerOfdmaPfSuite()
     std::list<std::string> scheds = {"PF"};
     std::list<TxMode> mode = {DL, UL, DL_UL};
     std::list<uint32_t> uesPerBeamList = {1, 2, 4, 8};
+    std::map<uint32_t, Duration> durationForUesPerBeam = {
+        {1, Duration::QUICK},
+        {2, Duration::QUICK},
+        {4, Duration::EXTENSIVE},
+        {8, Duration::EXTENSIVE},
+    };
     std::list<uint32_t> beams = {1, 2};
     std::list<uint32_t> numerologies = {
         0,
@@ -99,7 +107,7 @@ NrSystemTestSchedulerOfdmaPfSuite::NrSystemTestSchedulerOfdmaPfSuite()
                                                                 isDl,
                                                                 isUl,
                                                                 schedName.str()),
-                                        Duration::QUICK);
+                                        durationForUesPerBeam.at(uesPerBeam));
                         }
                     }
                 }

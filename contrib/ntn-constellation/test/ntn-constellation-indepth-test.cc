@@ -112,7 +112,7 @@ class ConWalkerGeometryTest : public TestCase
 {
   public:
     ConWalkerGeometryTest()
-        : TestCase("Walker T/P/F geometry holds at build time and through a propagated orbit")
+        : TestCase("Walker T-P-F geometry holds at build time and through a propagated orbit")
     {
     }
 
@@ -253,7 +253,7 @@ class ConJ2PrecessionTest : public TestCase
 {
   public:
     ConJ2PrecessionTest()
-        : TestCase("J2 RAAN drift over a day: -4.49 deg/day at 53 deg, sun-synchronous at 97.59 deg")
+        : TestCase("J2 RAAN drift over a day: -4.49 deg-day at 53 deg, sun-synchronous at 97.59 deg")
     {
     }
 
@@ -410,7 +410,7 @@ class ConVelocityIsDerivativeTest : public TestCase
 {
   public:
     ConVelocityIsDerivativeTest()
-        : TestCase("Kepler+J2 velocity equals the 1 ms central difference of the position within 1 cm/s")
+        : TestCase("Kepler+J2 velocity equals the 1 ms central difference of the position within 1 cm-s")
     {
     }
 

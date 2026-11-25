@@ -16,6 +16,7 @@ is available at U{http://www.opensource.org/licenses/bsd-license.php}
 
 import gi
 
+gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 import os
 import re
@@ -24,7 +25,7 @@ from functools import reduce
 from io import StringIO
 
 from gi.repository import Gdk, GLib, Gtk, Pango
-from pkg_resources import parse_version
+from packaging.version import Version
 
 ## Try to import IPython
 try:
@@ -138,7 +139,7 @@ class IterableIPShell:
         sys.excepthook = excepthook
         self.iter_more = 0
         self.history_level = 0
-        self.complete_sep = re.compile("[\s\{\}\[\]\(\)]")
+        self.complete_sep = re.compile(r"[\s\{\}\[\]\(\)]")
         self.updateNamespace({"exit": lambda: None})
         self.updateNamespace({"quit": lambda: None})
         # Workaround for updating namespace with sys.modules
@@ -148,7 +149,7 @@ class IterableIPShell:
         # Avoid using input splitter when not really needed.
         # Perhaps it could work even before 5.8.0
         # But it definitely does not work any more with >= 7.0.0
-        self.no_input_splitter = parse_version(IPython.release.version) >= parse_version("5.8.0")
+        self.no_input_splitter = Version(IPython.release.version) >= Version("5.8.0")
         self.lines = []
         self.indent_spaces = ""
 
@@ -202,7 +203,7 @@ class IterableIPShell:
         else:
             if self.no_input_splitter:
                 self.lines.append(line)
-                (status, self.indent_spaces) = self.IP.check_complete("\n".join(self.lines))
+                status, self.indent_spaces = self.IP.check_complete("\n".join(self.lines))
                 self.iter_more = status == "incomplete"
             else:
                 self.IP.input_splitter.push(line)
@@ -418,7 +419,7 @@ class ConsoleView(Gtk.TextView):
         Initialize console view.
         """
         Gtk.TextView.__init__(self)
-        self.modify_font(Pango.FontDescription("Mono"))
+        self.set_monospace(True)
         self.set_cursor_visible(True)
         self.text_buffer = self.get_buffer()
         self.mark = self.text_buffer.create_mark(
@@ -433,7 +434,7 @@ class ConsoleView(Gtk.TextView):
             )
         self.text_buffer.create_tag("0")
         self.text_buffer.create_tag("notouch", editable=False)
-        self.color_pat = re.compile("\x01?\x1b\[(.*?)m\x02?")
+        self.color_pat = re.compile(r"\x01?\x1b\[(.*?)m\x02?")
         self.line_start = self.text_buffer.create_mark(
             "line_start", self.text_buffer.get_end_iter(), True
         )

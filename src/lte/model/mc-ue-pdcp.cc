@@ -250,8 +250,11 @@ McUePdcp::DoReceivePdu(Ptr<Packet> p)
     }
     m_rxPdu(m_rnti, m_lcid, p->GetSize(), delay.GetNanoSeconds());
 
-    p->RemoveAllByteTags();
-    NS_LOG_LOGIC("ALL BYTE TAGS REMOVED. NetAmin and FlowMonitor won't work");
+    // Keep the byte tags. The mmWave fork stripped every byte tag here
+    // (RemoveAllByteTags), which also removed the Ipv4FlowProbeTag that FlowMonitor
+    // attaches at the IP sender: every flow over an LTE or mmWave DRB then reported
+    // 0 received packets although the PacketSink received them. This matches the
+    // upstream LtePdcp::DoReceivePdu, which no longer strips the tags either.
 
     if (p->GetSize() > 3)
     {

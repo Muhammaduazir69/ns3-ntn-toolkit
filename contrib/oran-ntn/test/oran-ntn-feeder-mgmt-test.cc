@@ -363,7 +363,7 @@ class OranNtnGatedUserPlaneTest : public TestCase
 {
   public:
     OranNtnGatedUserPlaneTest()
-        : TestCase("Wave 7B: user plane follows the control feeder state; delay = slant/c")
+        : TestCase("Wave 7B: user plane follows the control feeder state; delay = slant-c")
     {
     }
 

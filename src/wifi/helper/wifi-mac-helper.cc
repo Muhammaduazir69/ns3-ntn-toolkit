@@ -14,8 +14,10 @@
 #include "ns3/emlsr-manager.h"
 #include "ns3/enum.h"
 #include "ns3/frame-exchange-manager.h"
+#include "ns3/gcr-manager.h"
 #include "ns3/multi-user-scheduler.h"
 #include "ns3/pointer.h"
+#include "ns3/power-save-manager.h"
 #include "ns3/wifi-ack-manager.h"
 #include "ns3/wifi-assoc-manager.h"
 #include "ns3/wifi-mac-queue-scheduler.h"
@@ -91,6 +93,7 @@ WifiMacHelper::Create(Ptr<WifiNetDevice> device, WifiStandard standard) const
 
     // create Channel Access Managers
     std::vector<Ptr<ChannelAccessManager>> caManagers;
+    caManagers.reserve(nLinks);
     for (uint8_t linkId = 0; linkId < nLinks; ++linkId)
     {
         caManagers.emplace_back(m_channelAccessManager.Create<ChannelAccessManager>());
@@ -132,11 +135,10 @@ WifiMacHelper::Create(Ptr<WifiNetDevice> device, WifiStandard standard) const
     mac->SetMacQueueScheduler(queueScheduler);
 
     // create and install the Multi User Scheduler if this is an HE AP
-    Ptr<ApWifiMac> apMac;
-    if (standard >= WIFI_STANDARD_80211ax && m_muScheduler.IsTypeIdSet() &&
-        (apMac = DynamicCast<ApWifiMac>(mac)))
+    auto apMac = DynamicCast<ApWifiMac>(mac);
+    if (standard >= WIFI_STANDARD_80211ax && m_muScheduler.IsTypeIdSet() && apMac)
     {
-        Ptr<MultiUserScheduler> muScheduler = m_muScheduler.Create<MultiUserScheduler>();
+        auto muScheduler = m_muScheduler.Create<MultiUserScheduler>();
         apMac->AggregateObject(muScheduler);
     }
 
@@ -148,24 +150,37 @@ WifiMacHelper::Create(Ptr<WifiNetDevice> device, WifiStandard standard) const
         staMac->SetAssocManager(assocManager);
     }
 
-    // create and install the EMLSR Manager if this is an EHT non-AP MLD with EMLSR activated
-    if (BooleanValue emlsrActivated;
-        standard >= WIFI_STANDARD_80211be && staMac && staMac->GetNLinks() > 1 &&
-        device->GetEhtConfiguration()->GetAttributeFailSafe("EmlsrActivated", emlsrActivated) &&
-        emlsrActivated.Get())
+    // create and install a Power Save Manager if this is a STA and a Power Save Manager typeid
+    // has been set
+    if (staMac && m_powerSaveManager.IsTypeIdSet())
+    {
+        auto powerSaveManager = m_powerSaveManager.Create<PowerSaveManager>();
+        staMac->SetPowerSaveManager(powerSaveManager);
+    }
+
+    // create and install the EMLSR Manager if this is an EHT non-AP device with EMLSR activated
+    // and association type set to ML setup
+    if (standard >= WIFI_STANDARD_80211be && staMac &&
+        device->GetEhtConfiguration()->GetEmlsrActivated() &&
+        staMac->GetAssocType() == WifiAssocType::ML_SETUP)
     {
         auto emlsrManager = m_emlsrManager.Create<EmlsrManager>();
         staMac->SetEmlsrManager(emlsrManager);
     }
 
     // create and install the AP EMLSR Manager if this is an EHT AP MLD with EMLSR activated
-    if (BooleanValue emlsrActivated;
-        standard >= WIFI_STANDARD_80211be && apMac && apMac->GetNLinks() > 1 &&
-        device->GetEhtConfiguration()->GetAttributeFailSafe("EmlsrActivated", emlsrActivated) &&
-        emlsrActivated.Get())
+    if (standard >= WIFI_STANDARD_80211be && apMac && apMac->GetNLinks() > 1 &&
+        device->GetEhtConfiguration()->GetEmlsrActivated())
     {
         auto apEmlsrManager = m_apEmlsrManager.Create<ApEmlsrManager>();
         apMac->SetApEmlsrManager(apEmlsrManager);
+    }
+
+    // create and install the GCR Manager if this is a HT-capable AP
+    if (apMac && apMac->GetRobustAVStreamingSupported() && m_gcrManager.IsTypeIdSet())
+    {
+        auto gcrManager = m_gcrManager.Create<GcrManager>();
+        apMac->SetGcrManager(gcrManager);
     }
 
     return mac;

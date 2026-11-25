@@ -8,8 +8,8 @@
 
 #include "lr-wpan-fields.h"
 
-#include <ns3/address-utils.h>
-#include <ns3/log.h>
+#include "ns3/address-utils.h"
+#include "ns3/log.h"
 
 namespace ns3
 {
@@ -562,10 +562,10 @@ CapabilityField::SetShortAddrAllocOn(bool addrAlloc)
 /**
  * output stream output operator
  *
- * \param os output stream
- * \param capabilityField the Capability Information Field
+ * @param os output stream
+ * @param capabilityField the Capability Information Field
  *
- * \returns output stream
+ * @returns output stream
  */
 std::ostream&
 operator<<(std::ostream& os, const CapabilityField& capabilityField)

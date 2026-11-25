@@ -158,7 +158,7 @@ main(int argc, char* argv[])
     ipv4Left.SetBase("10.1.1.0", "255.255.255.0");
     Ipv4InterfaceContainer interfacesLeft = ipv4Left.Assign(devicesLeft);
 
-    TapBridgeHelper tapBridge(interfacesLeft.GetAddress(1));
+    TapBridgeHelper tapBridge;
     tapBridge.SetAttribute("Mode", StringValue(mode));
     tapBridge.SetAttribute("DeviceName", StringValue(tapName));
     tapBridge.Install(nodesLeft.Get(0), devicesLeft.Get(0));
@@ -204,13 +204,13 @@ main(int argc, char* argv[])
     onoff.SetConstantRate(DataRate("500kb/s"));
 
     ApplicationContainer apps = onoff.Install(nodesLeft.Get(3));
-    apps.Start(Seconds(1.0));
+    apps.Start(Seconds(1));
 
     // Create a packet sink to receive these packets
     PacketSinkHelper sink("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
 
     apps = sink.Install(nodesRight.Get(0));
-    apps.Start(Seconds(1.0));
+    apps.Start(Seconds(1));
 
     wifiPhy.EnablePcapAll("tap-wifi-dumbbell");
 

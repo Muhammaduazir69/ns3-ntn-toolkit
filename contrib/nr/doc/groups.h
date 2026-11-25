@@ -103,7 +103,7 @@
   * \section what Description of the module
   * This group specifies the MAC Scheduler interface and their implementation.
   * The goal of this interface specification is to allow the use of a wide range
-  * of schedulers which can be plugged into the eNodeB and to allow for
+  * of schedulers which can be plugged into the gNB and to allow for
   * standardized interference coordination interface to the scheduler.
   *
   * Not only the interface between the MAC and the scheduler is standardized,

@@ -6,14 +6,15 @@
 #ifndef DISTANCE_BASED_THREE_GPP_SPECTRUM_PROPAGATION_LOSS_H
 #define DISTANCE_BASED_THREE_GPP_SPECTRUM_PROPAGATION_LOSS_H
 
+#include "ns3/nr-export.h"
 #include "ns3/three-gpp-spectrum-propagation-loss-model.h"
 
 namespace ns3
 {
 
 /**
- * \ingroup nr-utils
- * \brief Distance based 3GPP Spectrum Propagation Loss Model
+ * @ingroup nr-utils
+ * @brief Distance based 3GPP Spectrum Propagation Loss Model
  *
  * This class inherits ThreeGppSpectrumPropagationLossModel
  * and calculates the fading and beamforming only for the signals
@@ -21,9 +22,9 @@ namespace ns3
  * max allowed distance that can be configured
  * through the attribute of this class.
  *
- * \see ThreeGppSpectrumPropagationLossModel
+ * @see ThreeGppSpectrumPropagationLossModel
  */
-class DistanceBasedThreeGppSpectrumPropagationLossModel
+class NR_EXPORT DistanceBasedThreeGppSpectrumPropagationLossModel
     : public ThreeGppSpectrumPropagationLossModel
 {
   public:
@@ -39,40 +40,44 @@ class DistanceBasedThreeGppSpectrumPropagationLossModel
 
     /**
      * Get the type ID.
-     * \return the object TypeId
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     /*
-     * \brief Sets the max distance
+     * @brief Sets the max distance
      */
     void SetMaxDistance(double maxDistance);
 
     /*
-     * \brief Gets the configured max distance
+     * @brief Gets the configured max distance
      */
     double GetMaxDistance() const;
 
     /**
-     * \brief Computes the received PSD.
+     * @brief Computes the received PSD.
      *
      * This function computes the received PSD by applying the 3GPP fast fading
      * model and the beamforming gain. However, if the distance between a and b
      * is higher than allowed this class will return 0 PSD.
      *
-     * \param params tx parameters
-     * \param a first node mobility model
-     * \param b second node mobility model
-     * \param aPhasedArrayModel the antenna array of the first node
-     * \param bPhasedArrayModel the antenna array of the second node
-     * \return the received PSD
+     * @param params tx parameters
+     * @param a first node mobility model
+     * @param b second node mobility model
+     * @param aPhasedArrayModel the antenna array of the first node
+     * @param bPhasedArrayModel the antenna array of the second node
+     * @param aBeamformingVector the beamforming vector of the first node's array
+     * @param bBeamformingVector the beamforming vector of the second node's array
+     * @return the received PSD
      */
     Ptr<SpectrumSignalParameters> DoCalcRxPowerSpectralDensity(
         Ptr<const SpectrumSignalParameters> params,
         Ptr<const MobilityModel> a,
         Ptr<const MobilityModel> b,
         Ptr<const PhasedArrayModel> aPhasedArrayModel,
-        Ptr<const PhasedArrayModel> bPhasedArrayModel) const override;
+        Ptr<const PhasedArrayModel> bPhasedArrayModel,
+        const PhasedArrayModel::ComplexVector& aBeamformingVector,
+        const PhasedArrayModel::ComplexVector& bBeamformingVector) const override;
 
   private:
     double m_maxDistance{1000}; //!< the maximum distance of the nodes a and b in order to calculate

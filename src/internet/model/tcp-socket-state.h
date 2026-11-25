@@ -9,6 +9,7 @@
 #include "tcp-rx-buffer.h"
 
 #include "ns3/data-rate.h"
+#include "ns3/internet-export.h"
 #include "ns3/object.h"
 #include "ns3/sequence-number.h"
 #include "ns3/traced-value.h"
@@ -17,7 +18,7 @@ namespace ns3
 {
 
 /**
- * \brief Data structure that records the congestion state of a connection
+ * @brief Data structure that records the congestion state of a connection
  *
  * In this data structure, basic information that should be passed between
  * socket and the congestion control algorithm are saved. Through the code,
@@ -33,13 +34,13 @@ class TcpSocketState : public Object
   public:
     /**
      * Get the type ID.
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief TcpSocketState Constructor
+     * @brief TcpSocketState Constructor
      */
     TcpSocketState()
         : Object()
@@ -47,13 +48,13 @@ class TcpSocketState : public Object
     }
 
     /**
-     * \brief Copy constructor.
-     * \param other object to copy.
+     * @brief Copy constructor.
+     * @param other object to copy.
      */
     TcpSocketState(const TcpSocketState& other);
 
     /**
-     * \brief Definition of the Congestion state machine
+     * @brief Definition of the Congestion state machine
      *
      * The design of this state machine is taken from Linux v4.0, but it has been
      * maintained in the Linux mainline from ages. It basically avoids to maintain
@@ -81,7 +82,7 @@ class TcpSocketState : public Object
 
     // Note: "not triggered" events are currently not triggered by the code.
     /**
-     * \brief Congestion avoidance events
+     * @brief Congestion avoidance events
      */
     enum TcpCAEvent_t
     {
@@ -96,7 +97,7 @@ class TcpSocketState : public Object
     };
 
     /**
-     * \brief Parameter value related to ECN enable/disable functionality
+     * @brief Parameter value related to ECN enable/disable functionality
      *        similar to sysctl for tcp_ecn. Currently value 2 from
      *        https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt
      *        is not implemented.
@@ -109,7 +110,7 @@ class TcpSocketState : public Object
     };
 
     /**
-     * \brief ECN code points
+     * @brief ECN code points
      */
     enum EcnCodePoint_t
     {
@@ -120,7 +121,7 @@ class TcpSocketState : public Object
     };
 
     /**
-     * \brief ECN Modes
+     * @brief ECN Modes
      */
     enum EcnMode_t
     {
@@ -130,7 +131,7 @@ class TcpSocketState : public Object
     };
 
     /**
-     * \brief Definition of the Ecn state machine
+     * @brief Definition of the Ecn state machine
      *
      */
     enum EcnState_t
@@ -146,14 +147,14 @@ class TcpSocketState : public Object
     };
 
     /**
-     * \brief Literal names of TCP states for use in log messages
+     * @brief Literal names of TCP states for use in log messages
      */
-    static const char* const TcpCongStateName[TcpSocketState::CA_LAST_STATE];
+    INTERNET_EXPORT static const char* const TcpCongStateName[TcpSocketState::CA_LAST_STATE];
 
     /**
-     * \brief Literal names of ECN states for use in log messages
+     * @brief Literal names of ECN states for use in log messages
      */
-    static const char* const EcnStateName[TcpSocketState::ECN_CWR_SENT + 1];
+    INTERNET_EXPORT static const char* const EcnStateName[TcpSocketState::ECN_CWR_SENT + 1];
 
     // Congestion control
     TracedValue<uint32_t> m_cWnd{0}; //!< Congestion window
@@ -172,6 +173,8 @@ class TcpSocketState : public Object
     // Segment
     uint32_t m_segmentSize{0};          //!< Segment size
     SequenceNumber32 m_lastAckedSeq{0}; //!< Last sequence ACKed
+
+    bool m_sackEnabled{true}; //!< Whether SACK is enabled on the connection
 
     TracedValue<TcpCongState_t> m_congState{CA_OPEN}; //!< State in the Congestion state machine
 
@@ -196,15 +199,17 @@ class TcpSocketState : public Object
     Time m_minRtt{Time::Max()}; //!< Minimum RTT observed throughout the connection
 
     TracedValue<uint32_t> m_bytesInFlight{0}; //!< Bytes in flight
-    bool m_isCwndLimited{false};              //!< Whether throughput is limited by cwnd
-    TracedValue<Time> m_srtt;                 //!< Smoothed RTT
-    TracedValue<Time> m_lastRtt;              //!< RTT of the last (S)ACKed packet
+    TracedValue<uint32_t> m_fackAwnd{0};      //!< inflight data by FACK
+
+    bool m_isCwndLimited{false}; //!< Whether throughput is limited by cwnd
+    TracedValue<Time> m_srtt;    //!< Smoothed RTT
+    TracedValue<Time> m_lastRtt; //!< RTT of the last (S)ACKed packet
 
     Ptr<TcpRxBuffer> m_rxBuffer; //!< Rx buffer (reordering buffer)
 
-    EcnMode_t m_ecnMode{ClassicEcn}; //!< ECN mode
-    UseEcn_t m_useEcn{Off};          //!< Socket ECN capability
-
+    EcnMode_t m_ecnMode{ClassicEcn};     //!< ECN mode
+    UseEcn_t m_useEcn{Off};              //!< Socket ECN capability
+    bool m_abeEnabled{false};            //!< ABE mode
     EcnCodePoint_t m_ectCodePoint{Ect0}; //!< ECT code point to use
 
     uint32_t m_lastAckedSackedBytes{
@@ -212,9 +217,9 @@ class TcpSocketState : public Object
             //!< is similar to acked_sacked variable in Linux
 
     /**
-     * \brief Get cwnd in segments rather than bytes
+     * @brief Get cwnd in segments rather than bytes
      *
-     * \return Congestion window in segments
+     * @return Congestion window in segments
      */
     uint32_t GetCwndInSegments() const
     {
@@ -222,9 +227,9 @@ class TcpSocketState : public Object
     }
 
     /**
-     * \brief Get slow start thresh in segments rather than bytes
+     * @brief Get slow start thresh in segments rather than bytes
      *
-     * \return Slow start threshold in segments
+     * @return Slow start threshold in segments
      */
     uint32_t GetSsThreshInSegments() const
     {
@@ -241,21 +246,21 @@ namespace TracedValueCallback
 {
 
 /**
- * \ingroup tcp
+ * @ingroup tcp
  * TracedValue Callback signature for TcpCongState_t
  *
- * \param [in] oldValue original value of the traced variable
- * \param [in] newValue new value of the traced variable
+ * @param [in] oldValue original value of the traced variable
+ * @param [in] newValue new value of the traced variable
  */
 typedef void (*TcpCongState)(const TcpSocketState::TcpCongState_t oldValue,
                              const TcpSocketState::TcpCongState_t newValue);
 
 /**
- * \ingroup tcp
+ * @ingroup tcp
  * TracedValue Callback signature for EcnState_t
  *
- * \param [in] oldValue original value of the traced variable
- * \param [in] newValue new value of the traced variable
+ * @param [in] oldValue original value of the traced variable
+ * @param [in] newValue new value of the traced variable
  */
 typedef void (*EcnState)(const TcpSocketState::EcnState_t oldValue,
                          const TcpSocketState::EcnState_t newValue);

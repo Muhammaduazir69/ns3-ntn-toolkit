@@ -66,8 +66,7 @@ except ModuleNotFoundError:
 #   std::cout << " start="<<start<<" duration="<<duration<<std::endl;
 # }
 
-ns.cppyy.cppdef(
-    """
+ns.cppyy.cppdef("""
     using namespace ns3;
     void AdvancePosition(Ptr<Node> node){
         Ptr<MobilityModel> mob = node->GetObject<MobilityModel>();
@@ -76,9 +75,8 @@ ns.cppyy.cppdef(
         if (pos.x >= 210.0)
             return;
         mob->SetPosition(pos);
-        Simulator::Schedule(Seconds(1.0), AdvancePosition, node);
-    }"""
-)
+        Simulator::Schedule(Seconds(1), AdvancePosition, node);
+    }""")
 
 
 def main(argv):
@@ -124,7 +122,7 @@ def main(argv):
     mobility.Install(stas)
     mobility.Install(ap)
 
-    ns.Simulator.Schedule(ns.Seconds(1.0), ns.cppyy.gbl.AdvancePosition, ap.Get(0))
+    ns.Simulator.Schedule(ns.Seconds(1), ns.cppyy.gbl.AdvancePosition, ap.Get(0))
 
     socket = ns.PacketSocketAddress()
     socket.SetSingleDevice(staDevs.Get(0).GetIfIndex())
@@ -136,9 +134,9 @@ def main(argv):
 
     apps = onoff.Install(ns.NodeContainer(stas.Get(0)))
     apps.Start(ns.Seconds(0.5))
-    apps.Stop(ns.Seconds(43.0))
+    apps.Stop(ns.Seconds(43))
 
-    ns.Simulator.Stop(ns.Seconds(44.0))
+    ns.Simulator.Stop(ns.Seconds(44))
 
     #   Config::Connect("/NodeList/*/DeviceList/*/Tx", MakeCallback(&DevTxTrace));
     #   Config::Connect("/NodeList/*/DeviceList/*/Rx", MakeCallback(&DevRxTrace));

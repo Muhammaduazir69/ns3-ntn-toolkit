@@ -6,7 +6,7 @@
 
 #include "nr-lte-amc.h"
 
-#include <ns3/log.h>
+#include "ns3/log.h"
 
 namespace ns3
 {
@@ -87,12 +87,6 @@ LenaErrorModel::GetTypeId()
                             .SetParent<NrLteMiErrorModel>()
                             .AddConstructor<LenaErrorModel>();
     return tid;
-}
-
-TypeId
-LenaErrorModel::GetInstanceTypeId() const
-{
-    return LenaErrorModel::GetTypeId();
 }
 
 } // namespace ns3

@@ -2,13 +2,29 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file lena-v2-utils.h
+ *
+ * @brief Declaration of the LenaV2Utils class, which encapsulates the 5G-LENA (NR module)
+ * configuration of the comparison scenario. Its SetLenaV2SimulatorParameters() creates the
+ * NrHelper/EPC, builds the operation bands and bandwidth parts for TDD or FDD under overlapping
+ * or non-overlapping frequency reuse, and sets the error model, scheduler, numerology, TDD
+ * pattern, beamforming, and the gNB/UE uniform planar arrays (isotropic elements in calibration
+ * mode, 3GPP elements otherwise) before installing the per-sector gNB and UE devices. It also
+ * declares the callbacks that feed the SQLite writers: UE "DlDataSinr" to SinrOutputStats, UE
+ * "ReportPowerSpectralDensity" to PowerOutputStats (ueTxPower table), and gNB "SlotDataStats",
+ * "RBDataStats" and spectrum "RxDataTrace" to SlotOutputStats, RbOutputStats and PowerOutputStats
+ * (gnbRxPower table).
+ */
+
 #ifndef LENA_V2_UTILS_H
 #define LENA_V2_UTILS_H
 
 #include "sinr-output-stats.h"
 
-#include <ns3/hexagonal-grid-scenario-helper.h>
-#include <ns3/nr-module.h>
+#include "ns3/hexagonal-grid-scenario-helper.h"
+#include "ns3/nr-module.h"
 
 namespace ns3
 {

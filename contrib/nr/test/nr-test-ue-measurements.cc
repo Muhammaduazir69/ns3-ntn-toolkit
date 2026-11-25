@@ -8,36 +8,52 @@
 //              adapt lte-test-interference.cc to lte-ue-measurements.cc
 //         Budiarto Herman <budiarto.herman@magister.fi>
 
+/**
+ * @ingroup test
+ * @file nr-test-ue-measurements.cc
+ *
+ * @brief Implementation of the UE measurement test suites. `nr-ue-measurements` places two
+ * gNB/UE pairs at parametric distances and compares the RSRP/RSRQ reported by the UE PHY and
+ * carried in RRC measurement reports against precomputed reference values. The piecewise suites
+ * (`nr-ue-measurements-piecewise-1/2/3`) run one UE against one, two or three gNBs, teleporting
+ * the UE (or a gNB) between near and far positions, and assert that reports triggered by events
+ * A1-A5 arrive exactly at the expected times and carry the expected RSRP range values.
+ * `nr-ue-measurements-handover` switches the UE measurement configuration through a
+ * mid-simulation handover between two gNBs and verifies the reports produced under the target
+ * cell's configuration.
+ */
+
 #include "nr-test-ue-measurements.h"
 
-#include <ns3/boolean.h>
-#include <ns3/callback.h>
-#include <ns3/config.h>
-#include <ns3/double.h>
-#include <ns3/enum.h>
-#include <ns3/ff-mac-scheduler.h>
-#include <ns3/internet-stack-helper.h>
-#include <ns3/ipv4-address-helper.h>
-#include <ns3/ipv4-interface-container.h>
-#include <ns3/ipv4-static-routing-helper.h>
-#include <ns3/log.h>
-#include <ns3/mobility-helper.h>
-#include <ns3/net-device-container.h>
-#include <ns3/node-container.h>
-#include <ns3/nr-common.h>
-#include <ns3/nr-epc-helper.h>
-#include <ns3/nr-gnb-net-device.h>
-#include <ns3/nr-gnb-phy.h>
-#include <ns3/nr-gnb-rrc.h>
-#include <ns3/nr-helper.h>
-#include <ns3/nr-point-to-point-epc-helper.h>
-#include <ns3/nr-ue-net-device.h>
-#include <ns3/nr-ue-phy.h>
-#include <ns3/nr-ue-rrc.h>
-#include <ns3/point-to-point-epc-helper.h>
-#include <ns3/point-to-point-helper.h>
-#include <ns3/simulator.h>
-#include <ns3/string.h>
+#include "ns3/boolean.h"
+#include "ns3/callback.h"
+#include "ns3/config.h"
+#include "ns3/double.h"
+#include "ns3/enum.h"
+#include "ns3/internet-stack-helper.h"
+#include "ns3/ipv4-address-helper.h"
+#include "ns3/ipv4-interface-container.h"
+#include "ns3/ipv4-static-routing-helper.h"
+#include "ns3/isotropic-antenna-model.h"
+#include "ns3/log.h"
+#include "ns3/mobility-helper.h"
+#include "ns3/net-device-container.h"
+#include "ns3/node-container.h"
+#include "ns3/nr-channel-helper.h"
+#include "ns3/nr-common.h"
+#include "ns3/nr-epc-helper.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/nr-gnb-phy.h"
+#include "ns3/nr-gnb-rrc.h"
+#include "ns3/nr-helper.h"
+#include "ns3/nr-point-to-point-epc-helper.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-ue-phy.h"
+#include "ns3/nr-ue-rrc.h"
+#include "ns3/point-to-point-helper.h"
+#include "ns3/rng-seed-manager.h"
+#include "ns3/simulator.h"
+#include "ns3/string.h"
 
 using namespace ns3;
 
@@ -76,154 +92,159 @@ RecvMeasurementReportCallback(NrUeMeasurementsTestCase* testcase,
 NrUeMeasurementsTestSuite::NrUeMeasurementsTestSuite()
     : TestSuite("nr-ue-measurements", Type::SYSTEM)
 {
+    // RSRQ expectations are the NR fully-loaded RSRQ: RSSI is the total received
+    // power over all 12 subcarriers per RB (NrSpectrumValueHelper::SUBCARRIERS_PER_RB),
+    // so a dominant cell reads RSRP / (12 * RSRP) = 1/12 ~ -10.8 dB. These differ from
+    // the legacy LTE placeholders (which assumed an unloaded cell, max RSRQ -3 dB) by a
+    // fixed 10*log10(12/2) = 7.78 dB for the dominant-cell cases.
     AddTestCase(new NrUeMeasurementsTestCase("d1=10, d2=10000",
                                              10.000000,
                                              10000.000000,
-                                             -53.739702,
-                                             -113.739702,
-                                             -3.010305,
-                                             -63.010305),
+                                             -56.33,
+                                             -116.33,
+                                             -10.7918,
+                                             -70.7918),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=20, d2=10000",
                                              20.000000,
                                              10000.000000,
-                                             -59.760302,
-                                             -113.739702,
-                                             -3.010319,
-                                             -56.989719),
+                                             -62.35,
+                                             -116.33,
+                                             -10.7918,
+                                             -64.7712),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=50, d2=10000",
                                              50.000000,
                                              10000.000000,
-                                             -67.719102,
-                                             -113.739702,
-                                             -3.010421,
-                                             -49.031021),
+                                             -70.31,
+                                             -116.33,
+                                             -10.7919,
+                                             -56.8125),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=100, d2=10000",
                                              100.000000,
                                              10000.000000,
-                                             -73.739702,
-                                             -113.739702,
-                                             -3.010783,
-                                             -43.010783),
+                                             -76.33,
+                                             -116.33,
+                                             -10.7923,
+                                             -50.7923),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=200, d2=10000",
                                              200.000000,
                                              10000.000000,
-                                             -79.760302,
-                                             -113.739702,
-                                             -3.012232,
-                                             -36.991632),
+                                             -82.35,
+                                             -116.33,
+                                             -10.7937,
+                                             -44.7731),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=100, d2=10000",
                                              100.000000,
                                              10000.000000,
-                                             -73.739702,
-                                             -113.739702,
-                                             -3.010783,
-                                             -43.010783),
+                                             -76.33,
+                                             -116.33,
+                                             -10.7923,
+                                             -50.7923),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=200, d2=10000",
                                              200.000000,
                                              10000.000000,
-                                             -79.760302,
-                                             -113.739702,
-                                             -3.012232,
-                                             -36.991632),
+                                             -82.35,
+                                             -116.33,
+                                             -10.7937,
+                                             -44.7731),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=500, d2=10000",
                                              500.000000,
                                              10000.000000,
-                                             -87.719102,
-                                             -113.739702,
-                                             -3.022359,
-                                             -29.042959),
+                                             -90.32,
+                                             -116.33,
+                                             -10.8035,
+                                             -36.8241),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=1000, d2=10000",
                                              1000.000000,
                                              10000.000000,
-                                             -93.739702,
-                                             -113.739702,
-                                             -3.058336,
-                                             -23.058336),
+                                             -96.33,
+                                             -116.33,
+                                             -10.8385,
+                                             -30.8385),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=2000, d2=10000",
                                              2000.000000,
                                              10000.000000,
-                                             -99.760302,
-                                             -113.739702,
-                                             -3.199337,
-                                             -17.178738),
+                                             -102.35,
+                                             -116.33,
+                                             -10.9758,
+                                             -24.9552),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=5000, d2=10000",
                                              5000.000000,
                                              10000.000000,
-                                             -107.719102,
-                                             -113.739702,
-                                             -4.075793,
-                                             -10.096393),
+                                             -110.31,
+                                             -116.33,
+                                             -11.8312,
+                                             -17.8518),
                 TestCase::Duration::QUICK);
     AddTestCase(new NrUeMeasurementsTestCase("d1=10000, d2=10000",
                                              10000.000000,
                                              10000.000000,
-                                             -113.739702,
-                                             -113.739702,
-                                             -6.257687,
-                                             -6.257687),
+                                             -116.33,
+                                             -116.33,
+                                             -13.9758,
+                                             -13.9758),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=20000, d2=10000",
                                              20000.000000,
                                              10000.000000,
-                                             -119.760302,
-                                             -113.739702,
-                                             -10.373365,
-                                             -4.352765),
+                                             -122.35,
+                                             -116.33,
+                                             -18.0562,
+                                             -12.0356),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=50000, d2=10000",
                                              50000.000000,
                                              10000.000000,
-                                             -127.719102,
-                                             -113.739702,
-                                             -17.605046,
-                                             -3.625645),
+                                             -130.31,
+                                             -116.33,
+                                             -25.2697,
+                                             -11.2903),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=100000, d2=10000",
                                              100000.000000,
                                              10000.000000,
-                                             -133.739702,
-                                             -113.739702,
-                                             -23.511071,
-                                             -3.511071),
+                                             -136.33,
+                                             -116.33,
+                                             -31.1725,
+                                             -11.1725),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=200000, d2=10000",
                                              200000.000000,
                                              10000.000000,
-                                             -139.760302,
-                                             -113.739702,
-                                             -29.502549,
-                                             -3.481949),
+                                             -142.35,
+                                             -116.33,
+                                             -37.1632,
+                                             -11.1426),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=500000, d2=10000",
                                              500000.000000,
                                              10000.000000,
-                                             -147.719102,
-                                             -113.739702,
-                                             -37.453160,
-                                             -3.473760),
+                                             -150.31,
+                                             -116.33,
+                                             -45.1136,
+                                             -11.1342),
                 TestCase::Duration::EXTENSIVE);
     AddTestCase(new NrUeMeasurementsTestCase("d1=1000000, d2=10000",
                                              1000000.000000,
                                              10000.000000,
-                                             -153.739702,
-                                             -113.739702,
-                                             -43.472589,
-                                             -3.472589),
+                                             -156.33,
+                                             -116.33,
+                                             -51.1330,
+                                             -11.1330),
                 TestCase::Duration::EXTENSIVE);
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrUeMeasurementsTestSuite nrUeMeasurementsTestSuite;
@@ -262,7 +283,8 @@ NrUeMeasurementsTestCase::DoRun()
     Config::SetDefault("ns3::NrSpectrumPhy::DataErrorModelEnabled", BooleanValue(false));
     Config::SetDefault("ns3::NrAmc::AmcModel", EnumValue(NrAmc::ShannonModel));
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
-    nrHelper->SetAttribute("UseIdealRrc", BooleanValue(false));
+    // todo: switch back to false when RRC real is working
+    nrHelper->SetAttribute("UseIdealRrc", BooleanValue(true));
     Config::SetDefault("ns3::NrGnbPhy::TxPower", DoubleValue(30));
     Config::SetDefault("ns3::NrUePhy::TxPower", DoubleValue(23));
 
@@ -271,7 +293,7 @@ NrUeMeasurementsTestCase::DoRun()
 
     // LogComponentEnable ("NrUeMeasurementsTest", LOG_LEVEL_ALL);
 
-    // Create Nodes: eNodeB and UE
+    // Create Nodes: gNB and UE
     NodeContainer nrNodes;
     NodeContainer ueNodes1;
     NodeContainer ueNodes2;
@@ -298,21 +320,34 @@ NrUeMeasurementsTestCase::DoRun()
     mobility.SetPositionAllocator(positionAlloc);
     mobility.Install(allNodes);
 
-    auto bandwidthAndBWPPair =
-        nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1, BandwidthPartInfo::UMa}});
+    // Override the default antenna model with IsotropicAntennaModel
+    nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+    nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+
+    // Configure Friis propagation loss model before assign it to band
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
+
+    // Create and set the channel with the band
+    CcBwpCreator ccBwpCreator;
+    CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 5e6, 1);
+    OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+    channelHelper->AssignChannelsToBands({band});
+
+    // Create bandwidth part from band
+    BandwidthPartInfoPtrVector allBwps;
+    allBwps = CcBwpCreator::GetAllBwps({band});
+
     // Create Devices and install them in the Nodes (gNB and UE)
     NetDeviceContainer nrDevs;
     NetDeviceContainer ueDevs1;
     NetDeviceContainer ueDevs2;
     nrHelper->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerTdmaRR"));
-    nrDevs = nrHelper->InstallGnbDevice(nrNodes, bandwidthAndBWPPair.second);
-    ueDevs1 = nrHelper->InstallUeDevice(ueNodes1, bandwidthAndBWPPair.second);
-    ueDevs2 = nrHelper->InstallUeDevice(ueNodes2, bandwidthAndBWPPair.second);
-    nrHelper->UpdateDeviceConfigs(nrDevs);
-    nrHelper->UpdateDeviceConfigs(ueDevs1);
-    nrHelper->UpdateDeviceConfigs(ueDevs2);
+    nrDevs = nrHelper->InstallGnbDevice(nrNodes, allBwps);
+    ueDevs1 = nrHelper->InstallUeDevice(ueNodes1, allBwps);
+    ueDevs2 = nrHelper->InstallUeDevice(ueNodes2, allBwps);
 
-    // Attach UEs to eNodeBs
+    // Attach UEs to gNBs
     for (uint32_t i = 0; i < ueDevs1.GetN(); i++)
     {
         nrHelper->AttachToGnb(ueDevs1.Get(i), nrDevs.Get(0));
@@ -322,11 +357,11 @@ NrUeMeasurementsTestCase::DoRun()
         nrHelper->AttachToGnb(ueDevs2.Get(i), nrDevs.Get(1));
     }
 
-    // Activate an EPS bearer
-    NrEpsBearer::Qci q = NrEpsBearer::GBR_CONV_VOICE;
-    NrEpsBearer bearer(q);
-    nrHelper->ActivateDataRadioBearer(ueDevs1, bearer);
-    nrHelper->ActivateDataRadioBearer(ueDevs2, bearer);
+    // Activate an QoS flow
+    NrQosFlow::FiveQi q = NrQosFlow::GBR_CONV_VOICE;
+    NrQosFlow flow(q);
+    nrHelper->ActivateDataRadioBearer(ueDevs1, flow);
+    nrHelper->ActivateDataRadioBearer(ueDevs2, flow);
 
     Config::Connect("/NodeList/2/DeviceList/0/$ns3::NrNetDevice/$ns3::NrUeNetDevice/"
                     "ComponentCarrierMapUe/*/NrUePhy/ReportUeMeasurements",
@@ -339,6 +374,11 @@ NrUeMeasurementsTestCase::DoRun()
                     MakeBoundCallback(&ReportUeMeasurementsCallback, this));
     Config::Connect("/NodeList/1/DeviceList/0/NrGnbRrc/RecvMeasurementReport",
                     MakeBoundCallback(&RecvMeasurementReportCallback, this));
+
+    RngSeedManager::SetSeed(1);
+    RngSeedManager::SetRun(1);
+    nrHelper->AssignStreams({.gnbDevs = nrDevs, .ueDevs = ueDevs1});
+    nrHelper->AssignStreams({.ueDevs = ueDevs2, .ueDevStream = 7000});
 
     // need to allow for RRC connection establishment + SRS
     Simulator::Stop(Seconds(0.800));
@@ -363,16 +403,16 @@ NrUeMeasurementsTestCase::ReportUeMeasurements(uint16_t rnti,
             NS_LOG_DEBUG("UE serving cellId " << cellId << " Rxed RSRP " << rsrp << " thr "
                                               << m_rsrpDbmUeServingCell << " RSRQ " << rsrq
                                               << " thr " << m_rsrqDbUeServingCell);
-            NS_TEST_ASSERT_MSG_EQ_TOL(m_rsrpDbmUeServingCell, rsrp, 0.2, "Wrong RSRP UE 1");
-            NS_TEST_ASSERT_MSG_EQ_TOL(m_rsrqDbUeServingCell, rsrq, 0.2, "Wrong RSRQ UE 1");
+            NS_TEST_ASSERT_MSG_EQ_TOL(rsrp, m_rsrpDbmUeServingCell, 0.2, "Wrong RSRP UE 1");
+            NS_TEST_ASSERT_MSG_EQ_TOL(rsrq, m_rsrqDbUeServingCell, 0.2, "Wrong RSRQ UE 1");
         }
         else
         {
             NS_LOG_DEBUG("UE neighbor cellId " << cellId << " Rxed RSRP " << rsrp << " thr "
                                                << m_rsrpDbmUeNeighborCell << " RSRQ " << rsrq
                                                << " thr " << m_rsrqDbUeNeighborCell);
-            NS_TEST_ASSERT_MSG_EQ_TOL(m_rsrpDbmUeNeighborCell, rsrp, 0.2, "Wrong RSRP UE 2");
-            NS_TEST_ASSERT_MSG_EQ_TOL(m_rsrqDbUeNeighborCell, rsrq, 0.2, "Wrong RSRQ UE ");
+            NS_TEST_ASSERT_MSG_EQ_TOL(rsrp, m_rsrpDbmUeNeighborCell, 0.2, "Wrong RSRP UE 2");
+            NS_TEST_ASSERT_MSG_EQ_TOL(rsrq, m_rsrqDbUeNeighborCell, 0.2, "Wrong RSRQ UE 2");
         }
     }
 }
@@ -473,12 +513,13 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     config.threshold1.range = 0;
     config.triggerQuantity = NrRrcSap::ReportConfigEutra::RSRP;
     config.reportInterval = NrRrcSap::ReportConfigEutra::MS120;
+
     expectedTime.clear();
     expectedTime << 200 << 320 << 440 << 560 << 680 << 800 << 920 << 1040 << 1160 << 1280 << 1400
                  << 1520 << 1640 << 1760 << 1880 << 2000 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 67 << 67 << 57 << 57 << 66 << 47 << 47 << 66 << 66 << 57 << 51 << 51 << 47 << 47
-                 << 51 << 57 << 57;
+    expectedRsrp << 80 << 80 << 77 << 77 << 80 << 62 << 62 << 80 << 80 << 71 << 65 << 65 << 60 << 60
+                 << 65 << 71 << 71;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A1 with very low threshold",
                     config,
@@ -487,11 +528,11 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
                 TestCase::Duration::EXTENSIVE);
 
     // With normal threshold
-    config.threshold1.range = 54;
+    config.threshold1.range = 70;
     expectedTime.clear();
     expectedTime << 200 << 320 << 440 << 560 << 680 << 1000 << 1120 << 1240 << 1360 << 2000 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 67 << 67 << 57 << 57 << 66 << 66 << 66 << 57 << 57 << 57 << 57;
+    expectedRsrp << 80 << 80 << 77 << 77 << 80 << 80 << 80 << 71 << 71 << 71 << 71;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A1 with normal threshold",
                     config,
@@ -504,7 +545,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     expectedTime.clear();
     expectedTime << 264 << 384 << 504 << 624 << 744 << 1064 << 1184 << 1304 << 1424 << 2064 << 2184;
     expectedRsrp.clear();
-    expectedRsrp << 67 << 67 << 57 << 66 << 66 << 66 << 66 << 57 << 51 << 57 << 57;
+    expectedRsrp << 80 << 80 << 77 << 80 << 80 << 80 << 80 << 71 << 65 << 71 << 71;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A1 with short time-to-trigger",
                     config,
@@ -517,7 +558,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     expectedTime.clear();
     expectedTime << 328 << 448 << 568 << 688 << 808 << 1128 << 1248 << 1368 << 1488 << 2128;
     expectedRsrp.clear();
-    expectedRsrp << 67 << 57 << 57 << 66 << 47 << 66 << 57 << 57 << 51 << 57;
+    expectedRsrp << 80 << 77 << 77 << 80 << 62 << 80 << 71 << 71 << 65 << 71;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A1 with long time-to-trigger",
                     config,
@@ -530,7 +571,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     expectedTime.clear();
     expectedTime << 456 << 576 << 696 << 816 << 936 << 1056 << 1176 << 1296 << 1416 << 1536;
     expectedRsrp.clear();
-    expectedRsrp << 57 << 57 << 66 << 47 << 47 << 66 << 66 << 57 << 51 << 51;
+    expectedRsrp << 77 << 77 << 80 << 62 << 62 << 80 << 80 << 71 << 65 << 65;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A1 with super time-to-trigger",
                     config,
@@ -542,9 +583,9 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     config.hysteresis = 8;
     config.timeToTrigger = 0;
     expectedTime.clear();
-    expectedTime << 200 << 320 << 440 << 560 << 680 << 1000 << 1120 << 1240 << 1360 << 1480 << 2200;
+    expectedTime << 200 << 320 << 440 << 560 << 680 << 1000 << 1120 << 1240 << 1360 << 2200;
     expectedRsrp.clear();
-    expectedRsrp << 67 << 67 << 57 << 57 << 66 << 66 << 66 << 57 << 57 << 51 << 67;
+    expectedRsrp << 80 << 80 << 77 << 77 << 80 << 80 << 80 << 71 << 71 << 80;
     AddTestCase(
         new NrUeMeasurementsPiecewiseTestCase1("Piecewise test case 1 - Event A1 with hysteresis",
                                                config,
@@ -553,7 +594,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
         TestCase::Duration::QUICK);
 
     // With very high threshold
-    config.threshold1.range = 97;
+    config.threshold1.range = 113;
     config.hysteresis = 0;
     expectedTime.clear();
     expectedRsrp.clear();
@@ -579,11 +620,11 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
                 TestCase::Duration::TAKES_FOREVER);
 
     // With normal threshold
-    config.threshold1.range = 54;
+    config.threshold1.range = 70;
     expectedTime.clear();
     expectedTime << 800 << 920 << 1400 << 1520 << 1640 << 1760 << 1880;
     expectedRsrp.clear();
-    expectedRsrp << 47 << 47 << 51 << 51 << 47 << 47 << 51;
+    expectedRsrp << 62 << 62 << 65 << 65 << 60 << 60 << 65;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A2 with normal threshold",
                     config,
@@ -596,7 +637,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     expectedTime.clear();
     expectedTime << 864 << 984 << 1464 << 1584 << 1704 << 1824 << 1944;
     expectedRsrp.clear();
-    expectedRsrp << 47 << 47 << 51 << 51 << 47 << 51 << 51;
+    expectedRsrp << 62 << 62 << 65 << 65 << 60 << 65 << 65;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A2 with short time-to-trigger",
                     config,
@@ -609,7 +650,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     expectedTime.clear();
     expectedTime << 928 << 1048 << 1528 << 1648 << 1768 << 1888 << 2008;
     expectedRsrp.clear();
-    expectedRsrp << 47 << 66 << 51 << 47 << 47 << 51 << 57;
+    expectedRsrp << 62 << 80 << 65 << 60 << 60 << 65 << 71;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A2 with long time-to-trigger",
                     config,
@@ -622,7 +663,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     expectedTime.clear();
     expectedTime << 1656 << 1776 << 1896 << 2016 << 2136;
     expectedRsrp.clear();
-    expectedRsrp << 47 << 47 << 51 << 57 << 57;
+    expectedRsrp << 60 << 60 << 65 << 71 << 71;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A2 with super time-to-trigger",
                     config,
@@ -634,9 +675,9 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     config.hysteresis = 8;
     config.timeToTrigger = 0;
     expectedTime.clear();
-    expectedTime << 800 << 920 << 1600 << 1720 << 1840 << 1960 << 2080;
+    expectedTime << 800 << 920 << 1400 << 1520 << 1640 << 1760 << 1880 << 2000 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 47 << 47 << 47 << 47 << 51 << 51 << 57;
+    expectedRsrp << 62 << 62 << 65 << 65 << 60 << 60 << 65 << 71 << 71;
     AddTestCase(
         new NrUeMeasurementsPiecewiseTestCase1("Piecewise test case 1 - Event A2 with hysteresis",
                                                config,
@@ -645,14 +686,14 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
         TestCase::Duration::EXTENSIVE);
 
     // With very high threshold
-    config.threshold1.range = 97;
+    config.threshold1.range = 113;
     config.hysteresis = 0;
     expectedTime.clear();
     expectedTime << 200 << 320 << 440 << 560 << 680 << 800 << 920 << 1040 << 1160 << 1280 << 1400
                  << 1520 << 1640 << 1760 << 1880 << 2000 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 67 << 67 << 57 << 57 << 66 << 47 << 47 << 66 << 66 << 57 << 51 << 51 << 47 << 47
-                 << 51 << 57 << 57;
+    expectedRsrp << 80 << 80 << 77 << 77 << 80 << 62 << 62 << 80 << 80 << 71 << 65 << 65 << 60 << 60
+                 << 65 << 71 << 71;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1(
                     "Piecewise test case 1 - Event A2 with very high threshold",
                     config,
@@ -683,7 +724,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     // === Event A4 (neighbour becomes better than threshold) ===
 
     config.eventId = NrRrcSap::ReportConfigEutra::EVENT_A4;
-    config.threshold1.range = 54;
+    config.threshold1.range = 70;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1("Piecewise test case 1 - Event A4",
                                                        config,
                                                        expectedTime,
@@ -694,7 +735,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
     // another absolute threshold2) ===
 
     config.eventId = NrRrcSap::ReportConfigEutra::EVENT_A5;
-    config.threshold2.range = 58;
+    config.threshold2.range = 74;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase1("Piecewise test case 1 - Event A5",
                                                        config,
                                                        expectedTime,
@@ -704,7 +745,7 @@ NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1()
 } // end of NrUeMeasurementsPiecewiseTestSuite1::NrUeMeasurementsPiecewiseTestSuite1
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrUeMeasurementsPiecewiseTestSuite1 nrUeMeasurementsPiecewiseTestSuite1;
@@ -755,7 +796,7 @@ NrUeMeasurementsPiecewiseTestCase1::DoRun()
     // Disable Uplink Power Control
     Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
 
-    // Create Nodes: eNodeB and UE
+    // Create Nodes: gNB and UE
     NodeContainer nrNodes;
     NodeContainer ueNodes;
     nrNodes.Create(1);
@@ -764,7 +805,7 @@ NrUeMeasurementsPiecewiseTestCase1::DoRun()
     /*
      * The topology is the following:
      *
-     * eNodeB     UE
+     * gNB     UE
      *    |       |
      *    x ----- x --------- x --------------- x ------------------- x
      *      100 m |   200 m   |      300 m      |        400 m        |
@@ -773,7 +814,7 @@ NrUeMeasurementsPiecewiseTestCase1::DoRun()
      */
 
     Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
-    positionAlloc->Add(Vector(0.0, 0.0, 0.0));   // eNodeB
+    positionAlloc->Add(Vector(0.0, 0.0, 0.0));   // gNB
     positionAlloc->Add(Vector(100.0, 0.0, 0.0)); // UE
     MobilityHelper mobility;
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -785,28 +826,42 @@ NrUeMeasurementsPiecewiseTestCase1::DoRun()
     // Disable layer-3 filtering
     Config::SetDefault("ns3::NrGnbRrc::RsrpFilterCoefficient", UintegerValue(0));
 
-    auto bandwidthAndBWPPair =
-        nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1, BandwidthPartInfo::UMa}});
+    // Override the default antenna model with IsotropicAntennaModel
+    nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+    nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+
+    // Configure Friis propagation loss model before assign it to band
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
+
+    // Create and set the channel with the band
+    CcBwpCreator ccBwpCreator;
+    CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 5e6, 1);
+    OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+    channelHelper->AssignChannelsToBands({band});
+
+    // Create bandwidth part from band
+    BandwidthPartInfoPtrVector allBwps;
+    allBwps = CcBwpCreator::GetAllBwps({band});
+
     // Create Devices and install them in the Nodes (gNB and UE)
     NetDeviceContainer nrDevs;
     NetDeviceContainer ueDevs;
     nrHelper->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerTdmaRR"));
-    nrDevs = nrHelper->InstallGnbDevice(nrNodes, bandwidthAndBWPPair.second);
-    ueDevs = nrHelper->InstallUeDevice(ueNodes, bandwidthAndBWPPair.second);
-    nrHelper->UpdateDeviceConfigs(nrDevs);
-    nrHelper->UpdateDeviceConfigs(ueDevs);
+    nrDevs = nrHelper->InstallGnbDevice(nrNodes, allBwps);
+    ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
     // Setup UE measurement configuration
     Ptr<NrGnbRrc> nrRrc = nrDevs.Get(0)->GetObject<NrGnbNetDevice>()->GetRrc();
     m_expectedMeasId = nrRrc->AddUeMeasReportConfig(m_config).at(0);
 
-    // Attach UE to eNodeB
+    // Attach UE to gNB
     nrHelper->AttachToGnb(ueDevs.Get(0), nrDevs.Get(0));
 
-    // Activate an EPS bearer
-    NrEpsBearer::Qci q = NrEpsBearer::GBR_CONV_VOICE;
-    NrEpsBearer bearer(q);
-    nrHelper->ActivateDataRadioBearer(ueDevs, bearer);
+    // Activate an QoS flow
+    NrQosFlow::FiveQi q = NrQosFlow::GBR_CONV_VOICE;
+    NrQosFlow flow(q);
+    nrHelper->ActivateDataRadioBearer(ueDevs, flow);
 
     // Connect to trace sources
     Config::Connect(
@@ -849,6 +904,10 @@ NrUeMeasurementsPiecewiseTestCase1::DoRun()
                         &NrUeMeasurementsPiecewiseTestCase1::TeleportVeryNear,
                         this);
 
+    RngSeedManager::SetSeed(1);
+    RngSeedManager::SetRun(1);
+    nrHelper->AssignStreams({.gnbDevs = nrDevs, .ueDevs = ueDevs});
+
     // Run simulation
     Simulator::Stop(Seconds(2.201));
     Simulator::Run();
@@ -865,7 +924,12 @@ NrUeMeasurementsPiecewiseTestCase1::DoTeardown()
                           true,
                           "Reporting should have occurred at " << m_itExpectedTime->As(Time::S));
     hasEnded = m_itExpectedRsrp == m_expectedRsrp.end();
-    NS_ASSERT(hasEnded);
+    NS_TEST_ASSERT_MSG_EQ(hasEnded,
+                          true,
+                          "List still contains "
+                              << m_expectedRsrp.size() -
+                                     std::distance(m_expectedRsrp.begin(), m_itExpectedRsrp)
+                              << " samples");
 }
 
 void
@@ -986,7 +1050,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 200 << 440 << 680 << 920 << 1160 << 1400 << 1640 << 1880 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 73 << 63 << 72 << 52 << 72 << 56 << 52 << 56 << 59;
+    expectedRsrp << 86 << 83 << 86 << 67 << 86 << 69 << 65 << 69 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A1 with very low threshold",
                     config,
@@ -995,11 +1059,11 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
                 TestCase::Duration::EXTENSIVE);
 
     // With normal threshold
-    config.threshold1.range = 58;
+    config.threshold1.range = 74;
     expectedTime.clear();
-    expectedTime << 200 << 440 << 680 << 1000 << 1240 << 2000;
+    expectedTime << 200 << 440 << 680 << 1000 << 2200;
     expectedRsrp.clear();
-    expectedRsrp << 73 << 63 << 72 << 72 << 59 << 59;
+    expectedRsrp << 86 << 83 << 86 << 86 << 86;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A1 with normal threshold",
                     config,
@@ -1010,9 +1074,9 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     // With hysteresis
     config.hysteresis = 6;
     expectedTime.clear();
-    expectedTime << 200 << 440 << 680 << 1000 << 1240 << 1480 << 2200;
+    expectedTime << 200 << 440 << 680 << 1000 << 1240 << 2200;
     expectedRsrp.clear();
-    expectedRsrp << 73 << 63 << 72 << 72 << 59 << 56 << 72;
+    expectedRsrp << 86 << 83 << 86 << 86 << 73 << 86;
     AddTestCase(
         new NrUeMeasurementsPiecewiseTestCase2("Piecewise test case 2 - Event A1 with hysteresis",
                                                config,
@@ -1047,11 +1111,11 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
                 TestCase::Duration::TAKES_FOREVER);
 
     // With normal threshold
-    config.threshold1.range = 58;
+    config.threshold1.range = 74;
     expectedTime.clear();
-    expectedTime << 800 << 1400 << 1640 << 1880;
+    expectedTime << 800 << 1200 << 1440 << 1680 << 1920 << 2160;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 52 << 56;
+    expectedRsrp << 67 << 73 << 69 << 65 << 69 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A2 with normal threshold",
                     config,
@@ -1062,9 +1126,9 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     // With hysteresis
     config.hysteresis = 6;
     expectedTime.clear();
-    expectedTime << 800 << 1600 << 1840 << 2080;
+    expectedTime << 800 << 1400 << 1640 << 1880 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 52 << 56 << 59;
+    expectedRsrp << 67 << 69 << 65 << 69 << 72;
     AddTestCase(
         new NrUeMeasurementsPiecewiseTestCase2("Piecewise test case 2 - Event A2 with hysteresis",
                                                config,
@@ -1078,7 +1142,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 200 << 440 << 680 << 920 << 1160 << 1400 << 1640 << 1880 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 73 << 63 << 72 << 52 << 72 << 56 << 52 << 56 << 59;
+    expectedRsrp << 86 << 83 << 86 << 67 << 86 << 69 << 65 << 69 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A2 with very high threshold",
                     config,
@@ -1093,9 +1157,9 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     config.threshold1.range = 0;
     config.a3Offset = 7;
     expectedTime.clear();
-    expectedTime << 800 << 1600;
+    expectedTime << 800 << 1600 << 1840;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 52;
+    expectedRsrp << 67 << 65 << 69;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A3 with positive offset",
                     config,
@@ -1108,7 +1172,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 800 << 1400 << 1640 << 1880;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 52 << 56;
+    expectedRsrp << 67 << 69 << 65 << 69;
     AddTestCase(
         new NrUeMeasurementsPiecewiseTestCase2("Piecewise test case 2 - Event A3 with zero offset",
                                                config,
@@ -1121,7 +1185,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 960 << 1560 << 1800 << 2040;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 56 << 59;
+    expectedRsrp << 67 << 69 << 69 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A3 with short time-to-trigger",
                     config,
@@ -1134,7 +1198,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 1720 << 1960 << 2200;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 72;
+    expectedRsrp << 65 << 69 << 86;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A3 with super time-to-trigger",
                     config,
@@ -1149,7 +1213,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 800 << 1000 << 1600 << 1840 << 2080 << 2200;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 72 << 52 << 56 << 59 << 72;
+    expectedRsrp << 67 << 86 << 65 << 69 << 72 << 86;
     AddTestCase(
         new NrUeMeasurementsPiecewiseTestCase2("Piecewise test case 2 - Event A3 with hysteresis",
                                                config,
@@ -1164,7 +1228,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 400 << 800 << 1200 << 1440 << 1680 << 1920 << 2160;
     expectedRsrp.clear();
-    expectedRsrp << 63 << 52 << 59 << 56 << 52 << 56 << 59;
+    expectedRsrp << 83 << 67 << 73 << 69 << 65 << 69 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A3 with negative offset",
                     config,
@@ -1181,7 +1245,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 200 << 440 << 680 << 920 << 1160 << 1400 << 1640 << 1880 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 73 << 63 << 72 << 52 << 72 << 56 << 52 << 56 << 59;
+    expectedRsrp << 86 << 83 << 86 << 67 << 86 << 69 << 65 << 69 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A4 with very low threshold",
                     config,
@@ -1190,11 +1254,11 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
                 TestCase::Duration::QUICK);
 
     // With normal threshold
-    config.threshold1.range = 58;
+    config.threshold1.range = 74;
     expectedTime.clear();
-    expectedTime << 400 << 800 << 1400 << 1640 << 1880;
+    expectedTime << 400 << 800 << 1600 << 1840;
     expectedRsrp.clear();
-    expectedRsrp << 63 << 52 << 56 << 52 << 56;
+    expectedRsrp << 83 << 67 << 65 << 69;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A4 with normal threshold",
                     config,
@@ -1205,9 +1269,9 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     // With short time-to-trigger
     config.timeToTrigger = 160;
     expectedTime.clear();
-    expectedTime << 560 << 960 << 1560 << 1800 << 2040;
+    expectedTime << 560 << 960 << 1760 << 2000;
     expectedRsrp.clear();
-    expectedRsrp << 63 << 52 << 56 << 56 << 59;
+    expectedRsrp << 83 << 67 << 65 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A4 with short time-to-trigger",
                     config,
@@ -1218,9 +1282,12 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     // With super time-to-trigger
     config.timeToTrigger = 320;
     expectedTime.clear();
-    expectedTime << 1720 << 1960 << 2200;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 72;
+    expectedTime.clear();
+    expectedTime << 1920 << 2160;
+    expectedRsrp.clear();
+    expectedRsrp << 69 << 72;
+
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A4 with super time-to-trigger",
                     config,
@@ -1232,9 +1299,9 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     config.hysteresis = 6;
     config.timeToTrigger = 0;
     expectedTime.clear();
-    expectedTime << 400 << 800 << 1600 << 1840 << 2080;
+    expectedTime << 400 << 640 << 880 << 1120 << 1600 << 1840;
     expectedRsrp.clear();
-    expectedRsrp << 63 << 52 << 52 << 56 << 59;
+    expectedRsrp << 83 << 86 << 67 << 86 << 65 << 69;
     AddTestCase(
         new NrUeMeasurementsPiecewiseTestCase2("Piecewise test case 2 - Event A4 with hysteresis",
                                                config,
@@ -1289,12 +1356,12 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
                 TestCase::Duration::TAKES_FOREVER);
 
     // With normal-low threshold
-    config.threshold1.range = 58;
+    config.threshold1.range = 74;
     config.threshold2.range = 0;
     expectedTime.clear();
-    expectedTime << 800 << 1400 << 1640 << 1880;
+    expectedTime << 800 << 1200 << 1440 << 1680 << 1920 << 2160;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 52 << 56;
+    expectedRsrp << 67 << 73 << 69 << 65 << 69 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A5 with normal-low threshold",
                     config,
@@ -1303,11 +1370,11 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
                 TestCase::Duration::EXTENSIVE);
 
     // With normal-normal threshold
-    config.threshold2.range = 58;
+    config.threshold2.range = 74;
     expectedTime.clear();
-    expectedTime << 800 << 1400 << 1640 << 1880;
+    expectedTime << 800 << 1600 << 1840;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 52 << 56;
+    expectedRsrp << 67 << 65 << 69;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A5 with normal-normal threshold",
                     config,
@@ -1318,9 +1385,9 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     // With short time-to-trigger
     config.timeToTrigger = 160;
     expectedTime.clear();
-    expectedTime << 960 << 1560 << 1800 << 2040;
+    expectedTime << 960 << 1760 << 2000;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 56 << 59;
+    expectedRsrp << 67 << 65 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A5 with short time-to-trigger",
                     config,
@@ -1331,9 +1398,13 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     // With super time-to-trigger
     config.timeToTrigger = 320;
     expectedTime.clear();
-    expectedTime << 1720 << 1960 << 2200;
+    // expectedTime << 1720 << 1960 << 2200;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 56 << 72;
+    // expectedRsrp << 68 << 72 << 72;    expectedTime.clear();
+    expectedTime << 1920 << 2160;
+    expectedRsrp.clear();
+    expectedRsrp << 69 << 72;
+
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A5 with super time-to-trigger",
                     config,
@@ -1345,9 +1416,9 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     config.hysteresis = 6;
     config.timeToTrigger = 0;
     expectedTime.clear();
-    expectedTime << 800 << 1600 << 1840 << 2080;
+    expectedTime << 800 << 1600 << 1840; //<< 2080;
     expectedRsrp.clear();
-    expectedRsrp << 52 << 52 << 56 << 59;
+    expectedRsrp << 67 << 65 << 69; // << 59;
     AddTestCase(
         new NrUeMeasurementsPiecewiseTestCase2("Piecewise test case 2 - Event A5 with hysteresis",
                                                config,
@@ -1373,7 +1444,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
     expectedTime.clear();
     expectedTime << 200 << 440 << 680 << 920 << 1160 << 1400 << 1640 << 1880 << 2120;
     expectedRsrp.clear();
-    expectedRsrp << 73 << 63 << 72 << 52 << 72 << 56 << 52 << 56 << 59;
+    expectedRsrp << 86 << 83 << 86 << 67 << 86 << 69 << 65 << 69 << 72;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A5 with high-low threshold",
                     config,
@@ -1382,11 +1453,11 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
                 TestCase::Duration::EXTENSIVE);
 
     // With high-normal threshold
-    config.threshold2.range = 58;
+    config.threshold2.range = 74;
     expectedTime.clear();
-    expectedTime << 400 << 800 << 1400 << 1640 << 1880;
+    expectedTime << 400 << 800 << 1600 << 1840;
     expectedRsrp.clear();
-    expectedRsrp << 63 << 52 << 56 << 52 << 56;
+    expectedRsrp << 83 << 67 << 65 << 69;
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
                     "Piecewise test case 2 - Event A5 with high-normal threshold",
                     config,
@@ -1395,7 +1466,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
                 TestCase::Duration::TAKES_FOREVER);
 
     // With high-high threshold
-    config.threshold2.range = 97;
+    config.threshold2.range = 113;
     expectedTime.clear();
     expectedRsrp.clear();
     AddTestCase(new NrUeMeasurementsPiecewiseTestCase2(
@@ -1408,7 +1479,7 @@ NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2()
 } // end of NrUeMeasurementsPiecewiseTestSuite2::NrUeMeasurementsPiecewiseTestSuite2
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrUeMeasurementsPiecewiseTestSuite2 nrUeMeasurementsPiecewiseTestSuite2;
@@ -1459,7 +1530,7 @@ NrUeMeasurementsPiecewiseTestCase2::DoRun()
     // Disable Uplink Power Control
     Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
 
-    // Create Nodes: eNodeB and UE
+    // Create Nodes: gNB and UE
     NodeContainer nrNodes;
     NodeContainer ueNodes;
     nrNodes.Create(2);
@@ -1468,7 +1539,7 @@ NrUeMeasurementsPiecewiseTestCase2::DoRun()
     /*
      * The topology is the following:
      *
-     * eNodeB    UE                                                eNodeB
+     * gNB    UE                                                gNB
      *    |      |                                                    |
      *    x ---- x --------------- x ------- x --------------- x ---- x
      *      50 m |      200 m      |  100 m  |      200 m      | 50 m
@@ -1477,8 +1548,8 @@ NrUeMeasurementsPiecewiseTestCase2::DoRun()
      */
 
     Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
-    positionAlloc->Add(Vector(0.0, 0.0, 0.0));   // Serving eNodeB
-    positionAlloc->Add(Vector(600.0, 0.0, 0.0)); // Neighbour eNodeB
+    positionAlloc->Add(Vector(0.0, 0.0, 0.0));   // Serving gNB
+    positionAlloc->Add(Vector(600.0, 0.0, 0.0)); // Neighbour gNB
     positionAlloc->Add(Vector(50.0, 0.0, 0.0));  // UE
     MobilityHelper mobility;
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -1489,16 +1560,32 @@ NrUeMeasurementsPiecewiseTestCase2::DoRun()
 
     // Disable layer-3 filtering
     Config::SetDefault("ns3::NrGnbRrc::RsrpFilterCoefficient", UintegerValue(0));
-    auto bandwidthAndBWPPair =
-        nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1, BandwidthPartInfo::UMa}});
+
+    // Override the default antenna model with IsotropicAntennaModel
+    nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+    nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+
+    // Configure Friis propagation loss model before assign it to band
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
+
+    // Create and set the channel with the band
+    CcBwpCreator ccBwpCreator;
+    CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 5e6, 1);
+    OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+    channelHelper->AssignChannelsToBands({band});
+
+    // Create bandwidth part from band
+    BandwidthPartInfoPtrVector allBwps;
+    allBwps = CcBwpCreator::GetAllBwps({band});
+
     // Create Devices and install them in the Nodes (gNB and UE)
     NetDeviceContainer nrDevs;
     NetDeviceContainer ueDevs;
+    nrDevs = nrHelper->InstallGnbDevice(nrNodes, allBwps);
+    ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
+
     nrHelper->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerTdmaRR"));
-    nrDevs = nrHelper->InstallGnbDevice(nrNodes, bandwidthAndBWPPair.second);
-    ueDevs = nrHelper->InstallUeDevice(ueNodes, bandwidthAndBWPPair.second);
-    nrHelper->UpdateDeviceConfigs(nrDevs);
-    nrHelper->UpdateDeviceConfigs(ueDevs);
 
     // Setup UE measurement configuration in serving cell
     Ptr<NrGnbRrc> nrRrc1 = nrDevs.Get(0)->GetObject<NrGnbNetDevice>()->GetRrc();
@@ -1508,15 +1595,15 @@ NrUeMeasurementsPiecewiseTestCase2::DoRun()
     Ptr<NrGnbRrc> nrRrc2 = nrDevs.Get(1)->GetObject<NrGnbNetDevice>()->GetRrc();
     nrRrc2->SetAttribute("AdmitHandoverRequest", BooleanValue(false));
 
-    // Attach UE to serving eNodeB
+    // Attach UE to serving gNB
     nrHelper->AttachToGnb(ueDevs.Get(0), nrDevs.Get(0));
 
-    // Activate an EPS bearer
-    NrEpsBearer::Qci q = NrEpsBearer::GBR_CONV_VOICE;
-    NrEpsBearer bearer(q);
-    nrHelper->ActivateDataRadioBearer(ueDevs, bearer);
+    // Activate an QoS flow
+    NrQosFlow::FiveQi q = NrQosFlow::GBR_CONV_VOICE;
+    NrQosFlow flow(q);
+    nrHelper->ActivateDataRadioBearer(ueDevs, flow);
 
-    // Connect to trace sources in serving eNodeB
+    // Connect to trace sources in serving gNB
     Config::Connect(
         "/NodeList/0/DeviceList/0/NrGnbRrc/RecvMeasurementReport",
         MakeCallback(&NrUeMeasurementsPiecewiseTestCase2::RecvMeasurementReportCallback, this));
@@ -1557,6 +1644,10 @@ NrUeMeasurementsPiecewiseTestCase2::DoRun()
                         &NrUeMeasurementsPiecewiseTestCase2::TeleportVeryNear,
                         this);
 
+    RngSeedManager::SetSeed(1);
+    RngSeedManager::SetRun(1);
+    nrHelper->AssignStreams({.gnbDevs = nrDevs, .ueDevs = ueDevs});
+
     // Run simulation
     Simulator::Stop(Seconds(2.201));
     Simulator::Run();
@@ -1573,7 +1664,12 @@ NrUeMeasurementsPiecewiseTestCase2::DoTeardown()
                           true,
                           "Reporting should have occurred at " << m_itExpectedTime->As(Time::S));
     hasEnded = m_itExpectedRsrp == m_expectedRsrp.end();
-    NS_ASSERT(hasEnded);
+    NS_TEST_ASSERT_MSG_EQ(hasEnded,
+                          true,
+                          "List still contains "
+                              << m_expectedRsrp.size() -
+                                     std::distance(m_expectedRsrp.begin(), m_itExpectedRsrp)
+                              << " samples");
 }
 
 void
@@ -1715,7 +1811,7 @@ NrUeMeasurementsPiecewiseTestSuite3::NrUeMeasurementsPiecewiseTestSuite3()
     // of the simulation.
     // 2. When neighbor 2 (gNB3) is placed at a very far position, its RSRP would
     // be less than the chosen threshold, hence, UE will not include it in its
-    // initial report(s) to its eNB.
+    // initial report(s) to its gNB.
     // 3. When neighbor 2 (gNB3) is placed at a near position, its RSRP would
     // always be above the chosen threshold, hence, the UE will include it in its
     // reports to its gNB (gNB1).
@@ -1736,7 +1832,7 @@ NrUeMeasurementsPiecewiseTestSuite3::NrUeMeasurementsPiecewiseTestSuite3()
 } // end of NrUeMeasurementsPiecewiseTestSuite3::NrUeMeasurementsPiecewiseTestSuite3
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrUeMeasurementsPiecewiseTestSuite3 nrUeMeasurementsPiecewiseTestSuite3;
@@ -1778,7 +1874,7 @@ NrUeMeasurementsPiecewiseTestCase3::DoRun()
     // Disable Uplink Power Control
     Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
 
-    // Create Nodes: eNodeB and UE
+    // Create Nodes: gNB and UE
     NodeContainer nrNodes;
     NodeContainer ueNodes;
     nrNodes.Create(3);
@@ -1790,7 +1886,7 @@ NrUeMeasurementsPiecewiseTestCase3::DoRun()
      * We place the 3rd gNB initially very far so it does not fulfills
      * the entry condition to be reported.
      *
-     * eNodeB    UE              eNodeB                                  eNodeB
+     * gNB    UE              gNB                                  gNB
      *    |      |                 |                                       |
      *    x ---- x --------------- x -------------- x ---------------------x
      *      50 m         100 m             500      |         1000000
@@ -1798,9 +1894,9 @@ NrUeMeasurementsPiecewiseTestCase3::DoRun()
      */
 
     Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
-    positionAlloc->Add(Vector(0.0, 0.0, 0.0));       // Serving eNodeB
-    positionAlloc->Add(Vector(200.0, 0.0, 0.0));     // Neighbour eNodeB1
-    positionAlloc->Add(Vector(1000700.0, 0.0, 0.0)); // Neighbour eNodeB2
+    positionAlloc->Add(Vector(0.0, 0.0, 0.0));       // Serving gNB
+    positionAlloc->Add(Vector(200.0, 0.0, 0.0));     // Neighbour gNB1
+    positionAlloc->Add(Vector(1000700.0, 0.0, 0.0)); // Neighbour gNB2
     positionAlloc->Add(Vector(50.0, 0.0, 0.0));      // UE
     MobilityHelper mobility;
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -1811,16 +1907,31 @@ NrUeMeasurementsPiecewiseTestCase3::DoRun()
 
     // Disable layer-3 filtering
     Config::SetDefault("ns3::NrGnbRrc::RsrpFilterCoefficient", UintegerValue(0));
-    auto bandwidthAndBWPPair =
-        nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1, BandwidthPartInfo::UMa}});
-    // Create Devices and install them in the Nodes (eNB and UE)
+
+    // Override the default antenna model with IsotropicAntennaModel
+    nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+    nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+
+    // Configure Friis propagation loss model before assign it to band
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
+
+    // Create and set the channel with the band
+    CcBwpCreator ccBwpCreator;
+    CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 5e6, 1);
+    OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+    channelHelper->AssignChannelsToBands({band});
+
+    // Create bandwidth part from band
+    BandwidthPartInfoPtrVector allBwps;
+    allBwps = CcBwpCreator::GetAllBwps({band});
+
+    // Create Devices and install them in the Nodes (gNB and UE)
     NetDeviceContainer nrDevs;
     NetDeviceContainer ueDevs;
     nrHelper->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerTdmaRR"));
-    nrDevs = nrHelper->InstallGnbDevice(nrNodes, bandwidthAndBWPPair.second);
-    ueDevs = nrHelper->InstallUeDevice(ueNodes, bandwidthAndBWPPair.second);
-    nrHelper->UpdateDeviceConfigs(nrDevs);
-    nrHelper->UpdateDeviceConfigs(ueDevs);
+    nrDevs = nrHelper->InstallGnbDevice(nrNodes, allBwps);
+    ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
     // Setup UE measurement configuration in serving cell
     Ptr<NrGnbRrc> nrRrc1 = nrDevs.Get(0)->GetObject<NrGnbNetDevice>()->GetRrc();
@@ -1832,15 +1943,15 @@ NrUeMeasurementsPiecewiseTestCase3::DoRun()
     Ptr<NrGnbRrc> nrRrc3 = nrDevs.Get(2)->GetObject<NrGnbNetDevice>()->GetRrc();
     nrRrc3->SetAttribute("AdmitHandoverRequest", BooleanValue(false));
 
-    // Attach UE to serving eNodeB
+    // Attach UE to serving gNB
     nrHelper->AttachToGnb(ueDevs.Get(0), nrDevs.Get(0));
 
-    // Activate an EPS bearer
-    NrEpsBearer::Qci q = NrEpsBearer::GBR_CONV_VOICE;
-    NrEpsBearer bearer(q);
-    nrHelper->ActivateDataRadioBearer(ueDevs, bearer);
+    // Activate an QoS flow
+    NrQosFlow::FiveQi q = NrQosFlow::GBR_CONV_VOICE;
+    NrQosFlow flow(q);
+    nrHelper->ActivateDataRadioBearer(ueDevs, flow);
 
-    // Connect to trace sources in serving eNodeB
+    // Connect to trace sources in serving gNB
     Config::Connect(
         "/NodeList/0/DeviceList/0/NrGnbRrc/RecvMeasurementReport",
         MakeCallback(&NrUeMeasurementsPiecewiseTestCase3::RecvMeasurementReportCallback, this));
@@ -1854,6 +1965,10 @@ NrUeMeasurementsPiecewiseTestCase3::DoRun()
     Simulator::Schedule(MilliSeconds(301),
                         &NrUeMeasurementsPiecewiseTestCase3::TeleportGnbNear,
                         this);
+
+    RngSeedManager::SetSeed(1);
+    RngSeedManager::SetRun(1);
+    nrHelper->AssignStreams({.gnbDevs = nrDevs, .ueDevs = ueDevs});
 
     // Run simulation
     Simulator::Stop(Seconds(2.201));
@@ -2005,7 +2120,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 200 << 680 << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 55 << 55 << 53 << 53 << 53 << 53;
+    expectedRsrp << 68 << 68 << 66 << 66 << 66 << 66;
     AddTestCase(
         new NrUeMeasurementsHandoverTestCase("Handover test case - decreasing report interval",
                                              sourceConfigList,
@@ -2021,7 +2136,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 200 << 320 << 440 << 560 << 680 << 800 << 920 << 1200 << 1840;
     expectedRsrp.clear();
-    expectedRsrp << 55 << 55 << 55 << 55 << 55 << 55 << 55 << 53 << 53;
+    expectedRsrp << 68 << 68 << 68 << 68 << 68 << 68 << 68 << 66 << 66;
     AddTestCase(
         new NrUeMeasurementsHandoverTestCase("Handover test case - increasing report interval",
                                              sourceConfigList,
@@ -2035,20 +2150,20 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
 
     sourceConfigList.front().reportInterval = NrRrcSap::ReportConfigEutra::MS240;
     targetConfigList.front().reportInterval = NrRrcSap::ReportConfigEutra::MS240;
-    sourceConfigList.front().threshold1.range = 54;
-    sourceConfigList.front().threshold2.range = 54;
+    sourceConfigList.front().threshold1.range = 70;
+    sourceConfigList.front().threshold2.range = 70;
     sourceConfigList.front().a3Offset = 1;
-    targetConfigList.front().threshold1.range = 54;
-    targetConfigList.front().threshold2.range = 54;
+    targetConfigList.front().threshold1.range = 70;
+    targetConfigList.front().threshold2.range = 70;
     targetConfigList.front().a3Offset = 1;
 
     // Event A1 to Event A2
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A1;
     targetConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A2;
     expectedTime.clear();
-    expectedTime << 200 << 440 << 680 << 920 << 1200 << 1440 << 1680 << 1920;
+    expectedTime << 1200 << 1440 << 1680 << 1920; // << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 55 << 55 << 55 << 55 << 53 << 53 << 53 << 53;
+    expectedRsrp << 66 << 66 << 66 << 66; // << 53 << 53 << 53 << 53;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - Event A1 to Event A2",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2061,7 +2176,9 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A2;
     targetConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A1;
     expectedTime.clear();
+    expectedTime << 200 << 440 << 680 << 920; // << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
+    expectedRsrp << 68 << 68 << 68 << 68; // << 53 << 53 << 53 << 53;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - Event A2 to Event A1",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2074,9 +2191,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A3;
     targetConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A4;
     expectedTime.clear();
-    expectedTime << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 53 << 53 << 53 << 53;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - Event A3 to Event A4",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2091,7 +2206,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 53 << 53 << 53 << 53;
+    expectedRsrp << 66 << 66 << 66 << 66;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - Event A4 to Event A3",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2104,9 +2219,9 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A2;
     targetConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A3;
     expectedTime.clear();
-    expectedTime << 1200 << 1440 << 1680 << 1920;
+    expectedTime << 200 << 440 << 680 << 920 << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 53 << 53 << 53 << 53;
+    expectedRsrp << 68 << 68 << 68 << 68 << 66 << 66 << 66 << 66;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - Event A2 to Event A3",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2121,7 +2236,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 53 << 53 << 53 << 53;
+    expectedRsrp << 66 << 66 << 66 << 66;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - Event A3 to Event A2",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2134,9 +2249,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A4;
     targetConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A5;
     expectedTime.clear();
-    expectedTime << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 53 << 53 << 53 << 53;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - Event A4 to Event A5",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2149,9 +2262,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A5;
     targetConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A4;
     expectedTime.clear();
-    expectedTime << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 53 << 53 << 53 << 53;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - Event A5 to Event A4",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2162,8 +2273,8 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
 
     // === Threshold/offset difference ===
 
-    sourceConfigList.front().threshold1.range = 52;
-    targetConfigList.front().threshold1.range = 56;
+    sourceConfigList.front().threshold1.range = 68;
+    targetConfigList.front().threshold1.range = 70;
 
     // Event A1
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A1;
@@ -2171,7 +2282,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 200 << 440 << 680 << 920;
     expectedRsrp.clear();
-    expectedRsrp << 55 << 55 << 55 << 55;
+    expectedRsrp << 68 << 68 << 68 << 68;
     AddTestCase(
         new NrUeMeasurementsHandoverTestCase("Handover test case - Event A1 threshold difference",
                                              sourceConfigList,
@@ -2187,7 +2298,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 1200 << 1440 << 1680 << 1920;
     expectedRsrp.clear();
-    expectedRsrp << 53 << 53 << 53 << 53;
+    expectedRsrp << 66 << 66 << 66 << 66;
     AddTestCase(
         new NrUeMeasurementsHandoverTestCase("Handover test case - Event A2 threshold difference",
                                              sourceConfigList,
@@ -2205,7 +2316,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 200 << 440 << 680 << 920;
     expectedRsrp.clear();
-    expectedRsrp << 55 << 55 << 55 << 55;
+    expectedRsrp << 68 << 68 << 68 << 68;
     AddTestCase(
         new NrUeMeasurementsHandoverTestCase("Handover test case - Event A3 offset difference",
                                              sourceConfigList,
@@ -2219,9 +2330,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A4;
     targetConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A4;
     expectedTime.clear();
-    expectedTime << 200 << 440 << 680 << 920;
     expectedRsrp.clear();
-    expectedRsrp << 55 << 55 << 55 << 55;
     AddTestCase(
         new NrUeMeasurementsHandoverTestCase("Handover test case - Event A4 threshold difference",
                                              sourceConfigList,
@@ -2233,9 +2342,9 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
 
     // Event A5
     sourceConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A5;
-    sourceConfigList.front().threshold2.range = 52;
+    sourceConfigList.front().threshold2.range = 68;
     targetConfigList.front().eventId = NrRrcSap::ReportConfigEutra::EVENT_A5;
-    targetConfigList.front().threshold2.range = 56;
+    targetConfigList.front().threshold2.range = 72;
     expectedTime.clear();
     expectedRsrp.clear();
     AddTestCase(
@@ -2264,7 +2373,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 1300 << 1540 << 1780;
     expectedRsrp.clear();
-    expectedRsrp << 53 << 53 << 53;
+    expectedRsrp << 66 << 66 << 66;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - decreasing TTT (short)",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2279,7 +2388,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
     expectedTime.clear();
     expectedTime << 1224 << 1464 << 1704 << 1944 << 2840 << 3080 << 3320 << 3560 << 3800 << 4040;
     expectedRsrp.clear();
-    expectedRsrp << 55 << 55 << 55 << 55 << 53 << 53 << 53 << 53 << 53 << 53;
+    expectedRsrp << 68 << 68 << 68 << 68 << 66 << 66 << 66 << 66 << 66 << 66;
     AddTestCase(new NrUeMeasurementsHandoverTestCase("Handover test case - decreasing TTT (long)",
                                                      sourceConfigList,
                                                      targetConfigList,
@@ -2291,7 +2400,7 @@ NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite()
 } // end of NrUeMeasurementsHandoverTestSuite::NrUeMeasurementsHandoverTestSuite
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrUeMeasurementsHandoverTestSuite nrUeMeasurementsHandoverTestSuite;
@@ -2348,7 +2457,7 @@ NrUeMeasurementsHandoverTestCase::DoRun()
     // Disable Uplink Power Control
     Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
 
-    // Create Nodes: eNodeB and UE
+    // Create Nodes: gNB and UE
     NodeContainer nrNodes;
     NodeContainer ueNodes;
     nrNodes.Create(2);
@@ -2357,15 +2466,15 @@ NrUeMeasurementsHandoverTestCase::DoRun()
     /*
      * The topology is the following:
      *
-     * eNodeB                   UE                     eNodeB
+     * gNB                   UE                     gNB
      *    |                     |                         |
      *    x ------------------- x ----------------------- x
      *             400 m                   500 m
      */
 
     Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
-    positionAlloc->Add(Vector(0.0, 0.0, 0.0));   // Source eNodeB
-    positionAlloc->Add(Vector(900.0, 0.0, 0.0)); // Target eNodeB
+    positionAlloc->Add(Vector(0.0, 0.0, 0.0));   // Source gNB
+    positionAlloc->Add(Vector(900.0, 0.0, 0.0)); // Target gNB
     positionAlloc->Add(Vector(400.0, 0.0, 0.0)); // UE
     MobilityHelper mobility;
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -2402,18 +2511,31 @@ NrUeMeasurementsHandoverTestCase::DoRun()
     // Enable layer-3 filtering
     Config::SetDefault("ns3::NrGnbRrc::RsrpFilterCoefficient", UintegerValue(4));
 
-    // Disable control channel error model
-    auto bandwidthAndBWPPair =
-        nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1, BandwidthPartInfo::UMa}});
+    // Override the default antenna model with IsotropicAntennaModel
+    nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+    nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+
+    // Configure Friis propagation loss model before assign it to band
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
+
+    // Create and set the channel with the band
+    CcBwpCreator ccBwpCreator;
+    CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 5e6, 1);
+    OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+    channelHelper->AssignChannelsToBands({band});
+
+    // Create bandwidth part from band
+    BandwidthPartInfoPtrVector allBwps;
+    allBwps = CcBwpCreator::GetAllBwps({band});
+
     // Create Devices and install them in the Nodes (eNB and UE)
     NetDeviceContainer nrDevs;
     NetDeviceContainer ueDevs;
-    nrDevs = nrHelper->InstallGnbDevice(nrNodes, bandwidthAndBWPPair.second);
-    ueDevs = nrHelper->InstallUeDevice(ueNodes, bandwidthAndBWPPair.second);
-    nrHelper->UpdateDeviceConfigs(nrDevs);
-    nrHelper->UpdateDeviceConfigs(ueDevs);
+    nrDevs = nrHelper->InstallGnbDevice(nrNodes, allBwps);
+    ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    // Setup UE measurement configuration in eNodeBs
+    // Setup UE measurement configuration in gNBs
     uint8_t measId;
     Ptr<NrGnbRrc> nrRrc1 = nrDevs.Get(0)->GetObject<NrGnbNetDevice>()->GetRrc();
     Ptr<NrGnbRrc> nrRrc2 = nrDevs.Get(1)->GetObject<NrGnbNetDevice>()->GetRrc();
@@ -2439,28 +2561,18 @@ NrUeMeasurementsHandoverTestCase::DoRun()
     Ipv4InterfaceContainer ueIpIfaces;
     ueIpIfaces = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueDevs));
 
-    // Assign IP address to UEs
-    for (uint32_t u = 0; u < ueNodes.GetN(); ++u)
-    {
-        Ptr<Node> ueNode = ueNodes.Get(u);
-        // Set the default gateway for the UE
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNode->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
-
-    // Attach UE to serving eNodeB
+    // Attach UE to serving gNB
     nrHelper->AttachToGnb(ueDevs.Get(0), nrDevs.Get(0));
 
     // Add X2 interface
     nrHelper->AddX2Interface(nrNodes);
 
-    // Connect to trace sources in source eNodeB
+    // Connect to trace sources in source gNB
     Config::Connect(
         "/NodeList/3/DeviceList/0/NrGnbRrc/RecvMeasurementReport",
         MakeCallback(&NrUeMeasurementsHandoverTestCase::RecvMeasurementReportCallback, this));
 
-    // Connect to trace sources in target eNodeB
+    // Connect to trace sources in target gNB
     Config::Connect(
         "/NodeList/4/DeviceList/0/NrGnbRrc/RecvMeasurementReport",
         MakeCallback(&NrUeMeasurementsHandoverTestCase::RecvMeasurementReportCallback, this));
@@ -2470,6 +2582,14 @@ NrUeMeasurementsHandoverTestCase::DoRun()
                               ueDevs.Get(0),
                               nrDevs.Get(0),
                               nrDevs.Get(1));
+
+    RngSeedManager::SetSeed(1);
+    RngSeedManager::SetRun(1);
+    nrHelper->AssignStreams({.assignEpc = true,
+                             .remoteHostNodes = remoteHostContainer,
+                             .ueNodes = ueNodes,
+                             .gnbDevs = nrDevs,
+                             .ueDevs = ueDevs});
 
     // Run simulation
     Simulator::Stop(m_duration);
@@ -2487,7 +2607,12 @@ NrUeMeasurementsHandoverTestCase::DoTeardown()
                           true,
                           "Reporting should have occurred at " << m_itExpectedTime->As(Time::S));
     hasEnded = m_itExpectedRsrp == m_expectedRsrp.end();
-    NS_ASSERT(hasEnded);
+    NS_TEST_ASSERT_MSG_EQ(hasEnded,
+                          true,
+                          "List still contains "
+                              << m_expectedRsrp.size() -
+                                     std::distance(m_expectedRsrp.begin(), m_itExpectedRsrp)
+                              << " samples");
 }
 
 void

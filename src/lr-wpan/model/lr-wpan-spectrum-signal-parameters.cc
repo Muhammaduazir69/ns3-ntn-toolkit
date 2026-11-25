@@ -7,8 +7,8 @@
  */
 #include "lr-wpan-spectrum-signal-parameters.h"
 
-#include <ns3/log.h>
-#include <ns3/packet-burst.h>
+#include "ns3/log.h"
+#include "ns3/packet-burst.h"
 
 namespace ns3
 {
@@ -24,7 +24,8 @@ LrWpanSpectrumSignalParameters::LrWpanSpectrumSignalParameters()
 
 LrWpanSpectrumSignalParameters::LrWpanSpectrumSignalParameters(
     const LrWpanSpectrumSignalParameters& p)
-    : SpectrumSignalParameters(p)
+    : SpectrumSignalParameters(p),
+      preambleDuration(p.preambleDuration)
 {
     NS_LOG_FUNCTION(this << &p);
     packetBurst = p.packetBurst->Copy();

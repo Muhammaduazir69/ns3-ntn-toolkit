@@ -1,0 +1,54 @@
+# Copyright (c) 2026 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+#
+# SPDX-License-Identifier: GPL-2.0-only
+
+# Proxy between the review agent, which speaks the Anthropic API, and the self-hosted
+# model, which speaks the OpenAI one. mr-triage.py starts it and sets the variables.
+model_list:
+  # The model reasoning as much as it does by default
+  - model_name: reviewer
+    litellm_params:
+      model: os.environ/REVIEW_PROXY_MODEL
+      api_base: os.environ/REVIEW_LLM_URL
+      api_key: os.environ/REVIEW_PROXY_UPSTREAM_KEY
+      # Sent by the agent, rejected by the chat template of the model
+      additional_drop_params: [reasoning_effort, prompt_cache_key]
+      extra_body:
+        chat_template_kwargs:
+          # Keep the reasoning of earlier turns in the conversation
+          preserve_thinking: true
+  # The same model reasoning less before it answers, or not at all
+  - model_name: reviewer-medium
+    litellm_params:
+      model: os.environ/REVIEW_PROXY_MODEL
+      api_base: os.environ/REVIEW_LLM_URL
+      api_key: os.environ/REVIEW_PROXY_UPSTREAM_KEY
+      additional_drop_params: [reasoning_effort, prompt_cache_key]
+      extra_body:
+        chat_template_kwargs:
+          reasoning_effort: medium
+          preserve_thinking: true
+  - model_name: reviewer-low
+    litellm_params:
+      model: os.environ/REVIEW_PROXY_MODEL
+      api_base: os.environ/REVIEW_LLM_URL
+      api_key: os.environ/REVIEW_PROXY_UPSTREAM_KEY
+      additional_drop_params: [reasoning_effort, prompt_cache_key]
+      extra_body:
+        chat_template_kwargs:
+          reasoning_effort: low
+          preserve_thinking: true
+  - model_name: reviewer-quick
+    litellm_params:
+      model: os.environ/REVIEW_PROXY_MODEL
+      api_base: os.environ/REVIEW_LLM_URL
+      api_key: os.environ/REVIEW_PROXY_UPSTREAM_KEY
+      additional_drop_params: [reasoning_effort, prompt_cache_key]
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+litellm_settings:
+  drop_params: true
+  telemetry: false
+general_settings:
+  master_key: os.environ/REVIEW_PROXY_KEY

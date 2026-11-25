@@ -7,14 +7,18 @@
 
 #include "nr-cb-type-one.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
+class NrPmSearchMaleki; ///< Forward-declaration for friendship
+
 /// @brief Implementation of Type-I Single-Panel Codebook 3GPP TS 38.214, Rel. 15, Sec. 5.2.2.2.1
 /// Supports codebook mode 1 only, and is limited to rank 4.
 /// Codebook mode 1 means the per-subband i2 beam index is used only for the phase shift of the
 /// second polarization, while codebook mode 2 would use i2 also for beam refinement.
 /// Plain references like 5.2.2.2.1-x refer to 3GPP TS 38.214, Rel. 15, Table 5.2.2.2.1-x
-class NrCbTypeOneSp : public NrCbTypeOne
+class NR_EXPORT NrCbTypeOneSp : public NrCbTypeOne
 {
   public:
     /// @brief Get ns-3 TypeId
@@ -192,6 +196,7 @@ class NrCbTypeOneSp : public NrCbTypeOne
 
     std::vector<size_t> m_uniqueBfvInds; ///< For each column in W, the beamforming vector index
     std::vector<double> m_signPhiN;      ///< For each column in W, the sign before phi_n
+    friend class NrPmSearchMaleki;       ///< Grant access to variables to NrPmSearchMaleki
 };
 
 } // namespace ns3

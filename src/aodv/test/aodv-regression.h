@@ -17,17 +17,19 @@
 using namespace ns3;
 
 /**
- * \ingroup aodv
+ * @ingroup aodv
  *
- * \brief AODV chain regression test
+ * @brief AODV chain regression test
  *
  * This script creates 1-dimensional grid topology and then ping last node from the first one:
  */
+
 // clang-format off
 /**
  *     [10.1.1.1] <-- step --> [10.1.1.2] <-- step --> [10.1.1.3] <-- step --> [10.1.1.4] <-- step --> [10.1.1.5]
  */
 // clang-format on
+
 /**
  * Each node can hear only his right and his left neighbor, if they exist.
  * When one third of total time expired, central node moves away.
@@ -39,7 +41,7 @@ using namespace ns3;
  */
 // clang-format off
 /**
- * \verbatim
+ * @verbatim
    Expected packets time diagram.
 
            1       2       3       4       5
@@ -144,7 +146,7 @@ using namespace ns3;
    <-------|------>|       |       |       |        RREQ (orig 10.1.1.1, dst 10.1.1.5, G=1, hop=0, ID=4, org_seqno=3) src = 10.1.1.1
            |<------|-->    |       |       |        RREQ (orig 10.1.1.1, dst 10.1.1.5, G=1, hop=1, ID=4, org_seqno=3) src = 10.1.1.2
    .................................................
-   \endverbatim
+   @endverbatim
  */
 //clang-format on
 class ChainRegressionTest : public TestCase

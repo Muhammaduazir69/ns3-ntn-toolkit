@@ -43,6 +43,7 @@
 
 #include "thz-ntn-pass-kit.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 
 #include <cmath>
@@ -122,7 +123,12 @@ main(int argc, char* argv[])
 
     std::cout << "thz-ntn-native-300ghz-traffic: REAL PACKETS at " << freqGhz << " GHz\n"
               << "  propagation: Friis + ThzNtnPropagationLossModel (no 3GPP 100 GHz cap)\n";
-    const thzkit::PassResult r = thzkit::RunPass(cfg);
+    // Globe scene of the measured pass (SGP4 satellite and the TR 38.811 terminal).
+    const thzkit::PassResult r = thzkit::RunPass(
+        cfg,
+        [&outputDir](Ptr<thzntn::ThzNtnPacketLink>, Ptr<MobilityModel>, Ptr<MobilityModel>) {
+            ns3::ntnobs::StartSceneFromNodeList(outputDir);
+        });
 
     std::cout << "\n--- measured at " << freqGhz << " GHz ---\n"
               << "  packets tx/rx:   " << r.txPackets << " / " << r.rxPackets << "  (PDR "
@@ -135,5 +141,8 @@ main(int argc, char* argv[])
               << "  -> this is a THz data plane, not an NR-at-THz result: no SpectrumPhy,\n"
               << "     no HARQ. Packets are carried at " << freqGhz
               << " GHz on real physics, which the 3GPP bridge refuses.\n";
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "thz-ntn-native-300ghz-traffic", "analytic", argc, argv);
     return 0;
 }

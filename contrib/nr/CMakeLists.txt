@@ -6,6 +6,12 @@ if(${ENABLE_EIGEN})
   set(eigen_sources
       model/nr-mimo-matrices-eigen.cc
   )
+  set(eigen_tests
+      test/nr-test-csi.cc
+      test/nr-test-ri-pmi.cc
+      test/nr-test-ul-mimo-cqi-wiring.cc
+      test/nr-interference-unprecoded-test.cc
+  )
 else()
   message(
     WARNING "nr MIMO features require the eigen3 library, but it was not found"
@@ -13,10 +19,40 @@ else()
   set(eigen_sources
       model/nr-mimo-matrices-no-eigen.cc
   )
+  set(eigen_tests)
+endif()
+
+set(opengym_sources)
+set(opengym_headers)
+set(opengym_tests)
+set(opengym_libraries)
+if(opengym
+   IN_LIST
+   contrib_libs_to_build
+)
+  set(opengym_sources
+      model/nr-mac-scheduler-ai-ns3-gym-env.cc
+      model/nr-mac-scheduler-ofdma-ai.cc
+      model/nr-mac-scheduler-tdma-ai.cc
+      model/nr-mac-scheduler-ue-info-ai.cc
+  )
+  set(opengym_headers
+      model/nr-mac-scheduler-ai-ns3-gym-env.h
+      model/nr-mac-scheduler-ofdma-ai.h
+      model/nr-mac-scheduler-tdma-ai.h
+      model/nr-mac-scheduler-ue-info-ai.h
+  )
+  set(opengym_tests
+      test/nr-test-scheduler-ai.cc
+  )
+  set(opengym_libraries
+      ${libopengym}
+  )
 endif()
 
 set(source_files
     ${eigen_sources}
+    ${opengym_sources}
     helper/beamforming-helper-base.cc
     helper/cc-bwp-helper.cc
     helper/file-scenario-helper.cc
@@ -27,11 +63,13 @@ set(source_files
     helper/nr-bearer-stats-calculator.cc
     helper/nr-bearer-stats-connector.cc
     helper/nr-bearer-stats-simple.cc
+    helper/nr-channel-helper.cc
     helper/nr-epc-helper.cc
     helper/nr-helper.cc
     helper/nr-mac-rx-trace.cc
     helper/nr-mac-scheduling-stats.cc
     helper/nr-no-backhaul-epc-helper.cc
+    helper/nr-ran-epc-helper.cc
     helper/nr-phy-rx-trace.cc
     helper/nr-point-to-point-epc-helper-base.cc
     helper/nr-point-to-point-epc-helper.cc
@@ -51,7 +89,7 @@ set(source_files
     model/bwp-manager-ue.cc
     model/ideal-beamforming-algorithm.cc
     model/lena-error-model.cc
-    model/nr-a2-a4-rsrq-handover-algorithm.cc
+    model/nr-a2-a4-rsrp-handover-algorithm.cc
     model/nr-a3-rsrp-handover-algorithm.cc
     model/nr-amc.cc
     model/nr-anr.cc
@@ -61,9 +99,12 @@ set(source_files
     model/nr-cb-type-one.cc
     model/nr-ch-access-manager.cc
     model/nr-chunk-processor.cc
+    model/nr-coexistence-filter.cc
     model/nr-common.cc
     model/nr-component-carrier.cc
     model/nr-control-messages.cc
+    model/nr-csi-rs-filter.cc
+    model/nr-device-registry.cc
     model/nr-eesm-cc-t1.cc
     model/nr-eesm-cc-t2.cc
     model/nr-eesm-cc.cc
@@ -79,17 +120,13 @@ set(source_files
     model/nr-epc-mme-application.cc
     model/nr-epc-pgw-application.cc
     model/nr-epc-sgw-application.cc
-    model/nr-epc-tft-classifier.cc
-    model/nr-epc-tft.cc
     model/nr-epc-ue-nas.cc
     model/nr-epc-x2-header.cc
     model/nr-epc-x2.cc
-    model/nr-eps-bearer-tag.cc
-    model/nr-eps-bearer.cc
     model/nr-error-model.cc
     model/nr-fh-control.cc
-    model/nr-fh-sched-sap.cc
     model/nr-fh-phy-sap.cc
+    model/nr-fh-sched-sap.cc
     model/nr-gnb-component-carrier-manager.cc
     model/nr-gnb-mac.cc
     model/nr-gnb-net-device.cc
@@ -97,6 +134,7 @@ set(source_files
     model/nr-gnb-rrc.cc
     model/nr-handover-algorithm.cc
     model/nr-harq-phy.cc
+    model/nr-initial-association.cc
     model/nr-interference-base.cc
     model/nr-interference.cc
     model/nr-lte-amc.cc
@@ -119,12 +157,15 @@ set(source_files
     model/nr-mac-scheduler-ofdma-pf.cc
     model/nr-mac-scheduler-ofdma-qos.cc
     model/nr-mac-scheduler-ofdma-rr.cc
+    model/nr-mac-scheduler-ofdma-symbol-per-beam.cc
+    model/nr-mac-scheduler-ofdma-random.cc
     model/nr-mac-scheduler-ofdma.cc
     model/nr-mac-scheduler-srs-default.cc
     model/nr-mac-scheduler-tdma-mr.cc
     model/nr-mac-scheduler-tdma-pf.cc
     model/nr-mac-scheduler-tdma-qos.cc
     model/nr-mac-scheduler-tdma-rr.cc
+    model/nr-mac-scheduler-tdma-random.cc
     model/nr-mac-scheduler-tdma.cc
     model/nr-mac-scheduler-ue-info-pf.cc
     model/nr-mac-scheduler-ue-info-qos.cc
@@ -132,6 +173,7 @@ set(source_files
     model/nr-mac-scheduler.cc
     model/nr-mac-short-bsr-ce.cc
     model/nr-mac-phr-ce.cc
+    model/nr-mcs-tables.cc
     model/nr-mimo-chunk-processor.cc
     model/nr-mimo-matrices.cc
     model/nr-mimo-signal.cc
@@ -144,8 +186,15 @@ set(source_files
     model/nr-phy-mac-common.cc
     model/nr-phy-tag.cc
     model/nr-phy.cc
+    model/nr-pm-search-fast.cc
     model/nr-pm-search-full.cc
+    model/nr-pm-search-ideal.cc
+    model/nr-pm-search-sasaoka.cc
     model/nr-pm-search.cc
+    model/nr-qos-flow-tag.cc
+    model/nr-qos-flow.cc
+    model/nr-qos-rule.cc
+    model/nr-qos-rule-classifier.cc
     model/nr-radio-bearer-info.cc
     model/nr-radio-bearer-tag.cc
     model/nr-rlc-am-header.cc
@@ -159,7 +208,9 @@ set(source_files
     model/nr-rlc.cc
     model/nr-rrc-header.cc
     model/nr-rrc-protocol-ideal.cc
-    model/nr-rrc-protocol-real.cc
+    model/nr-rrc-protocol-real-gnb.cc
+    model/nr-rrc-protocol-real-ue.cc
+    model/nr-sidelink-filter.cc
     model/nr-simple-ue-component-carrier-manager.cc
     model/nr-spectrum-phy.cc
     model/nr-spectrum-signal-parameters.cc
@@ -172,8 +223,16 @@ set(source_files
     model/nr-vendor-specific-parameters.cc
     model/realistic-beamforming-algorithm.cc
     model/realistic-bf-manager.cc
+    model/resource-assignment-matrix.cc
     model/sfnsf.cc
+    utils/channels/nyu/nyu-channel-condition-model.cc
+    utils/channels/nyu/nyu-channel-model.cc
+    utils/channels/nyu/nyu-propagation-loss-model.cc
+    utils/channels/nyu/nyu-spectrum-propagation-loss-model.cc
     utils/distance-based-three-gpp-spectrum-propagation-loss-model.cc
+    utils/fast-fading-constant-position-mobility-model.cc
+    utils/parse-string-to-vector.cc
+    utils/random-direction-disc-2d-mobility-model.cc
     utils/traffic-generators/helper/traffic-generator-helper.cc
     utils/traffic-generators/helper/xr-traffic-mixer-helper.cc
     utils/traffic-generators/model/traffic-generator-3gpp-audio-data.cc
@@ -185,9 +244,11 @@ set(source_files
     utils/traffic-generators/model/traffic-generator-ngmn-video.cc
     utils/traffic-generators/model/traffic-generator-ngmn-voip.cc
     utils/traffic-generators/model/traffic-generator.cc
+    utils/nr-wraparound-utils.cc
 )
 
 set(header_files
+    ${opengym_headers}
     helper/beamforming-helper-base.h
     helper/cc-bwp-helper.h
     helper/file-scenario-helper.h
@@ -198,11 +259,13 @@ set(header_files
     helper/nr-bearer-stats-calculator.h
     helper/nr-bearer-stats-connector.h
     helper/nr-bearer-stats-simple.h
+    helper/nr-channel-helper.h
     helper/nr-epc-helper.h
     helper/nr-helper.h
     helper/nr-mac-rx-trace.h
     helper/nr-mac-scheduling-stats.h
     helper/nr-no-backhaul-epc-helper.h
+    helper/nr-ran-epc-helper.h
     helper/nr-phy-rx-trace.h
     helper/nr-point-to-point-epc-helper-base.h
     helper/nr-point-to-point-epc-helper.h
@@ -222,11 +285,11 @@ set(header_files
     model/bwp-manager-ue.h
     model/ideal-beamforming-algorithm.h
     model/lena-error-model.h
-    model/nr-a2-a4-rsrq-handover-algorithm.h
+    model/nr-a2-a4-rsrp-handover-algorithm.h
     model/nr-a3-rsrp-handover-algorithm.h
     model/nr-amc.h
-    model/nr-anr.h
     model/nr-anr-sap.h
+    model/nr-anr.h
     model/nr-as-sap.h
     model/nr-asn1-header.h
     model/nr-cb-two-port.h
@@ -236,9 +299,12 @@ set(header_files
     model/nr-ccm-rrc-sap.h
     model/nr-ch-access-manager.h
     model/nr-chunk-processor.h
+    model/nr-coexistence-filter.h
     model/nr-common.h
     model/nr-component-carrier.h
     model/nr-control-messages.h
+    model/nr-csi-rs-filter.h
+    model/nr-device-registry.h
     model/nr-eesm-cc-t1.h
     model/nr-eesm-cc-t2.h
     model/nr-eesm-cc.h
@@ -257,18 +323,14 @@ set(header_files
     model/nr-epc-s11-sap.h
     model/nr-epc-s1ap-sap.h
     model/nr-epc-sgw-application.h
-    model/nr-epc-tft-classifier.h
-    model/nr-epc-tft.h
     model/nr-epc-ue-nas.h
     model/nr-epc-x2-header.h
     model/nr-epc-x2-sap.h
     model/nr-epc-x2.h
-    model/nr-eps-bearer-tag.h
-    model/nr-eps-bearer.h
     model/nr-error-model.h
     model/nr-fh-control.h
-    model/nr-fh-sched-sap.h
     model/nr-fh-phy-sap.h
+    model/nr-fh-sched-sap.h
     model/nr-gnb-cmac-sap.h
     model/nr-gnb-component-carrier-manager.h
     model/nr-gnb-cphy-sap.h
@@ -279,6 +341,7 @@ set(header_files
     model/nr-handover-algorithm.h
     model/nr-handover-management-sap.h
     model/nr-harq-phy.h
+    model/nr-initial-association.h
     model/nr-interference-base.h
     model/nr-interference.h
     model/nr-lte-amc.h
@@ -306,6 +369,8 @@ set(header_files
     model/nr-mac-scheduler-ofdma-pf.h
     model/nr-mac-scheduler-ofdma-qos.h
     model/nr-mac-scheduler-ofdma-rr.h
+    model/nr-mac-scheduler-ofdma-symbol-per-beam.h
+    model/nr-mac-scheduler-ofdma-random.h
     model/nr-mac-scheduler-ofdma.h
     model/nr-mac-scheduler-srs-default.h
     model/nr-mac-scheduler-srs.h
@@ -313,6 +378,7 @@ set(header_files
     model/nr-mac-scheduler-tdma-pf.h
     model/nr-mac-scheduler-tdma-qos.h
     model/nr-mac-scheduler-tdma-rr.h
+    model/nr-mac-scheduler-tdma-random.h
     model/nr-mac-scheduler-tdma.h
     model/nr-mac-scheduler-ue-info-mr.h
     model/nr-mac-scheduler-ue-info-pf.h
@@ -322,6 +388,7 @@ set(header_files
     model/nr-mac-scheduler.h
     model/nr-mac-short-bsr-ce.h
     model/nr-mac-phr-ce.h
+    model/nr-mcs-tables.h
     model/nr-mimo-chunk-processor.h
     model/nr-mimo-matrices.h
     model/nr-mimo-signal.h
@@ -336,8 +403,15 @@ set(header_files
     model/nr-phy-sap.h
     model/nr-phy-tag.h
     model/nr-phy.h
+    model/nr-pm-search-fast.h
     model/nr-pm-search-full.h
+    model/nr-pm-search-ideal.h
+    model/nr-pm-search-sasaoka.h
     model/nr-pm-search.h
+    model/nr-qos-flow-tag.h
+    model/nr-qos-flow.h
+    model/nr-qos-rule.h
+    model/nr-qos-rule-classifier.h
     model/nr-radio-bearer-info.h
     model/nr-radio-bearer-tag.h
     model/nr-rlc-am-header.h
@@ -352,8 +426,10 @@ set(header_files
     model/nr-rlc.h
     model/nr-rrc-header.h
     model/nr-rrc-protocol-ideal.h
-    model/nr-rrc-protocol-real.h
+    model/nr-rrc-protocol-real-gnb.h
+    model/nr-rrc-protocol-real-ue.h
     model/nr-rrc-sap.h
+    model/nr-sidelink-filter.h
     model/nr-simple-ue-component-carrier-manager.h
     model/nr-spectrum-phy.h
     model/nr-spectrum-signal-parameters.h
@@ -369,8 +445,17 @@ set(header_files
     model/nr-vendor-specific-parameters.h
     model/realistic-beamforming-algorithm.h
     model/realistic-bf-manager.h
+    model/resource-assignment-matrix.h
     model/sfnsf.h
+    utils/channels/nyu/nyu-channel-condition-model.h
+    utils/channels/nyu/nyu-channel-model.h
+    utils/channels/nyu/nyu-propagation-loss-model.h
+    utils/channels/nyu/nyu-spectrum-propagation-loss-model.h
     utils/distance-based-three-gpp-spectrum-propagation-loss-model.h
+    utils/fast-fading-constant-position-mobility-model.h
+    utils/nr-json.hpp
+    utils/parse-string-to-vector.h
+    utils/random-direction-disc-2d-mobility-model.h
     utils/traffic-generators/helper/traffic-generator-helper.h
     utils/traffic-generators/helper/xr-traffic-mixer-helper.h
     utils/traffic-generators/model/traffic-generator-3gpp-audio-data.h
@@ -382,72 +467,178 @@ set(header_files
     utils/traffic-generators/model/traffic-generator-ngmn-video.h
     utils/traffic-generators/model/traffic-generator-ngmn-voip.h
     utils/traffic-generators/model/traffic-generator.h
+    utils/nr-wraparound-utils.h
 )
 
 set(test_sources
-    test/nr-system-test-configurations.cc
-    test/nr-test-numerology-delay.cc
-    test/nr-test-fdm-of-numerologies.cc
-    test/nr-test-sched.cc
-    test/nr-system-test-schedulers-tdma-rr.cc
-    test/nr-system-test-schedulers-tdma-pf.cc
-    test/nr-system-test-schedulers-tdma-mr.cc
-    test/nr-system-test-schedulers-ofdma-rr.cc
-    test/nr-system-test-schedulers-ofdma-pf.cc
-    test/nr-system-test-schedulers-ofdma-mr.cc
+    ${eigen_tests}
+    ${opengym_tests}
+    test/nr-amc-tb-size-test.cc
     test/nr-antenna-3gpp-model-conf.cc
-    test/nr-test-l2sm-eesm.cc
-    test/nr-lte-pattern-generation.cc
-    test/nr-phy-patterns.cc
-    test/nr-test-sfnsf.cc
-    test/nr-test-timings.cc
-    test/nr-spectrum-phy-test.cc
     test/nr-cc-bwp-configuration.cc
-    test/system-scheduler-test.cc
-    test/nr-mac-short-bsr-ce-test.cc
-    test/nr-test-notching.cc
-    test/nr-realistic-beamforming-test.cc
-    test/nr-uplink-power-control-test.cc
-    test/nr-power-allocation.cc
-    test/nr-test-harq.cc
-    utils/traffic-generators/test/traffic-generator-test.cc
-    test/system-scheduler-test-qos.cc
-    test/nr-test-entities.cc
+    test/nr-channel-setup-test.cc
+    test/nr-colocated-ue-fairness-test.cc
     test/nr-epc-test-gtpu.cc
     test/nr-epc-test-s1u-downlink.cc
     test/nr-epc-test-s1u-uplink.cc
-    test/nr-test-epc-tft-classifier.cc
+    test/nr-epc-gnb-relayed-tag-test.cc
+    test/nr-ideal-beamforming-test.cc
+    test/nr-lte-pattern-generation.cc
+    test/nr-mac-short-bsr-ce-test.cc
+    test/nr-multipanel-test.cc
+    test/nr-phy-patterns.cc
+    test/nr-power-allocation.cc
+    test/nr-realistic-beamforming-test.cc
     test/nr-simple-helper.cc
     test/nr-simple-net-device.cc
     test/nr-simple-spectrum-phy.cc
+    test/nr-spectrum-phy-test.cc
+    test/nr-system-test-configurations.cc
+    test/nr-system-test-scheduler-many-ues.cc
+    test/nr-system-test-schedulers-ofdma-mr.cc
+    test/nr-system-test-schedulers-ofdma-pf.cc
+    test/nr-system-test-schedulers-ofdma-rr.cc
+    test/nr-system-test-schedulers-tdma-mr.cc
+    test/nr-system-test-schedulers-tdma-pf.cc
+    test/nr-system-test-schedulers-tdma-rr.cc
+    test/nr-test-unstructured-session.cc
+    test/nr-system-test-schedulers-random.cc
     test/nr-test-asn1-encoding.cc
-    test/nr-test-rlc-header.cc
+    test/nr-test-deactivate-bearer.cc
+    test/nr-test-entities.cc
+    test/nr-test-epc-e2e-data.cc
+    test/nr-test-qos-rule-classifier.cc
+    test/nr-test-fdm-of-numerologies.cc
+    test/nr-test-harq.cc
+    test/nr-test-harq-flush.cc
+    test/nr-test-harq-feedback-timing.cc
+    test/nr-ul-sr-retransmission-test.cc
+    test/nr-interference-overlap-test.cc
+    test/nr-interference-saturating-signal-test.cc
+    test/nr-ue-handover-interference-test.cc
+    test/nr-ue-mac-stale-bsr-test.cc
+    test/nr-x2-forwarding-drop-test.cc
+    test/nr-transmit-filter-test.cc
+    test/nr-test-ipv6-routing.cc
+    test/nr-test-l2sm-eesm.cc
+    test/nr-test-notching.cc
+    test/nr-test-numerology-delay.cc
+    test/nr-test-numerology-reception.cc
+    test/nr-test-phy.cc
+    test/nr-test-resource-assignment-matrix.cc
     test/nr-test-rlc-am-e2e.cc
+    test/nr-test-rlc-am-status.cc
     test/nr-test-rlc-am-transmitter.cc
+    test/nr-test-rlc-header.cc
+    test/nr-test-rlc-tm.cc
     test/nr-test-rlc-um-e2e.cc
     test/nr-test-rlc-um-transmitter.cc
+    test/nr-test-rlc-um-rx.cc
     test/nr-test-rrc.cc
-    test/nr-test-ipv6-routing.cc
-    test/nr-test-epc-e2e-data.cc
-    test/nr-test-deactivate-bearer.cc
+    test/nr-test-sched-released-ue.cc
+    test/nr-test-sched-harq.cc
+    test/nr-test-harq-retx-limit.cc
+    test/nr-test-sched-lc.cc
+    test/nr-test-sched-msg3-retx.cc
+    test/nr-test-sched-ofdma-frequency-domain.cc
+    test/nr-test-sched-reshape.cc
+    test/nr-test-sched-symbols-per-beam.cc
+    test/nr-test-sched-temporal-fairness.cc
+    test/nr-test-sched.cc
+    test/nr-test-sfnsf.cc
+    test/nr-test-subband.cc
+    test/nr-test-tdd-ul-dl-regression.cc
+    test/nr-test-timings.cc
+    test/nr-test-ue-mac-status.cc
+    test/nr-test-ul-mimo-cqi.cc
+    test/nr-uplink-power-control-test.cc
+    test/nr-system-scheduler-test-qos.cc
+    test/system-scheduler-test.cc
+    test/ul-scheduling-test.cc
+    utils/traffic-generators/test/traffic-generator-test.cc
+    test/nr-test-hexagonal-grid-scenario-helper.cc
+    test/nr-test-ue-measurements.cc
+    test/nr-test-radio-link-failure.cc
+    test/nr-test-rrc-reestablishment.cc
+    test/nr-test-rrc-state-transition.cc
+    test/nr-test-cell-selection.cc
+    test/nr-test-x2-handover.cc
+    test/nr-test-x2-handover-measures.cc
+    test/nr-test-same-cell-bwp-switch.cc
+    test/nr-test-inter-freq-handover.cc
+    test/nr-test-handover-delay.cc
+    test/nr-test-handover-failure.cc
+    test/nr-test-handover-rach-config.cc
+    test/nr-test-rbg-data-path.cc
+    test/nr-test-fdd-ul-routing.cc
+    test/nr-test-handover-target.cc
+    test/nr-test-handover-scenarios.cc
+    test/nr-test-cell-individual-offset.cc
+    test/nr-test-fh-control.cc
+    test/nr-test-cell-selection-with-rlf.cc
+    test/nr-test-attach-window.cc
+    test/nr-test-random-direction-disc-2d-mobility.cc
+    test/nr-test-tr36839-handover-failure.cc
+    test/nr-test-handover-metrics-guards.cc
+    test/nr-test-handover-target-admission.cc
+    test/nr-test-mib-wait-reselection.cc
+    test/nr-test-stray-rrc-request.cc
+    test/nr-test-mobility-state-ttt.cc
+    test/nr-test-core-connector.cc
+    test/nr-test-core-roaming.cc
+    test/nr-test-initial-association.cc
     # cmake-format: off
     # todo:
-    # test/nr-test-x2-handover.cc               \
-    # test/nr-test-x2-handover-measures.cc       \
-    # test/nr-test-ue-measurements.cc             \ <= works but needs to be updated to reflect NR measurements
-    # test/nr-test-cell-selection.cc               \
-    # test/nr-test-radio-link-failure.cc            \
-    # test/nr-test-lte-handover-delay.cc             | requires handover
-    # test/nr-test-lte-handover-failure.cc          /
-    # test/nr-test-lte-handover-target.cc          /
-    # test/nr-test-primary-cell-change.cc         /
+    # test/nr-test-primary-cell-change.cc         /  requires handover
     # test/nr-test-secondary-cell-handover.cc    /
     # test/nr-test-secondary-cell-selection.cc  /
-    #
-    # test/nr-test-carrier-aggregation.cc
-    # test/nr-test-cqi-generation.cc
     # cmake-format: on
 )
+
+check_deps(
+  hosvd_deps
+  PYTHON_PACKAGES
+  pyttb # Requires patches to compute HOSVD for a complex tensor. Use
+  # pip install git+https://gitlab.com/cttc-lena/pyttb
+  pybind11
+)
+if(NOT
+   ("${hosvd_deps}"
+    STREQUAL
+    "")
+   OR WIN32
+)
+  message(
+    STATUS
+      "Search-free PMI selection requires pyttb and pybind11, and only works on Unix"
+  )
+else()
+  set(PYBIND11_FINDPYTHON
+      ON
+  )
+  disable_cmake_warnings()
+  find_package(
+    pybind11
+    REQUIRED
+  )
+  enable_cmake_warnings()
+  link_libraries(
+    pybind11::headers
+    pybind11::embed
+    ${CMAKE_DL_LIBS}
+  )
+  list(
+    APPEND
+    source_files
+    model/nr-pm-search-maleki.cc
+  )
+  list(
+    APPEND
+    header_files
+    model/nr-pm-search-maleki.h
+  )
+  add_compile_definitions(PMI_MALEKI=1)
+endif()
 
 build_lib(
   LIBNAME nr
@@ -463,8 +654,39 @@ build_lib(
     ${libapplications}
     ${libcsma}
     ${libconfig-store}
+    ${opengym_libraries}
   TEST_SOURCES ${test_sources}
+  GENERATE_EXPORT_HEADER
 )
+
+# Symbol-visibility opt-in for the nr library only.
+#
+# Default MinGW/CMake behaviour exports *every* globally visible symbol into the
+# PE import library. With template-heavy code (Callback<>, std::function, Eigen,
+# the ns-3 attribute system) the count for the nr DLL has grown past the PE
+# 16-bit export-ordinal limit of 65535 entries, breaking the link with "export
+# ordinal too large: NNNNN".
+#
+# -fvisibility=hidden makes hidden the default for symbols that are not
+# annotated; -fvisibility-inlines-hidden additionally hides every inline
+# function (including template instantiations) regardless of annotation, which
+# is what trims the std::/Eigen::/Callback<> bulk out of the export table.
+if(WIN32)
+  set_target_properties(
+    nr
+    PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS
+               OFF
+  )
+  target_compile_options(
+    nr
+    PRIVATE -fvisibility=hidden
+            -fvisibility-inlines-hidden
+  )
+  target_compile_definitions(
+    nr
+    PRIVATE NS_MSVC
+  )
+endif()
 
 # Get path src/nr or contrib/nr
 string(
@@ -475,7 +697,7 @@ string(
 )
 build_exec(
   EXECNAME nr-print-introspected-doxygen
-  SOURCE_FILES ./utils/print-introspected-doxygen.cc
+  SOURCE_FILES ./tools/print-introspected-doxygen.cc
   LIBRARIES_TO_LINK ${libnr}
   EXECUTABLE_DIRECTORY_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${FOLDER}
 )

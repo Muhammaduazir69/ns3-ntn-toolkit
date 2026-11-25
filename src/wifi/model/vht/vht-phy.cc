@@ -50,40 +50,30 @@ const PhyEntity::PpduFormats VhtPhy::m_vhtPpduFormats {
 
 const VhtPhy::NesExceptionMap VhtPhy::m_exceptionsMap {
                     /* {BW,Nss,MCS} Nes */
-    { std::make_tuple ( 80, 7, 2),  3 }, // instead of 2
-    { std::make_tuple ( 80, 7, 7),  6 }, // instead of 4
-    { std::make_tuple ( 80, 7, 8),  6 }, // instead of 5
-    { std::make_tuple ( 80, 8, 7),  6 }, // instead of 5
-    { std::make_tuple (160, 4, 7),  6 }, // instead of 5
-    { std::make_tuple (160, 5, 8),  8 }, // instead of 7
-    { std::make_tuple (160, 6, 7),  8 }, // instead of 7
-    { std::make_tuple (160, 7, 3),  4 }, // instead of 3
-    { std::make_tuple (160, 7, 4),  6 }, // instead of 5
-    { std::make_tuple (160, 7, 5),  7 }, // instead of 6
-    { std::make_tuple (160, 7, 7),  9 }, // instead of 8
-    { std::make_tuple (160, 7, 8), 12 }, // instead of 9
-    { std::make_tuple (160, 7, 9), 12 }, // instead of 10
+    { std::make_tuple (MHz_u{80}, 7, 2),  3 }, // instead of 2
+    { std::make_tuple (MHz_u{80}, 7, 7),  6 }, // instead of 4
+    { std::make_tuple (MHz_u{80}, 7, 8),  6 }, // instead of 5
+    { std::make_tuple (MHz_u{80}, 8, 7),  6 }, // instead of 5
+    { std::make_tuple (MHz_u{160}, 4, 7),  6 }, // instead of 5
+    { std::make_tuple (MHz_u{160}, 5, 8),  8 }, // instead of 7
+    { std::make_tuple (MHz_u{160}, 6, 7),  8 }, // instead of 7
+    { std::make_tuple (MHz_u{160}, 7, 3),  4 }, // instead of 3
+    { std::make_tuple (MHz_u{160}, 7, 4),  6 }, // instead of 5
+    { std::make_tuple (MHz_u{160}, 7, 5),  7 }, // instead of 6
+    { std::make_tuple (MHz_u{160}, 7, 7),  9 }, // instead of 8
+    { std::make_tuple (MHz_u{160}, 7, 8), 12 }, // instead of 9
+    { std::make_tuple (MHz_u{160}, 7, 9), 12 }, // instead of 10
 };
 
 // clang-format on
 
 /**
- * \brief map a given channel list type to the corresponding scaling factor
+ * @brief map a given secondary channel width to its channel list type
  */
-const std::map<WifiChannelListType, dBm_u> channelTypeToScalingFactor{
-    {WIFI_CHANLIST_PRIMARY, 0.0},
-    {WIFI_CHANLIST_SECONDARY, 0.0},
-    {WIFI_CHANLIST_SECONDARY40, 3.0},
-    {WIFI_CHANLIST_SECONDARY80, 6.0},
-};
-
-/**
- * \brief map a given secondary channel width to its channel list type
- */
-const std::map<MHz_u, WifiChannelListType> secondaryChannels{
-    {20, WIFI_CHANLIST_SECONDARY},
-    {40, WIFI_CHANLIST_SECONDARY40},
-    {80, WIFI_CHANLIST_SECONDARY80},
+const std::map<MHz_u, WifiChannelListType> vhtSecondaryChannels{
+    {MHz_u{20}, WIFI_CHANLIST_SECONDARY},
+    {MHz_u{40}, WIFI_CHANLIST_SECONDARY40},
+    {MHz_u{80}, WIFI_CHANLIST_SECONDARY80},
 };
 
 VhtPhy::VhtPhy(bool buildModeList /* = true */)
@@ -447,8 +437,8 @@ VhtPhy::GetDataRateFromTxVector(const WifiTxVector& txVector, uint16_t /* staId 
 uint64_t
 VhtPhy::GetDataRate(uint8_t mcsValue, MHz_u channelWidth, Time guardInterval, uint8_t nss)
 {
-    [[maybe_unused]] const auto gi = guardInterval.GetNanoSeconds();
-    NS_ASSERT((gi == 800) || (gi == 400));
+    NS_ASSERT_MSG(IsValidGuardInterval(guardInterval, WIFI_STANDARD_80211ac),
+                  "Invalid VHT guard interval " << guardInterval.As(Time::NS));
     NS_ASSERT(nss <= 8);
     NS_ASSERT_MSG(IsCombinationAllowed(mcsValue, channelWidth, nss),
                   "VHT MCS " << +mcsValue << " forbidden at " << channelWidth << " MHz when NSS is "
@@ -516,11 +506,11 @@ VhtPhy::IsAllowed(const WifiTxVector& txVector)
 bool
 VhtPhy::IsCombinationAllowed(uint8_t mcsValue, MHz_u channelWidth, uint8_t nss)
 {
-    if (mcsValue == 9 && channelWidth == 20 && nss != 3)
+    if (mcsValue == 9 && channelWidth == MHz_u{20} && nss != 3)
     {
         return false;
     }
-    if (mcsValue == 6 && channelWidth == 80 && nss == 3)
+    if (mcsValue == 6 && channelWidth == MHz_u{80} && nss == 3)
     {
         return false;
     }
@@ -530,7 +520,7 @@ VhtPhy::IsCombinationAllowed(uint8_t mcsValue, MHz_u channelWidth, uint8_t nss)
 uint32_t
 VhtPhy::GetMaxPsduSize() const
 {
-    return 4692480;
+    return WIFI_PSDU_MAX_LENGTH_VHT;
 }
 
 dBm_u
@@ -547,13 +537,13 @@ VhtPhy::GetCcaThreshold(const Ptr<const WifiPpdu> ppdu, WifiChannelListType chan
             return m_wifiPhy->GetCcaSensitivityThreshold();
         }
         case WIFI_CHANLIST_SECONDARY:
-            NS_ASSERT_MSG(ppduBw == 20, "Invalid channel width " << ppduBw);
+            NS_ASSERT_MSG(ppduBw == MHz_u{20}, "Invalid channel width " << ppduBw);
             break;
         case WIFI_CHANLIST_SECONDARY40:
-            NS_ASSERT_MSG(ppduBw <= 40, "Invalid channel width " << ppduBw);
+            NS_ASSERT_MSG(ppduBw <= MHz_u{40}, "Invalid channel width " << ppduBw);
             break;
         case WIFI_CHANLIST_SECONDARY80:
-            NS_ASSERT_MSG(ppduBw <= 80, "Invalid channel width " << ppduBw);
+            NS_ASSERT_MSG(ppduBw <= MHz_u{80}, "Invalid channel width " << ppduBw);
             break;
         default:
             NS_ASSERT_MSG(false, "Invalid channel list type");
@@ -573,85 +563,10 @@ VhtPhy::GetCcaThreshold(const Ptr<const WifiPpdu> ppdu, WifiChannelListType chan
     }
 }
 
-PhyEntity::CcaIndication
-VhtPhy::GetCcaIndication(const Ptr<const WifiPpdu> ppdu)
+const std::map<MHz_u, WifiChannelListType>&
+VhtPhy::GetCcaSecondaryChannels() const
 {
-    if (m_wifiPhy->GetChannelWidth() < 80)
-    {
-        return HtPhy::GetCcaIndication(ppdu);
-    }
-
-    auto ccaThreshold = GetCcaThreshold(ppdu, WIFI_CHANLIST_PRIMARY);
-    auto delayUntilCcaEnd = GetDelayUntilCcaEnd(ccaThreshold, GetPrimaryBand(20));
-    if (delayUntilCcaEnd.IsStrictlyPositive())
-    {
-        return std::make_pair(
-            delayUntilCcaEnd,
-            WIFI_CHANLIST_PRIMARY); // if Primary is busy, ignore CCA for Secondary
-    }
-
-    if (ppdu)
-    {
-        const MHz_u primaryWidth = 20;
-        const MHz_u p20MinFreq =
-            m_wifiPhy->GetOperatingChannel().GetPrimaryChannelCenterFrequency(primaryWidth) -
-            (primaryWidth / 2);
-        const MHz_u p20MaxFreq =
-            m_wifiPhy->GetOperatingChannel().GetPrimaryChannelCenterFrequency(primaryWidth) +
-            (primaryWidth / 2);
-        if (ppdu->DoesOverlapChannel(p20MinFreq, p20MaxFreq))
-        {
-            /*
-             * PPDU occupies primary 20 MHz channel, hence we skip CCA sensitivity rules
-             * for signals not occupying the primary 20 MHz channel.
-             */
-            return std::nullopt;
-        }
-    }
-
-    std::vector<MHz_u> secondaryWidthsToCheck;
-    if (ppdu)
-    {
-        for (const auto& secondaryChannel : secondaryChannels)
-        {
-            const auto secondaryWidth = secondaryChannel.first;
-            const MHz_u secondaryMinFreq =
-                m_wifiPhy->GetOperatingChannel().GetSecondaryChannelCenterFrequency(
-                    secondaryWidth) -
-                (secondaryWidth / 2);
-            const MHz_u secondaryMaxFreq =
-                m_wifiPhy->GetOperatingChannel().GetSecondaryChannelCenterFrequency(
-                    secondaryWidth) +
-                (secondaryWidth / 2);
-            if ((m_wifiPhy->GetChannelWidth() > secondaryWidth) &&
-                ppdu->DoesOverlapChannel(secondaryMinFreq, secondaryMaxFreq))
-            {
-                secondaryWidthsToCheck.push_back(secondaryWidth);
-            }
-        }
-    }
-    else
-    {
-        secondaryWidthsToCheck.push_back(20);
-        secondaryWidthsToCheck.push_back(40);
-        if (m_wifiPhy->GetChannelWidth() > 80)
-        {
-            secondaryWidthsToCheck.push_back(80);
-        }
-    }
-
-    for (auto secondaryWidth : secondaryWidthsToCheck)
-    {
-        auto channelType = secondaryChannels.at(secondaryWidth);
-        ccaThreshold = GetCcaThreshold(ppdu, channelType);
-        delayUntilCcaEnd = GetDelayUntilCcaEnd(ccaThreshold, GetSecondaryBand(secondaryWidth));
-        if (delayUntilCcaEnd.IsStrictlyPositive())
-        {
-            return std::make_pair(delayUntilCcaEnd, channelType);
-        }
-    }
-
-    return std::nullopt;
+    return vhtSecondaryChannels;
 }
 
 } // namespace ns3
@@ -668,7 +583,7 @@ class ConstructorVht
     ConstructorVht()
     {
         ns3::VhtPhy::InitializeModes();
-        ns3::WifiPhy::AddStaticPhyEntity(ns3::WIFI_MOD_CLASS_VHT, ns3::Create<ns3::VhtPhy>());
+        ns3::WifiPhy::AddStaticPhyEntity(ns3::WIFI_MOD_CLASS_VHT, std::make_shared<ns3::VhtPhy>());
     }
 } g_constructor_vht; ///< the constructor for VHT modes
 

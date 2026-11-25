@@ -23,9 +23,9 @@ using namespace ns3::energy;
 NS_LOG_COMPONENT_DEFINE("BasicEnergyHarvesterTestSuite");
 
 /**
- * \ingroup energy-tests
+ * @ingroup energy-tests
  *
- * \brief Energy Harvester Test
+ * @brief Energy Harvester Test
  */
 class BasicEnergyHarvesterTestCase : public TestCase
 {
@@ -77,8 +77,6 @@ BasicEnergyHarvesterTestCase::DoRun()
     harvester->SetNode(node);
     harvester->SetEnergySource(source);
 
-    Time now = Simulator::Now();
-
     /*
      * The energy harvester will recharge the energy source for m_timeS seconds.
      */
@@ -112,9 +110,9 @@ BasicEnergyHarvesterTestCase::DoRun()
 }
 
 /**
- * \ingroup energy-tests
+ * @ingroup energy-tests
  *
- * \brief Energy harvester TestSuite
+ * @brief Energy harvester TestSuite
  */
 class BasicEnergyHarvesterTestSuite : public TestSuite
 {

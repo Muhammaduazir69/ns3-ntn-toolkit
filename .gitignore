@@ -4,41 +4,10 @@
 *.rej
 
 *.o
-*.so
-*.a
 *.pyc
 *.pyo
 
 *.cwnd
-
-# Build artifacts
-build/
-cmake-cache/
-__pycache__/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.clangd/
-compile_commands.json
-
-# NS-3 generated
-output-attributes.xml
-
-# Simulation outputs
-ntn-cho-output/
-ntn-cho-figures/
-
-# Node modules
-node_modules/
-package-lock.json
-
-# OS
-.DS_Store
-Thumbs.db
 *.dat
 *.log
 *.mob
@@ -82,123 +51,137 @@ vcpkg/
 # Ignore local cache used by e.g. clangd
 .cache/
 
+# ns3-ntn-toolkit additions
+*.a
+AI_NATIVE_ORAN_NTN_ADOPTION_PLAN_2026-06.md
+# and PyPI ships them; don't track them inside the repo.
+/*ASSESSMENT*.md
+/audit/
+/*AUDIT*.md
+AUDIT_*.md
+# boundaries lie belong in README.md, INSTALL.md, SCOPE_AND_LIMITATIONS.md and
+# Build artifacts
 # Bulk upstream module — clone separately, see README
+/cell_kpi.csv
+.clangd/
+cmake-cache/
+compile_commands.json
+contrib/ns3-ai-ntn/python_utils/
+contrib/*/paper/
 contrib/satellite/
-
-# Simulation outputs
+/CSV_REALISM_FIXES_*.md
+# directory, so each new case that checks a written file leaves one behind.
+**/dist/
+DlPathlossTrace.txt
 DlPhyTransmissionTrace.txt
+Dl*Sinr.txt
+docs/_archive_v1/
+# docs/. Keeping the notes local keeps those four honest and readable.
+# don't double-track from the umbrella.
+drafts/
+.DS_Store
+**/*.egg-info/
 EnbSchedAllocTraces.txt
-RxPacketTrace.txt
-UlPhyTransmissionTrace.txt
+# Example-run CSV outputs at repo root
+# follow the pattern above: the suite writes its artifacts into the working
+/*GAP_ANALYSIS*.md
+hexagonal-topology.gnuplot
+# IDE
+# Internal engineering records: audits, gap registers, roadmaps and fix plans.
+/*JUDGMENT*.md
+*_kpm_series.csv
+*_kpm_series.lp
+*_kpm_series_units.csv
+node_modules/
+# Node modules
+Nr*Stats*.txt
+Nr*Trace*.txt
+# NS-3 generated
 ntn-ai-output/
 ntn-analysis-output/
-oran-ntn-output/
-thz-ntn-results/
-sim_health_report.md
-
-# Example-run CSV outputs at repo root
+ntn-cho-figures/
+ntn-cho-output/
+/ntn-observability-traffic.lp
+/ntn-oran-monitor-*.csv
+/ntn-oran-monitor-*.lp
+/ntn-oran-monitor-test.*
+/ntn-oran-monitor-*.xml
 /ntn-rrc-*.csv
 /ntn-three-slice*.csv
 /ntn-v2x-*.csv
+# of these by name; the rest appear whenever an nr example runs from the source
+oran-ntn-output/
+# OS
+/*-out/
+/*-output/
+output-attributes.xml
+# Owned by the nested ns3-ai-ntn repo (git@gitlab.com:ha5050/ns3-ai.git);
+package-lock.json
+# Personal planning / audit notes — kept locally, not pushed
+/*_PLAN.md
+/*PLAN_*.md
+# Private planning documents and generated run artefacts — never publish.
+PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06.md
+protocol_fidelity_report.md
+push-v2-branches.sh
+__pycache__/
+# Python build artefacts — wheels and sdists are reproducible from source
+/rd-audit-*/
+/REALISM_*.md
+# released toolkit. What the toolkit does, how to install it and where its
+*-replay.bin
+/Roadmap/
+ROADMAP_EXECUTION.md
+/*ROADMAP*.md
+# root and are pure run output.
+Rxed*Trace.txt
+RxPacketTrace.txt
 /sagin-*.csv
 /sim_health.csv
-/ue_kpi.csv
-/cell_kpi.csv
-
-# Personal planning / audit notes — kept locally, not pushed
-ROADMAP_EXECUTION.md
-AUDIT_*.md
-docs/_archive_v1/
-drafts/
-
-# Owned by the nested ns3-ai-ntn repo (git@gitlab.com:ha5050/ns3-ai.git);
-# don't double-track from the umbrella.
-contrib/ns3-ai-ntn/python_utils/
-
-# Python build artefacts — wheels and sdists are reproducible from source
-# and PyPI ships them; don't track them inside the repo.
-**/dist/
-**/*.egg-info/
-
-# Private planning documents and generated run artefacts — never publish.
-AI_NATIVE_ORAN_NTN_ADOPTION_PLAN_2026-06.md
-PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06.md
-TOOLKIT_ARCHITECTURE_AUDIT_*.md
-push-v2-branches.sh
-protocol_fidelity_report.md
-/*-output/
-/*-out/
-/ntn-oran-monitor-test.*
-/ntn-observability-traffic.lp
-*_kpm_series.csv
-*_kpm_series.lp
-*-replay.bin
-test-ntn-repro-manifest/
-test-ntn-backhaul-fold/
-test-ntn-band-nonconf/
-test-ntn-band-conf/
-test-ntn-band-wide/
-test-ntn-gate-pass/
-test-ntn-gate-fail/
-test-ntn-chan-frozen/
-test-ntn-chan-evolve/
-test-ntn-budget-oracle/
-test-ntn-strict-pass/
-test-ntn-strict-fail/
-# Test scratch directories added by the 2026-08-26 audit-fix campaign. These
-# follow the pattern above: the suite writes its artifacts into the working
-# directory, so each new case that checks a written file leaves one behind.
+sim_health_report.md
+# Simulation outputs
+*.so
+/standards-gap-audit-*/
+# Study datasets live in each module repository (paper/), audit run outputs stay local
+/*SWEEP_REPORT*.md
+*.swo
+*.swp
+test1.db
+# Test and example outputs written into the tree root (any future test-ntn-* dir too)
 test-cho17-csv/
 test-cvc07-delay-treatment/
 test-cvc08-xapp-metrics/
 test-nt12-window/
+/test-ntn-*/
 test-ntn-airiface-delay/
-# Vendored nr/mmwave per-run trace dumps. The list above already covers several
-# of these by name; the rest appear whenever an nr example runs from the source
-# root and are pure run output.
-Nr*Stats*.txt
-Nr*Trace*.txt
-Dl*Sinr.txt
-DlPathlossTrace.txt
-Rxed*Trace.txt
-Txed*Trace.txt
-hexagonal-topology.gnuplot
-test1.db
-
-# Internal engineering records: audits, gap registers, roadmaps and fix plans.
-# These are the working notes a release is built from, not documentation of the
-# released toolkit. What the toolkit does, how to install it and where its
-# boundaries lie belong in README.md, INSTALL.md, SCOPE_AND_LIMITATIONS.md and
-# docs/. Keeping the notes local keeps those four honest and readable.
-/audit/
-/Roadmap/
-/rd-audit-*/
-/standards-gap-audit-*/
-/*AUDIT*.md
-/*ROADMAP*.md
-/*_PLAN.md
-/*PLAN_*.md
-/*ASSESSMENT*.md
-/*JUDGMENT*.md
-/*GAP_ANALYSIS*.md
-/*SWEEP_REPORT*.md
-/CSV_REALISM_FIXES_*.md
-/REALISM_*.md
-
-# Study datasets live in each module repository (paper/), audit run outputs stay local
-contrib/*/paper/
-toolkit-audit-*/
+test-ntn-backhaul-fold/
+test-ntn-band-conf/
+test-ntn-band-nonconf/
+test-ntn-band-wide/
+test-ntn-budget-oracle/
+test-ntn-chan-evolve/
+test-ntn-chan-frozen/
+/test-ntn-cho-*/
+test-ntn-gate-fail/
+test-ntn-gate-pass/
 test-ntn-ho-serving-stats/
 test-ntn-periodic-meas/
 test-ntn-ran-kpm/
+test-ntn-repro-manifest/
 test-ntn-seam-plugin/
 test-ntn-set1-zenith/
+test-ntn-strict-fail/
+test-ntn-strict-pass/
 test-ntn-ue-kpi/
-# Test and example outputs written into the tree root (any future test-ntn-* dir too)
-/test-ntn-*/
-/test-ntn-cho-*/
-*_kpm_series_units.csv
-/ntn-oran-monitor-*.csv
-/ntn-oran-monitor-*.xml
-/ntn-oran-monitor-*.lp
+# Test scratch directories added by the 2026-08-26 audit-fix campaign. These
+# These are the working notes a release is built from, not documentation of the
+Thumbs.db
 /thz-ntn-absorption-sweep.csv
+thz-ntn-results/
+TOOLKIT_ARCHITECTURE_AUDIT_*.md
+toolkit-audit-*/
+Txed*Trace.txt
+/ue_kpi.csv
+UlPhyTransmissionTrace.txt
+# Vendored nr/mmwave per-run trace dumps. The list above already covers several
+.vscode/

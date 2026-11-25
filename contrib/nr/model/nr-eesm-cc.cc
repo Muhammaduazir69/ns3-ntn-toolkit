@@ -4,7 +4,7 @@
 
 #include "nr-eesm-cc.h"
 
-#include <ns3/log.h>
+#include "ns3/log.h"
 
 namespace ns3
 {
@@ -55,7 +55,7 @@ NrEesmCc::ComputeSINR(const SpectrumValue& sinr,
     NS_ASSERT(sinr.GetSpectrumModel()->GetNumBands() == sinr.GetValuesN());
 
     SpectrumValue sinr_sum(sinr.GetSpectrumModel());
-    uint32_t historySize = static_cast<uint32_t>(total.size());
+    auto historySize = static_cast<uint32_t>(total.size());
     uint32_t maxRBUsed = 0;
     for (uint32_t i = 0; i < historySize; ++i)
     {

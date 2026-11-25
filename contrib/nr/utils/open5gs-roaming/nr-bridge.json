@@ -1,0 +1,24 @@
+{
+  "listen": "127.0.0.1:9999",
+  "cores": [
+    {"mcc": "001", "mnc": "01", "amf": "127.0.2.5:38412", "local_n2": "127.0.3.1:9487"}
+  ],
+  "subscriber": {
+    "key": "00112233445566778899AABBCCDDEEFF",
+    "opc": "63BFA50EE6523365FF14C1F45F88737D",
+    "amf": "8000",
+    "sqn": "00000000"
+  },
+  "dnn": "internet",
+  "sst": 1,
+  "sd": "",
+  "sepp": {
+    "fqdn": "sepp.5gc.mnc002.mcc002.3gppnetwork.org",
+    "n32c": "127.0.3.251:7777",
+    "n32f": "127.0.3.252:7777",
+    "plmns": [{"mcc": "002", "mnc": "02"}],
+    "five_qi": 9,
+    "ambr": "1000000 Kbps",
+    "peers": [{"plmn": {"mcc": "001", "mnc": "01"}, "n32f": "http://127.0.2.252:7777"}]
+  }
+}

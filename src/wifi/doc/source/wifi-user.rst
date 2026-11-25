@@ -216,7 +216,7 @@ For example, this code configures a node with 3 antennas that supports 2 spatial
  wifiPhyHelper.Set("MaxSupportedTxSpatialStreams", UintegerValue(2));
  wifiPhyHelper.Set("MaxSupportedRxSpatialStreams", UintegerValue(1));
 
-802.11n PHY layer can support both 20 (default) or 40 MHz channel width, and 802.11ac/ax PHY layer can use either 20, 40, 80 (default) or 160 MHz channel width.  See below for further documentation on setting the frequency, channel width, and channel number.
+802.11n PHY layer can support both 20 (default) or 40 MHz channel width, and 802.11ac/ax PHY layer can use either 20, 40, 80 (default), 160 or 320 MHz channel width.  See below for further documentation on setting the frequency, channel width, and channel number.
 
 .. sourcecode:: cpp
 
@@ -264,7 +264,7 @@ providing either a StringValue object or an AttributeContainerValue object:
 
 .. sourcecode:: cpp
 
-  AttributeContainerValue<TupleValue<UintegerValue, UintegerValue, EnumValue, UintegerValue>, ';'> value;
+  WifiPhy::ChannelSettingsValue value;
   value.Set(WifiPhy::ChannelSegments{{38, 40, WIFI_PHY_BAND_5GHZ, 0}});
 
 In both cases, the operating channel will be channel 38 in the 5 GHz band, which
@@ -283,7 +283,7 @@ The operating channel settings can then be configured in a number of ways:
 
 .. sourcecode:: cpp
 
-  AttributeContainerValue<TupleValue<UintegerValue, UintegerValue, EnumValue, UintegerValue>, ';'> value;
+  WifiPhy::ChannelSettingsValue value;
   value.Set(WifiPhy::ChannelSegments{{38, 40, WIFI_PHY_BAND_5GHZ, 0}});
   YansWifiPhyHelper wifiPhyHelper = YansWifiPhyHelper::Default();
   wifiPhyHelper.Set("ChannelSettings", value);
@@ -475,33 +475,35 @@ The following channel numbers are well-defined for 5 GHz standards:
    +------------------+-------------------------------------------+
 
 
-The following channel numbers are well-defined for 6 GHz standards (802.11ax only):
+The following channel numbers are well-defined for 6 GHz standards (802.11ax and later):
 
 .. table:: 6 GHz channel numbers
    :widths: 20 70
 
-   +------------------+-------------------------------------------+
-   | ``ChannelWidth`` | ``ChannelNumber``                         |
-   +------------------+-------------------------------------------+
-   | 20 MHz           | 1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41,  |
-   |                  | 45, 49, 53, 57, 61, 65, 69, 73, 77, 81,   |
-   |                  | 85, 89, 93, 97, 101, 105, 109, 113, 117,  |
-   |                  | 121, 125, 129, 133, 137, 141, 145, 149,   |
-   |                  | 153, 157, 161, 165, 169, 173, 177, 181,   |
-   |                  | 185, 189, 193, 197, 201, 205, 209, 213,   |
-   |                  | 217, 221, 225, 229, 233                   |
-   +------------------+-------------------------------------------+
-   | 40 MHz           | 3, 11, 19, 27, 35, 43, 51, 59, 67, 75,    |
-   |                  | 83, 91, 99, 107, 115, 123, 131, 139, 147, |
-   |                  | 155, 163, 171, 179, 187, 195, 203, 211,   |
-   |                  | 219, 227                                  |
-   +------------------+-------------------------------------------+
-   | 80 MHz           | 7, 23, 39, 55, 71, 87, 103, 119, 135,     |
-   |                  | 151, 167, 183, 199, 215                   |
-   +------------------+-------------------------------------------+
-   | 160 MHz          | 15, 47, 79, 111, 143, 175, 207            |
-   +------------------+-------------------------------------------+
-
+   +-------------------+------------------------------------------+
+   | ``ChannelWidth``  | ``ChannelNumber``                        |
+   +-------------------+------------------------------------------+
+   | 20 MHz            | 1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, |
+   |                   | 45, 49, 53, 57, 61, 65, 69, 73, 77, 81,  |
+   |                   | 85, 89, 93, 97, 101, 105, 109, 113, 117, |
+   |                   | 121, 125, 129, 133, 137, 141, 145, 149,  |
+   |                   | 153, 157, 161, 165, 169, 173, 177, 181,  |
+   |                   | 185, 189, 193, 197, 201, 205, 209, 213,  |
+   |                   | 217, 221, 225, 229, 233                  |
+   +-------------------+------------------------------------------+
+   | 40 MHz            | 3, 11, 19, 27, 35, 43, 51, 59, 67, 75,   |
+   |                   | 83, 91, 99, 107, 115, 123, 131, 139, 147,|
+   |                   | 155, 163, 171, 179, 187, 195, 203, 211,  |
+   |                   | 219, 227                                 |
+   +-------------------+------------------------------------------+
+   | 80 MHz            | 7, 23, 39, 55, 71, 87, 103, 119, 135,    |
+   |                   | 151, 167, 183, 199, 215                  |
+   +-------------------+------------------------------------------+
+   | 160 MHz           | 15, 47, 79, 111, 143, 175, 207           |
+   +-------------------+------------------------------------------+
+   | 320 MHz (802.11be | 31, 95, 159 (320 MHz-1)                  |
+   | and later)        | 63, 127, 191 (320 MHz-2)                 |
+   +-------------------+------------------------------------------+
 
 The channel number may be set either before or after creation of the
 WifiPhy object.
@@ -532,6 +534,9 @@ such as:
 
 In the above, while channel number 14 is well-defined in practice for 802.11b
 only, it is for 2.4 GHz band, not 5 GHz band.
+
+If a limitation is configured for the supported bandwidth of the PHY radio through the MaxRadioBw attribute,
+the simulator will exit with an error if the configured bandwidth exceeds the maximum allowed bandwidth.
 
 WifiPhy::Primary20MHzIndex
 ++++++++++++++++++++++++++
@@ -575,6 +580,32 @@ Otherwise, they are applied immediately.
 The wifi standard can be configured only once, i.e., it is not possible to
 change standard during a simulation. It is instead possible to change the
 channel settings at any time.
+
+Advertisement of the channel width
+++++++++++++++++++++++++++++++++++
+
+STAs are advertizing their channel width in capabilities and operations (for APs) information elements
+contained in management frames.
+
+The channel width that is being advertised is the value that is returned by WifiPhy::ChannelWidth, which corresponds to
+the value that is set in the ChannelSettings attribute (or the total width in case of non-contiguous channel operation).
+
+Not all the channel widths can be advertised for non-AP STAs, depending on the standard and the band.
+This is not a problem as long as the AP the non-AP STA is associated with is operating on the same channel width
+or on a narrower one. Otherwise, the AP might select a larger channel width for the transmission of downlink PPDUs,
+which would then be dropped by the PHY of the non-AP STA.
+
+For example, since VHT Capabilities Information Elements only allow the advertisement of 80 and 160 MHz channel widths,
+a VHT non-AP STA with its ChannelSettings set to use a 40 MHz channel width won't be able to receive any downlink PPDUs
+if the VHT AP has its ChannelSettings set to operate on an 80 MHz channel width.
+
+It is possible to configure the behavior of the association manager to either abort the simulation when such
+a problematic situation is detected (default) or to allow the association anyway, depending on the configured value
+for the ``ns3::WifiMac::AllowAssociationWithDifferentChannelWidth`` attribute.
+
+If the default association manager is used, it is also possible to skip candidate APs that are operating on a
+larger channel width than the non-AP STA and which would result in the problematic situation described above.
+This is done by setting the ``ns3::WifiMac::SkipCandidateAPsWithLargerChannelWidth`` attribute to true.
 
 
 SpectrumWifiPhyHelper
@@ -703,6 +734,46 @@ enables to select the acknowledgment method, e.g.:
 
     Config::SetDefault("ns3::WifiDefaultAckManager::DlMuAckSequenceType",
                        EnumValue(WifiAcknowledgment::DL_MU_AGGREGATE_TF));
+
+MAC queue scheduler
++++++++++++++++++++
+
+By default, a wifi device uses the ``FcfsWifiQueueScheduler`` (first-come,
+first-served). A different scheduler can be selected on the MAC helper before
+installing the devices. For example, to serve receivers in a round-robin
+fashion at the AP:
+
+.. sourcecode:: cpp
+
+    WifiMacHelper wifiMacHelper;
+    wifiMacHelper.SetMacQueueScheduler("ns3::RrWifiQueueScheduler");
+    // ... remaining SetType / install calls as usual
+
+Any attributes declared on the scheduler base class
+(``ns3::WifiMacQueueSchedulerImpl``) can be passed as additional arguments to
+``SetMacQueueScheduler``. The main one is ``DropPolicy``, which selects
+whether an enqueue into a full data queue drops the newest (default) or the
+oldest in-queue data frame:
+
+.. sourcecode:: cpp
+
+    wifiMacHelper.SetMacQueueScheduler("ns3::RrWifiQueueScheduler",
+                                       "DropPolicy", StringValue("DropOldest"));
+
+Notes:
+
+* The scheduler is not tied to any particular 802.11 amendment; it works with
+  any QoS-capable MAC. On a non-QoS MAC, ``RrWifiQueueScheduler`` produces the
+  same serving order as ``FcfsWifiQueueScheduler``.
+* The scheduler is per-device. The most visible effect of
+  ``RrWifiQueueScheduler`` is on downlink from an AP to several STAs on the
+  same Access Category: it prevents head-of-line blocking of one STA by a
+  large backlog to another.
+* Control and management frames always preempt data frames regardless of the
+  scheduler in use.
+* The wifi MAC queue scheduler is consulted for single-user transmissions. DL
+  OFDMA / UL OFDMA scheduling is performed by the separate Multi-User
+  Scheduler (see the ``SetMultiUserScheduler`` snippet above).
 
 Selection of the Access Category (AC)
 +++++++++++++++++++++++++++++++++++++
@@ -1099,6 +1170,276 @@ actual data PPDU, starting at time 1.00039 and ending at 1.00072.
 The management and control frames (which also include beacons) are filtered out above by
 the ``GetStatistics()`` methods, but when the raw PPDU records are retrieved, all PPDUs
 received are available and the user is responsible for further filtering as they see fit.
+
+WifiTxStatsHelper
+=================
+
+The ``WifiTxStatsHelper`` is complementary to the ``WifiPhyRxTraceHelper``.  Where the latter
+is used to collect statistics of Wi-Fi reception events at the physical layer, the former
+is used for collecting statistics on the transmit side at the MAC layer, including the
+number of transmissions and retransmissions of an MPDU, and the total number of successful,
+retransmitted, and failed MPDUs.  In addition, the helper tracks
+the duration of time that MPDUs are enqueued, including the durations that they reside
+within the MAC queue. For failed MPDUs, their timestamps of drop and reasons for being dropped
+are collected.
+
+The trace helper works by hooking MAC- and PHY-level traces on the applicable nodes, devices,
+and links (in multi-link operation), and maintaining per-MPDU records of every transmission.
+We explain the operation by way of first reviewing how a simulation is configured to
+use the helper, and then reviewing the public API.
+
+A sample usage of this trace helper is as follows, as can be explored by extending an
+existing Wi-fi example program.  First, declare an instance of the helper, as one might do
+with other Wi-Fi helpers, prior to calling ``Simulation::Run()``:
+
+.. sourcecode:: cpp
+
+  WifiTxStatsHelper txStatsHelper;
+
+You may need to include the trace helper's header if it is not otherwise included by the
+wifi module header:
+
+.. sourcecode:: cpp
+
+  #include "ns3/wifi-tx-stats-helper.h"
+
+Next, enable the trace helper on some subset of the Wi-Fi nodes in the simulation.  This step
+will hook traces on all of the nodes or devices enabled.  Two methods are provided, depending
+on whether a NodeContainer or NetDeviceContainer is enabled:
+
+.. sourcecode:: cpp
+
+  NodeContainer n;
+  txStatsHelper.Enable(n);
+
+or
+
+.. sourcecode:: cpp
+
+  NetDeviceContainer d;
+  txStatsHelper.Enable(d);
+
+By default, statistics will be collected for MPDUs enqueued between the start and stop times, which default to
+collecting statistics for the whole simulation.  To limit the duration, the following methods
+can be used, as an example:
+
+.. sourcecode:: cpp
+
+  txStatsHelper.Start(Seconds(1));
+  txStatsHelper.Stop(Seconds(10));
+
+Alternatively, the constructor is overloaded to allow these arguments to be passed there instead:
+
+.. sourcecode:: cpp
+
+  WifiTxStatsHelper txStatsHelper(Seconds(1), Seconds(10));
+
+Finally, a ``Reset()`` method is provided, to clear the success and failure records.  If
+this method is called, any in-progress MPDUs (i.e., those that have been queued but have
+neither been positively acked nor reached the maximum number of retries) are kept, but
+any completed records are deleted.
+
+The following main methods provide the output:
+
+.. sourcecode:: cpp
+
+   CountPerNodeDevice_t GetSuccessesByNodeDevice() const;
+   CountPerNodeDevice_t GetFailuresByNodeDevice() const;
+   CountPerNodeDevice_t GetRetransmissionsByNodeDevice() const;
+   uint64_t GetSuccesses() const;
+   uint64_t GetFailures() const;
+   uint64_t GetRetransmissions() const;
+   Time GetDuration() const;
+   const SuccessRecords& GetSuccessRecords(
+       WifiTxStatsHelper::MultiLinkSuccessType type = FIRST_LINK_IN_SET) const;
+   const FailureRecords& GetFailureRecords() const;
+
+For Multi-Link Operation (MLO) configurations, the records of successful MPDU transmissions
+are also available on a more granular, per-link basis:
+
+.. sourcecode:: cpp
+
+   const SuccessRecords& GetSuccessRecords(
+       WifiTxStatsHelper::MultiLinkSuccessType type = FIRST_LINK_IN_SET) const;
+
+MPDU transmission failures can also be filtered on the drop reason type with the following methods:
+
+.. sourcecode:: cpp
+
+   CountPerNodeDevice_t GetFailuresByNodeDevice(WifiMacDropReason reason) const;
+   uint64_t GetFailures(WifiMacDropReason reason) const;
+
+The first three methods return unordered maps with counts of successful MPDU transmissions,
+failed MPDU transmissions, and retransmitted MPDUs (for eventually successful MPDUs).
+
+1. ``GetSuccessesByNodeDevice()``: The returned data structure counts the number of
+   successful MPDU transmissions that were observed, indexed by a {node ID, device ID}
+   tuple.  If Multi-Link Operation is in use on the device, an acknowledged MPDU will be
+   counted as one success regardless of how many links it was transmitted on.
+
+   a. ``GetSuccessesByNodeDeviceLink()``: The returned data structure counts the number of
+      successful MPDU transmissions that were observed, indexed by {node ID, device ID, link ID}
+      tuple.  The link ID corresponds to the link for which the MPDU was successfully
+      acknowledged. If `type` is set to `FIRST_LINK_IN_SET` (default), then the success
+      is counted on the first link in the MPDU's in-flight link ID set. Otherwise, the success
+      is counted for all links in the MPDU's in-flight link ID set.
+
+2. ``GetFailuresByNodeDevice()``:  This returned data structure counts the number of failures
+   (maximum retries reached) that were observed, indexed by {node ID, device ID} tuple.
+   Per-link statistics are not available for failures (which may have experienced transmissions
+   on different links).
+
+   a. ``GetFailuresByNodeDevice(WifiMacDropReason reason)``: This overloaded method filters for
+      failure counts that match the provided drop reason.
+
+3. ``GetRetransmissionsByNodeDevice()``:  This returned data structure counts the number of
+   retransmissions that were observed, indexed by {node ID, device ID} tuple.  Per-link
+   statistics are not available for retransmissions.  Additionally, retransmissions of MPDUs
+   that were not ultimately successful are not counted.
+
+The second three methods provide aggregated counts across all nodes and devices enabled for
+the helper.  These counts should be the same as if the hashed maps of the first three methods
+were iterated, and the counts for each entry summed. The `GetFailures()` method has an
+overloaded version (`uint64_t GetFailures(WifiMacDropReason reason) const;`) to get the
+count of failed MPDU transmissions due to a given reason. If `type` is set to
+`FIRST_LINK_IN_SET` (default) for the `GetSuccessRecords` method, then the successful
+MPDU's record is saved in the `std::list<MpduRecord>` of the first link in the
+MPDU's in-flight link ID set. Otherwise, the record is saved in the lists of all links
+in the MPDU's in-flight link ID set.
+
+The ``GetDuration()`` method will return the duration since the helper was started or last reset.
+
+More detailed statistics can be obtained by the methods ``GetSuccessRecords()`` and
+``GetFailureRecords()``.  These methods export unordered maps of success and failure records,
+in the form of ``struct MpduRecord``, and organized by node, and device, and also by
+link-id in the case of success records (link-id is not available for failure records).
+Each ``MpduRecord`` tracks the time of enqueue, the time of first transmission, the ack time,
+and the dequeue time (a dequeue occurs when the MPDU is either positively acked or is discarded
+due to too many retransmissions).  The node ID, device ID, MPDU sequence number, and TID are
+recorded, and the number of retransmissions (if any) are counted.  Finally, for successful
+MPDUs, the ``m_successLinkId`` field tracks the link ID on which the MPDU was ultimately
+acknowledged.  To obtain a complete accounting of all MPDUs tracked by the helper, both
+``GetSuccessRecords()`` and ``GetFailureRecords()`` must be queried; all MPDU results
+will end up in one of the two data structures.
+
+The example program ``src/wifi/examples/wifi-bianchi.cc`` provides an example use of this
+helper, by setting the program option ``--useTxHelper`` to true.
+
+WifiCoTraceHelper
+=================
+
+The ``WifiCoTraceHelper`` (channel occupancy trace helper) can be used to collect statistics of Wi-Fi channel occupancy, as observed from the perspective of the WifiPhy state of devices or links (in the case of multi-link devices).  The ``WifiPhyStateHelper`` tracks the state of the WifiPhy corresponding to whether it is in idle, transmitting, receiving, or some other state.  This helper object can be added to ns-3 Wi-Fi simulations to track the duration and percentage of time spent in each state.
+
+Wi-Fi channel access relies also on additional busy states that conceptually reside in the MAC layer, corresponding to the Network Allocation Vector (NAV).  The idle states reported herein correspond to the PHY (physical) carrier sense state and not the MAC (virtual) carrier sense state.
+
+In case of an EMLSR device, PHY objects keep switching among links. This helper aggregates a PHY duration to the link it is operating on at that instant. Be aware that switching PHY objects for an EMLSR device might result in unexpected statistics. For example, if auxiliary PHY is configured to not switch in EMLSR configurations then a link could have no PHY object operating on it intermittently. As a result, the total recorded duration on all links would not be same which does not occur for non-EMLSR devices.
+
+This helper can be added to a simulation program with statements such as the following:
+
+.. sourcecode:: cpp
+
+    WifiCoTraceHelper coHelper{Seconds(1.0), Seconds(11.0)};
+
+The above statement, if placed just prior to the call to ``Simulator::Run(),``
+will declare a helper object and configure it to collect statistics between
+one and eleven seconds.  However, WifiNetDevices must still be added, such
+as the following sample code:
+
+.. sourcecode:: cpp
+
+    coHelper.Enable(nodeOrDeviceContainer);
+
+Then finally, print the results after ``Simulator::Run()`` returns:
+
+.. sourcecode:: cpp
+
+    coHelper.PrintStatistics(std::cout);
+
+This will print output such as:
+
+.. sourcecode:: text
+
+    ---- COT for AP:0 ----
+    Showing duration by states:
+    IDLE:       +5.69s  (56.93%)
+    CCA_BUSY:   +1.18s  (11.80%)
+    TX:       +301.90ms  (3.02%)
+    RX:         +2.83s  (28.25%)
+
+    ---- COT for STA0:0 ----
+    Showing duration by states:
+    IDLE:       +5.71s  (57.06%)
+    CCA_BUSY: +377.52ms  (3.78%)
+    TX:         +1.63s  (16.31%)
+    RX:         +2.29s  (22.85%)
+
+You can export statistics from this helper for use cases such as printing in your own formatted statements:
+
+.. sourcecode:: cpp
+
+    auto records = coHelper.GetDeviceRecords();
+
+You can refer an example program in ``src/wifi/examples/wifi-co-trace-example.cc`` on how to use these APIs.
+
+WifiStaticSetupHelper
+=====================
+
+Wi-Fi devices normally exchange management frames over the air to perform association or setup
+various features. In many simulations, users are not interested in the actual exchange of such
+management frames because they want to evaluate the performance of the network when the requested
+features are already established. In such cases, actually exchanging management frames not only
+constitutes a waste of computing resources, but it could also lead to unexpected results due to
+collisions among the required management frames.
+
+The purpose of the ``WifiStaticSetupHelper`` is to statically setup wifi devices at the exact time
+the simulation starts without actually exchanging management frames over the air. Currently, the
+following operations can be statically setup:
+
+* legacy association/ML setup (note that channel scanning is automatically disabled by the helper)
+* establishment of block ack agreements
+* enabling EMLSR mode on EMLSR client links
+
+The ``WifiStaticSetupHelper`` is made of various static functions to perform the operations above,
+which can be called once the installation and configuration of the wifi is completed.
+For example, the following line of code:
+
+.. sourcecode:: cpp
+
+    WifiStaticSetupHelper::SetStaticAssociation(apDev, staDevices);
+
+performs association or ML setup (depending on whether involved devices are single-link or multi-link)
+between the AP ``apDev`` and the non-AP STAs included in the ``staDevices`` container of devices.
+Additionally, the following line of code:
+
+.. sourcecode:: cpp
+
+    WifiStaticSetupHelper::SetStaticBlockAck(apDev, staDev, 0);
+
+establishes a Block Ack agreement for TID 0 between the AP ``apDev`` and the non-AP STA ``staDev``,
+with the AP being the originator and the non-AP STA the recipient.
+
+To enable EMLSR mode on the links specified via the ``EmlsrManager::EmlsrLinkSet`` attribute, the
+following line of code can be used:
+
+.. sourcecode:: cpp
+
+    WifiStaticSetupHelper::SetStaticEmlsr(apDev, staDev);
+
+where ``apDev`` is the AP device and ``staDev`` is the EMLSR client device.
+
+In case wifi devices exchange IPv4 or IPv6 traffic, it is also convenient to statically setup their
+ARP or NDISC cache, so that ARP Request/Response frames do not need to be actually exchanged. This
+can be achieved by calling:
+
+.. sourcecode:: cpp
+
+    NeighborCacheHelper nbCache;
+    nbCache.PopulateNeighborCache();
+
+after assigning IP addresses to the devices in the network.
+
+For an example usage of these static helpers, you can refer to the
+``/examples/wireless/wifi-{ht,vht,he,eht}-network.cc`` example programs.
 
 HT configuration
 ================

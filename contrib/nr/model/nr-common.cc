@@ -7,8 +7,8 @@
 
 #include "nr-common.h"
 
-#include <ns3/abort.h>
-#include <ns3/log.h>
+#include "ns3/abort.h"
+#include "ns3/log.h"
 
 namespace ns3
 {
@@ -30,9 +30,9 @@ FlowId_t::FlowId_t(const uint16_t a, const uint8_t b)
 /**
  * Equality operator
  *
- * \param a lhs
- * \param b rhs
- * \returns true if "equal"
+ * @param a lhs
+ * @param b rhs
+ * @returns true if "equal"
  */
 bool
 operator==(const FlowId_t& a, const FlowId_t& b)
@@ -43,9 +43,9 @@ operator==(const FlowId_t& a, const FlowId_t& b)
 /**
  * Less than operator
  *
- * \param a lhs
- * \param b rhs
- * \returns true if "less than"
+ * @param a lhs
+ * @param b rhs
+ * @returns true if "less than"
  */
 bool
 operator<(const FlowId_t& a, const FlowId_t& b)
@@ -66,9 +66,9 @@ ImsiLcidPair_t::ImsiLcidPair_t(const uint64_t a, const uint8_t b)
 /**
  * Equality operator
  *
- * \param a lhs
- * \param b rhs
- * \returns true if "equal"
+ * @param a lhs
+ * @param b rhs
+ * @returns true if "equal"
  */
 bool
 operator==(const ImsiLcidPair_t& a, const ImsiLcidPair_t& b)
@@ -79,9 +79,9 @@ operator==(const ImsiLcidPair_t& a, const ImsiLcidPair_t& b)
 /**
  * Less than operator
  *
- * \param a lhs
- * \param b rhs
- * \returns true if "less than"
+ * @param a lhs
+ * @param b rhs
+ * @returns true if "less than"
  */
 bool
 operator<(const ImsiLcidPair_t& a, const ImsiLcidPair_t& b)
@@ -96,9 +96,9 @@ NrUeConfig_t::NrUeConfig_t()
 /**
  * Equality operator
  *
- * \param a lhs
- * \param b rhs
- * \returns true if "equal"
+ * @param a lhs
+ * @param b rhs
+ * @returns true if "equal"
  */
 bool
 operator==(const NrUeConfig_t& a, const NrUeConfig_t& b)
@@ -109,9 +109,9 @@ operator==(const NrUeConfig_t& a, const NrUeConfig_t& b)
 /**
  * Less than operator
  *
- * \param a lhs
- * \param b rhs
- * \returns true if "less than"
+ * @param a lhs
+ * @param b rhs
+ * @returns true if "less than"
  */
 bool
 operator<(const NrUeConfig_t& a, const NrUeConfig_t& b)
@@ -214,16 +214,16 @@ TransmissionModesLayers::TxMode2LayerNum(uint8_t txMode)
 double
 EutranMeasurementMapping::RsrpRange2Dbm(uint8_t range)
 {
-    // 3GPP TS 36.133 section 9.1.4 RSRP Measurement Report Mapping
-    NS_ASSERT_MSG(range <= 97, "value " << range << " is out of range");
-    return (double)range - 141.0;
+    // 3GPP TS 38.133 Table 10.1.6.1-1: SS-RSRP and CSI-RSRP measurement report mapping
+    NS_ASSERT_MSG(range <= 127, "value " << range << " is out of range");
+    return (double)range - 157.0;
 }
 
 uint8_t
 EutranMeasurementMapping::Dbm2RsrpRange(double dbm)
 {
-    // 3GPP TS 36.133 section 9.1.4 RSRP Measurement Report Mapping
-    double range = std::min(std::max(std::floor(dbm + 141), 0.0), 97.0);
+    // 3GPP TS 38.133 Table 10.1.6.1-1: SS-RSRP and CSI-RSRP measurement report mapping
+    double range = std::min(std::max(std::floor(dbm + 157), 0.0), 126.0);
     return (uint8_t)range;
 }
 
@@ -347,5 +347,51 @@ EutranMeasurementMapping::IeValue2ActualQQualMin(int8_t qQualMinIeValue)
     NS_ASSERT(actual <= -3.0);
     return actual;
 }
+
+uint8_t
+Lcid2Drbid(uint8_t lcid)
+{
+    // Direct mapping: LCID = DRBID for data radio bearers
+    return lcid;
+}
+
+uint8_t
+Drbid2Lcid(uint8_t drbid)
+{
+    // Direct mapping: LCID = DRBID for data radio bearers
+    return drbid;
+}
+
+uint8_t
+Lcid2Qfi(uint8_t lcid)
+{
+    // LCID = DRBID, and DRBID = QFI + 2, so QFI = LCID - 2
+    return lcid - 2;
+}
+
+uint8_t
+Qfi2Lcid(uint8_t qfi)
+{
+    // QFI -> DRBID -> LCID
+    // DRBID = QFI + 2, LCID = DRBID, so LCID = QFI + 2
+    return qfi + 2;
+}
+
+uint8_t
+Drbid2Qfi(uint8_t drbid)
+{
+    // QFI = DRBID - 2
+    return drbid - 2;
+}
+
+uint8_t
+Qfi2Drbid(uint8_t qfi)
+{
+    // DRBID = QFI + 2
+    // QFI 2 is reserved for sidelink, so this function should not be called with QFI 2
+    NS_ASSERT_MSG(qfi != 2, "QFI 2 is reserved for sidelink and cannot be converted to DRBID");
+    return qfi + 2;
+}
+
 }; // namespace nr
 }; // namespace ns3

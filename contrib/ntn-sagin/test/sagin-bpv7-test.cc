@@ -100,7 +100,7 @@ class SaginCustodyTransferTest : public TestCase
 {
   public:
     SaginCustodyTransferTest()
-        : TestCase("M3: custody transfer accept/refuse/timeout/lifetime accounting")
+        : TestCase("M3: custody transfer accept-refuse-timeout-lifetime accounting")
     {
     }
 

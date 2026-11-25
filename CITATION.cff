@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use this toolkit in your research, please cite the article listed under preferred-citation."
 title: "ns3-ntn-toolkit: An Integrated ns-3 Platform for 6G Non-Terrestrial Networks"
 abstract: >-
-  A fork of ns-3.43 carrying fourteen custom modules for 6G non-terrestrial
+  A fork of ns-3.49 carrying fourteen custom modules for 6G non-terrestrial
   network research: LEO satellite constellation generation and contact-graph
   routing, 3GPP NR-NTN protocol stacks with conditional handover and SIB19
   timing, satellite O-RAN with E2 and A1 control loops, sub-terahertz and

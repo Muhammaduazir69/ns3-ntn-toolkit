@@ -6,23 +6,23 @@
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
 
+#include "ns3/building.h"
+#include "ns3/buildings-helper.h"
+#include "ns3/constant-position-mobility-model.h"
 #include "ns3/log.h"
+#include "ns3/mobility-building-info.h"
+#include "ns3/mobility-helper.h"
+#include "ns3/simulator.h"
 #include "ns3/test.h"
-#include <ns3/building.h>
-#include <ns3/buildings-helper.h>
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/mobility-building-info.h>
-#include <ns3/mobility-helper.h>
-#include <ns3/simulator.h>
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("BuildingsHelperTest");
 
 /**
- * \ingroup building-test
+ * @ingroup building-test
  *
- * \brief Struct representing a position in a building
+ * @brief Struct representing a position in a building
  */
 struct PositionInBuilding
 {
@@ -46,7 +46,7 @@ PositionInBuilding::PositionInBuilding()
 }
 
 /**
- * \ingroup building-test
+ * @ingroup building-test
 
  * Data to construct a Building object. We don't want to pass Building
  * objects to the TestCase constructor because otherwise BuildingList
@@ -82,25 +82,25 @@ BuildingData::BuildingData()
 }
 
 /**
- * \ingroup building-test
+ * @ingroup building-test
  *
- * \brief BuildingsHelper test
+ * @brief BuildingsHelper test
  */
 class BuildingsHelperOneTestCase : public TestCase
 {
   public:
     /**
      * Build the testcase name
-     * \param pib Position in building
-     * \param bd Building data
-     * \return the TestCase name
+     * @param pib Position in building
+     * @param bd Building data
+     * @return the TestCase name
      */
     static std::string BuildNameString(PositionInBuilding pib, BuildingData bd);
 
     /**
      * Constructor
-     * \param pib Position in building
-     * \param bd Building data
+     * @param pib Position in building
+     * @param bd Building data
      */
     BuildingsHelperOneTestCase(PositionInBuilding pib, BuildingData bd);
 
@@ -182,9 +182,9 @@ BuildingsHelperOneTestCase::DoRun()
 }
 
 /**
- * \ingroup building-test
+ * @ingroup building-test
  *
- * \brief BuildingsHelper TestSuite
+ * @brief BuildingsHelper TestSuite
  */
 class BuildingsHelperTestSuite : public TestSuite
 {

@@ -12,6 +12,8 @@
 #include "qos-utils.h"
 #include "sta-wifi-mac.h"
 
+#include "ns3/wifi-export.h"
+
 #include <optional>
 #include <set>
 #include <unordered_map>
@@ -20,33 +22,33 @@ namespace ns3
 {
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  *
  * Abstract base class for the Association Manager, which manages
  * scanning and association for single link devices and ML discovery
  * and setup for multi-link devices.
  */
-class WifiAssocManager : public Object
+class WIFI_EXPORT WifiAssocManager : public Object
 {
     /**
      * Struct providing a function call operator to compare two ApInfo objects.
      * This struct is used as the Compare template type parameter of the set of
      * ApInfo objects maintained by the Association Manager.
      */
-    struct ApInfoCompare
+    struct WIFI_EXPORT ApInfoCompare
     {
         /**
          * Constructor.
          *
-         * \param manager a pointer to the Association Manager
+         * @param manager a pointer to the Association Manager
          */
         ApInfoCompare(const WifiAssocManager& manager);
         /**
          * Function call operator. Calls the Compare method of the Association Manager.
          *
-         * \param lhs left hand side ApInfo object
-         * \param rhs right hand side ApInfo object
-         * \return true if the left hand side ApInfo object should be placed before the
+         * @param lhs left hand side ApInfo object
+         * @param rhs right hand side ApInfo object
+         * @return true if the left hand side ApInfo object should be placed before the
          *         right hand side ApInfo object in the sorted list maintained by the
          *         Association Manager, false otherwise
          */
@@ -61,15 +63,15 @@ class WifiAssocManager : public Object
      * Struct to identify a specific TBTT Information field of a Neighbor AP Information
      * field in a Reduced Neighbor Report element.
      */
-    struct RnrLinkInfo
+    struct WIFI_EXPORT RnrLinkInfo
     {
         std::size_t m_nbrApInfoId;     ///< Neighbor AP Information field index
         std::size_t m_tbttInfoFieldId; ///< TBTT Information field index
     };
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -78,7 +80,7 @@ class WifiAssocManager : public Object
     /**
      * Set the pointer to the STA wifi MAC.
      *
-     * \param mac the pointer to the STA wifi MAC
+     * @param mac the pointer to the STA wifi MAC
      */
     void SetStaWifiMac(Ptr<StaWifiMac> mac);
 
@@ -88,7 +90,7 @@ class WifiAssocManager : public Object
      * about APs matching the given scanning parameters may be used and scanning
      * not performed.
      *
-     * \param scanParams the scanning parameters
+     * @param scanParams the scanning parameters
      */
     void StartScanning(WifiScanParams&& scanParams);
 
@@ -98,24 +100,33 @@ class WifiAssocManager : public Object
      *
      * Note that the given ApInfo object is moved to the sorted list of ApInfo objects.
      *
-     * \param apInfo the AP information contained in the received frame
+     * @param apInfo the AP information contained in the received frame
      */
     virtual void NotifyApInfo(const StaWifiMac::ApInfo&& apInfo);
 
     /**
      * Notify that the given link has completed channel switching.
      *
-     * \param linkId the ID of the given link
+     * @param linkId the ID of the given link
      */
     virtual void NotifyChannelSwitched(uint8_t linkId) = 0;
+
+    /**
+     * Notify that ML setup has been completed and link IDs have been swapped. This method
+     * updates the link IDs in the information gathered so far.
+     *
+     * @param swapInfo a set of pairs (from, to) each mapping a current link ID to the
+     *              link ID it has to become (i.e., link 'from' becomes link 'to')
+     */
+    void NotifyLinkSwapped(const std::map<uint8_t, uint8_t>& swapInfo);
 
     /**
      * Compare two ApInfo objects for the purpose of keeping a sorted list of
      * ApInfo objects.
      *
-     * \param lhs left hand side ApInfo object
-     * \param rhs right hand side ApInfo object
-     * \return true if the left hand side ApInfo object should be placed before the
+     * @param lhs left hand side ApInfo object
+     * @param rhs right hand side ApInfo object
+     * @return true if the left hand side ApInfo object should be placed before the
      *         right hand side ApInfo object in the sorted list of ApInfo objects,
      *         false otherwise
      */
@@ -125,9 +136,9 @@ class WifiAssocManager : public Object
      * Search the given RNR element for APs affiliated to the same AP MLD as the
      * reporting AP. The search starts at the given Neighbor AP Information field.
      *
-     * \param rnr the given RNR element
-     * \param nbrApInfoId the index of the given Neighbor AP Information field
-     * \return the index of the Neighbor AP Information field and the index of the
+     * @param rnr the given RNR element
+     * @param nbrApInfoId the index of the given Neighbor AP Information field
+     * @return the index of the Neighbor AP Information field and the index of the
      *         TBTT Information field containing the next affiliated AP, if any.
      */
     static std::optional<WifiAssocManager::RnrLinkInfo> GetNextAffiliatedAp(
@@ -138,8 +149,8 @@ class WifiAssocManager : public Object
      * Find all the APs affiliated to the same AP MLD as the reporting AP that sent
      * the given RNR element.
      *
-     * \param rnr the given RNR element
-     * \return a list containing the index of the Neighbor AP Information field and the index of the
+     * @param rnr the given RNR element
+     * @return a list containing the index of the Neighbor AP Information field and the index of the
      *         TBTT Information field containing all the affiliated APs
      */
     static std::list<WifiAssocManager::RnrLinkInfo> GetAllAffiliatedAps(
@@ -156,7 +167,7 @@ class WifiAssocManager : public Object
     using SortedList = std::set<StaWifiMac::ApInfo, ApInfoCompare>;
 
     /**
-     * \return a const reference to the sorted list of ApInfo objects.
+     * @return a const reference to the sorted list of ApInfo objects.
      */
     const SortedList& GetSortedList() const;
 
@@ -164,21 +175,21 @@ class WifiAssocManager : public Object
      * Get a reference to the list of the links to setup with the given AP. This method
      * allows subclasses to modify such a list.
      *
-     * \param apInfo the info about the given AP
-     * \return a reference to the list of the links to setup with the given AP
+     * @param apInfo the info about the given AP
+     * @return a reference to the list of the links to setup with the given AP
      */
     std::list<StaWifiMac::ApInfo::SetupLinksInfo>& GetSetupLinks(const StaWifiMac::ApInfo& apInfo);
 
     /**
-     * \return the scanning parameters.
+     * @return the scanning parameters.
      */
     const WifiScanParams& GetScanParams() const;
 
     /**
      * Check whether the given AP information match the current scanning parameters.
      *
-     * \param apInfo the given AP information
-     * \return whether the given AP information match the current scanning parameters
+     * @param apInfo the given AP information
+     * @return whether the given AP information match the current scanning parameters
      */
     bool MatchScanParams(const StaWifiMac::ApInfo& apInfo) const;
 
@@ -186,18 +197,28 @@ class WifiAssocManager : public Object
      * Allow subclasses to choose whether the given ApInfo shall be considered
      * and hence inserted in the sorted list of ApInfo objects.
      *
-     * \param apInfo the apInfo object to insert
-     * \return true if the apInfo object can be inserted, false otherwise
+     * @param apInfo the apInfo object to insert
+     * @return true if the apInfo object can be inserted, false otherwise
      */
     virtual bool CanBeInserted(const StaWifiMac::ApInfo& apInfo) const = 0;
     /**
      * Allow subclasses to choose whether the given ApInfo shall be returned or
      * discarded when the STA wifi MAC requests information on the best AP.
      *
-     * \param apInfo the apInfo object to return
-     * \return true if the apInfo object can be returned, false otherwise
+     * @param apInfo the apInfo object to return
+     * @return true if the apInfo object can be returned, false otherwise
      */
     virtual bool CanBeReturned(const StaWifiMac::ApInfo& apInfo) const = 0;
+
+    /**
+     * Check whether the channel width of the STA is compatible with the channel width of the
+     * operating channel of a given AP. A channel width is compatible if the STA can advertise it to
+     * the AP, or AP operates on a channel width that is equal or lower than that channel width
+     *
+     * @param apInfo the given AP information
+     * @return true if the channel width of the STA is compatible, false otherwise
+     */
+    bool IsChannelWidthCompatible(const StaWifiMac::ApInfo& apInfo) const;
 
     /**
      * Extract the best AP to associate with from the sorted list and return
@@ -214,17 +235,20 @@ class WifiAssocManager : public Object
     /**
      * Check whether 11be Multi-Link setup can be established with the current best AP.
      *
-     * \param[out] mle const reference to the Multi-Link Element present in the
-     *                 Beacon/Probe Response received from the best AP, if any
-     * \param[out] rnr const reference to the Reduced Neighbor Report Element present
-     *                 in the Beacon/Probe Response received from the best AP, if any.
-     * \return whether 11be Multi-Link setup can be established with the current best AP
+     * @param [out] mle const reference to the Multi-Link Element present in the
+     *                  Beacon/Probe Response received from the best AP, if any
+     * @param [out] rnr const reference to the Reduced Neighbor Report Element present
+     *                  in the Beacon/Probe Response received from the best AP, if any.
+     * @return whether 11be Multi-Link setup can be established with the current best AP
      */
     bool CanSetupMultiLink(OptMleConstRef& mle, OptRnrConstRef& rnr);
 
     Ptr<StaWifiMac> m_mac;            ///< pointer to the STA wifi MAC
     std::set<uint8_t> m_allowedLinks; /**< "Only Beacon and Probe Response frames received on a
                                             link belonging to the this set are processed */
+
+    bool m_allowAssocAllChannelWidths; ///< flag whether the check on channel width compatibility
+                                       ///< with the candidate AP should be skipped
 
   private:
     /**

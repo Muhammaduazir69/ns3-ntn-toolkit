@@ -13,6 +13,7 @@
 #include "ns3/object.h"
 #include "ns3/ptr.h"
 #include "ns3/type-id.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-phy-common.h"
 #include "ns3/wifi-phy-state.h"
 
@@ -35,33 +36,33 @@ class WifiMode;
  *
  *
  */
-class AthstatsHelper
+class WIFI_EXPORT AthstatsHelper
 {
   public:
     AthstatsHelper();
     /**
      * Enable athstats
-     * \param filename the file name
-     * \param nodeid the node ID
-     * \param deviceid the device ID
+     * @param filename the file name
+     * @param nodeid the node ID
+     * @param deviceid the device ID
      */
     void EnableAthstats(std::string filename, uint32_t nodeid, uint32_t deviceid);
     /**
      * Enable athstats
-     * \param filename the file name
-     * \param nd the device
+     * @param filename the file name
+     * @param nd the device
      */
     void EnableAthstats(std::string filename, Ptr<NetDevice> nd);
     /**
      * Enable athstats
-     * \param filename the file name
-     * \param d the collection of devices
+     * @param filename the file name
+     * @param d the collection of devices
      */
     void EnableAthstats(std::string filename, NetDeviceContainer d);
     /**
      * Enable athstats
-     * \param filename the file name
-     * \param n the collection of nodes
+     * @param filename the file name
+     * @param n the collection of nodes
      */
     void EnableAthstats(std::string filename, NodeContainer n);
 
@@ -90,12 +91,12 @@ class AthstatsHelper
  *
  * - AthstatsWifiTraceSink does never produce a cumulative report.
  */
-class AthstatsWifiTraceSink : public Object
+class WIFI_EXPORT AthstatsWifiTraceSink : public Object
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     AthstatsWifiTraceSink();
@@ -188,13 +189,13 @@ class AthstatsWifiTraceSink : public Object
      * @param packet the packet
      * @param mode the WifiMode
      * @param preamble the wifi preamble
-     * @param txPower the transmit power level
+     * @param txPowerLevel the transmit power level
      */
     void PhyTxTrace(std::string context,
                     Ptr<const Packet> packet,
                     WifiMode mode,
                     WifiPreamble preamble,
-                    uint8_t txPower);
+                    uint8_t txPowerLevel);
 
     /**
      * Function to be called when the PHY layer of the considered device
@@ -232,8 +233,7 @@ class AthstatsWifiTraceSink : public Object
     std::ofstream* m_writer; ///< output stream
 
     Time m_interval; ///< interval
-
-}; // class AthstatsWifiTraceSink
+};
 
 } // namespace ns3
 

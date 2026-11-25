@@ -85,6 +85,7 @@
 // Quick test: (no arguments; runs all five classes in one process)
 #include "ns3/core-module.h"
 #include "ns3/geographic-positions.h"
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/ntn-influx-sink.h"
 #include "ns3/ntn-realistic-mobility.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -99,9 +100,14 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/system-path.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using namespace ns3;
 
@@ -365,6 +371,38 @@ RunOnStack(double altM,
     Simulator::Destroy();
     return r;
 }
+/// Metric-name form of a platform class name ("UAV (untethered)" -> "uav_untethered").
+std::string
+MetricKey(const std::string& name)
+{
+    std::string k;
+    for (char ch : name)
+    {
+        if (std::isalnum(static_cast<unsigned char>(ch)))
+        {
+            k += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        else if (!k.empty() && k.back() != '_')
+        {
+            k += '_';
+        }
+    }
+    while (!k.empty() && k.back() == '_')
+    {
+        k.pop_back();
+    }
+    return k;
+}
+
+/// Shortest decimal form of a metric value.
+std::string
+MetricValue(double v)
+{
+    std::ostringstream o;
+    o << std::setprecision(6) << v;
+    return o.str();
+}
+
 } // namespace
 
 int
@@ -423,6 +461,7 @@ main(int argc, char* argv[])
         uint32_t nPass = 0;
         uint32_t nFail = 0;
         uint32_t nError = 0;
+        std::vector<ns3::ntnobs::DatasetMetric> metrics;
         for (const auto& c : cases)
         {
             const auto& spec = NtnPlatformSpec::Get(c.cls);
@@ -446,6 +485,13 @@ main(int argc, char* argv[])
                 << r.tbs << "," << c.rttMinMs << "," << c.rttMaxMs << "," << verdict << ","
                 << r.jitterMs << "," << r.lossRatio << "," << r.elevStartDeg << ","
                 << r.elevEndDeg << "," << (r.orbit ? "sgp4" : "fixed") << "," << numUes << "\n";
+            const std::string key = MetricKey(spec.name);
+            metrics.push_back({key + "_owd_ms", MetricValue(r.owdMs), "measured"});
+            metrics.push_back({key + "_p99_ms", MetricValue(r.p99Ms), "measured"});
+            metrics.push_back({key + "_rtt2x_ms", MetricValue(rtt), "measured"});
+            metrics.push_back({key + "_sinr_db", MetricValue(r.sinrDb), "measured"});
+            metrics.push_back({key + "_rx_packets", std::to_string(r.rx), "measured"});
+            metrics.push_back({key + "_verdict", verdict, "measured"});
             std::printf("#   jitter %.3f ms  loss %.4f  elevation %.2f -> %.2f deg (%s)\n",
                         r.jitterMs, r.lossRatio, r.elevStartDeg, r.elevEndDeg,
                         r.orbit ? "SGP4 orbit" : "fixed platform");
@@ -459,6 +505,19 @@ main(int argc, char* argv[])
                     (nFail + nError) == 0 ? ": ALL CLASSES PASS" : "");
         std::printf("# results written to %s\n", csvPath.c_str());
         csv.close();
+        // ntn-dataset@1 record at the top of the run directory; each class's own NR-stack
+        // record sits in its subdirectory.
+        metrics.push_back({"classes_pass", std::to_string(nPass), "measured"});
+        metrics.push_back({"classes_fail", std::to_string(nFail), "measured"});
+        metrics.push_back({"classes_error", std::to_string(nError), "measured"});
+        ns3::ntnobs::WriteDatasetRecord(outputDir,
+                                        "ntn-platform-latency-validation",
+                                        "measured",
+                                        argc,
+                                        argv,
+                                        metrics,
+                                        {{"mode", mode},
+                                         {"per_class_sim_seconds", MetricValue(simSeconds)}});
         return (nError > 0 || (strict && nFail > 0)) ? 1 : 0;
     }
 
@@ -471,6 +530,7 @@ main(int argc, char* argv[])
     uint32_t nPass = 0;
     uint32_t nFail = 0;
     uint32_t nError = 0;
+    std::vector<ns3::ntnobs::DatasetMetric> metrics;
     uint16_t port = 8200;
     for (const auto& c : cases)
     {
@@ -544,6 +604,10 @@ main(int argc, char* argv[])
         csv << "transport," << spec.name << "," << c.altM / 1e3 << "," << slantM / 1e3 << ","
             << rttMs << "," << sink->GetRxPackets() << "," << (enduranceExhausted ? 1 : 0) << ","
             << c.rttMinMs << "," << c.rttMaxMs << "," << verdict << "\n";
+        const std::string key = MetricKey(spec.name);
+        metrics.push_back({key + "_rtt_ms", MetricValue(rttMs), "measured"});
+        metrics.push_back({key + "_rx_packets", std::to_string(sink->GetRxPackets()), "measured"});
+        metrics.push_back({key + "_verdict", verdict, "measured"});
         Simulator::Destroy();
         ++port;
     }
@@ -553,5 +617,15 @@ main(int argc, char* argv[])
                 nPass, nFail, nError, (nFail + nError) == 0 ? ": ALL CLASSES PASS" : "");
     std::printf("# results written to %s\n", csvPath.c_str());
     csv.close();
+    metrics.push_back({"classes_pass", std::to_string(nPass), "measured"});
+    metrics.push_back({"classes_fail", std::to_string(nFail), "measured"});
+    metrics.push_back({"classes_error", std::to_string(nError), "measured"});
+    ns3::ntnobs::WriteDatasetRecord(outputDir,
+                                    "ntn-platform-latency-validation",
+                                    "measured",
+                                    argc,
+                                    argv,
+                                    metrics,
+                                    {{"mode", mode}, {"per_class_sim_seconds", MetricValue(simSeconds)}});
     return (nError > 0 || (strict && nFail > 0)) ? 1 : 0;
 }

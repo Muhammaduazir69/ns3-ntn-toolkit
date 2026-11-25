@@ -6,13 +6,12 @@
  * Author: Amine Ismail <amine.ismail@sophia.inria.fr>
  *                      <amine.ismail@udcast.com>
  */
+
 #include "udp-client.h"
 
 #include "seq-ts-header.h"
 
-#include "ns3/inet-socket-address.h"
-#include "ns3/inet6-socket-address.h"
-#include "ns3/ipv4-address.h"
+#include "ns3/address-utils.h"
 #include "ns3/log.h"
 #include "ns3/nstime.h"
 #include "ns3/packet.h"
@@ -36,7 +35,7 @@ UdpClient::GetTypeId()
 {
     static TypeId tid =
         TypeId("ns3::UdpClient")
-            .SetParent<Application>()
+            .SetParent<SourceApplication>()
             .SetGroupName("Applications")
             .AddConstructor<UdpClient>()
             .AddAttribute(
@@ -47,35 +46,35 @@ UdpClient::GetTypeId()
                 MakeUintegerChecker<uint32_t>())
             .AddAttribute("Interval",
                           "The time to wait between packets",
-                          TimeValue(Seconds(1.0)),
+                          TimeValue(Seconds(1)),
                           MakeTimeAccessor(&UdpClient::m_interval),
                           MakeTimeChecker())
-            .AddAttribute("RemoteAddress",
-                          "The destination Address of the outbound packets",
-                          AddressValue(),
-                          MakeAddressAccessor(&UdpClient::m_peerAddress),
-                          MakeAddressChecker())
+            // NS_DEPRECATED_3_44
+            .AddAttribute(
+                "RemoteAddress",
+                "The destination Address of the outbound packets",
+                AddressValue(),
+                MakeAddressAccessor(
+                    // this is needed to indicate which version of the function overload to use
+                    static_cast<void (UdpClient::*)(const Address&)>(&UdpClient::SetRemote),
+                    &UdpClient::GetRemote),
+                MakeAddressChecker(),
+                TypeId::SupportLevel::DEPRECATED,
+                "Replaced by Remote in ns-3.44.")
+            // NS_DEPRECATED_3_44
             .AddAttribute("RemotePort",
                           "The destination port of the outbound packets",
-                          UintegerValue(100),
-                          MakeUintegerAccessor(&UdpClient::m_peerPort),
-                          MakeUintegerChecker<uint16_t>())
-            .AddAttribute("Tos",
-                          "The Type of Service used to send IPv4 packets. "
-                          "All 8 bits of the TOS byte are set (including ECN bits).",
-                          UintegerValue(0),
-                          MakeUintegerAccessor(&UdpClient::m_tos),
-                          MakeUintegerChecker<uint8_t>())
+                          UintegerValue(UdpClient::DEFAULT_PORT),
+                          MakeUintegerAccessor(&UdpClient::SetPort, &UdpClient::GetPort),
+                          MakeUintegerChecker<uint16_t>(),
+                          TypeId::SupportLevel::DEPRECATED,
+                          "Replaced by Remote in ns-3.44.")
             .AddAttribute("PacketSize",
                           "Size of packets generated. The minimum packet size is 12 bytes which is "
                           "the size of the header carrying the sequence number and the time stamp.",
                           UintegerValue(1024),
                           MakeUintegerAccessor(&UdpClient::m_size),
                           MakeUintegerChecker<uint32_t>(12, 65507))
-            .AddTraceSource("Tx",
-                            "A new packet is created and sent",
-                            MakeTraceSourceAccessor(&UdpClient::m_txTrace),
-                            "ns3::Packet::TracedCallback")
             .AddTraceSource("TxWithAddresses",
                             "A new packet is created and sent",
                             MakeTraceSourceAccessor(&UdpClient::m_txTraceWithAddresses),
@@ -84,12 +83,10 @@ UdpClient::GetTypeId()
 }
 
 UdpClient::UdpClient()
+    : SourceApplication(false)
 {
     NS_LOG_FUNCTION(this);
-    m_sent = 0;
-    m_totalTx = 0;
-    m_socket = nullptr;
-    m_sendEvent = EventId();
+    m_protocolTid = TypeId::LookupByName("ns3::UdpSocketFactory");
 }
 
 UdpClient::~UdpClient()
@@ -98,102 +95,91 @@ UdpClient::~UdpClient()
 }
 
 void
-UdpClient::SetRemote(Address ip, uint16_t port)
+UdpClient::SetRemote(const Address& ip, uint16_t port)
 {
     NS_LOG_FUNCTION(this << ip << port);
-    m_peerAddress = ip;
-    m_peerPort = port;
+    SetRemote(ip);
+    SetPort(port);
 }
 
 void
-UdpClient::SetRemote(Address addr)
+UdpClient::SetRemote(const Address& addr)
 {
     NS_LOG_FUNCTION(this << addr);
-    m_peerAddress = addr;
+    if (!addr.IsInvalid())
+    {
+        m_peer = addr;
+        if (m_peerPort)
+        {
+            SetPort(*m_peerPort);
+        }
+    }
+}
+
+Address
+UdpClient::GetRemote() const
+{
+    return m_peer;
 }
 
 void
-UdpClient::StartApplication()
+UdpClient::SetPort(uint16_t port)
+{
+    NS_LOG_FUNCTION(this << port);
+    if (m_peer.IsInvalid())
+    {
+        // save for later
+        m_peerPort = port;
+        return;
+    }
+    if (Ipv4Address::IsMatchingType(m_peer) || Ipv6Address::IsMatchingType(m_peer))
+    {
+        m_peer = addressUtils::ConvertToSocketAddress(m_peer, port);
+    }
+}
+
+uint16_t
+UdpClient::GetPort() const
+{
+    if (m_peer.IsInvalid())
+    {
+        return m_peerPort.value_or(UdpClient::DEFAULT_PORT);
+    }
+    if (InetSocketAddress::IsMatchingType(m_peer))
+    {
+        return InetSocketAddress::ConvertFrom(m_peer).GetPort();
+    }
+    else if (Inet6SocketAddress::IsMatchingType(m_peer))
+    {
+        return Inet6SocketAddress::ConvertFrom(m_peer).GetPort();
+    }
+    return UdpClient::DEFAULT_PORT;
+}
+
+void
+UdpClient::DoStartApplication()
 {
     NS_LOG_FUNCTION(this);
 
-    if (!m_socket)
-    {
-        TypeId tid = TypeId::LookupByName("ns3::UdpSocketFactory");
-        m_socket = Socket::CreateSocket(GetNode(), tid);
-        if (Ipv4Address::IsMatchingType(m_peerAddress))
-        {
-            if (m_socket->Bind() == -1)
-            {
-                NS_FATAL_ERROR("Failed to bind socket");
-            }
-            m_socket->SetIpTos(m_tos); // Affects only IPv4 sockets.
-            m_socket->Connect(
-                InetSocketAddress(Ipv4Address::ConvertFrom(m_peerAddress), m_peerPort));
-        }
-        else if (Ipv6Address::IsMatchingType(m_peerAddress))
-        {
-            if (m_socket->Bind6() == -1)
-            {
-                NS_FATAL_ERROR("Failed to bind socket");
-            }
-            m_socket->Connect(
-                Inet6SocketAddress(Ipv6Address::ConvertFrom(m_peerAddress), m_peerPort));
-        }
-        else if (InetSocketAddress::IsMatchingType(m_peerAddress))
-        {
-            if (m_socket->Bind() == -1)
-            {
-                NS_FATAL_ERROR("Failed to bind socket");
-            }
-            m_socket->SetIpTos(m_tos); // Affects only IPv4 sockets.
-            m_socket->Connect(m_peerAddress);
-        }
-        else if (Inet6SocketAddress::IsMatchingType(m_peerAddress))
-        {
-            if (m_socket->Bind6() == -1)
-            {
-                NS_FATAL_ERROR("Failed to bind socket");
-            }
-            m_socket->Connect(m_peerAddress);
-        }
-        else
-        {
-            NS_ASSERT_MSG(false, "Incompatible address type: " << m_peerAddress);
-        }
-    }
+    m_socket->SetAllowBroadcast(true);
 
 #ifdef NS3_LOG_ENABLE
     std::stringstream peerAddressStringStream;
-    if (Ipv4Address::IsMatchingType(m_peerAddress))
+    if (InetSocketAddress::IsMatchingType(m_peer))
     {
-        peerAddressStringStream << Ipv4Address::ConvertFrom(m_peerAddress);
+        peerAddressStringStream << InetSocketAddress::ConvertFrom(m_peer).GetIpv4() << ":"
+                                << InetSocketAddress::ConvertFrom(m_peer).GetPort();
+        ;
     }
-    else if (Ipv6Address::IsMatchingType(m_peerAddress))
+    else if (Inet6SocketAddress::IsMatchingType(m_peer))
     {
-        peerAddressStringStream << Ipv6Address::ConvertFrom(m_peerAddress);
+        peerAddressStringStream << Inet6SocketAddress::ConvertFrom(m_peer).GetIpv6() << ":"
+                                << Inet6SocketAddress::ConvertFrom(m_peer).GetPort();
     }
-    else if (InetSocketAddress::IsMatchingType(m_peerAddress))
-    {
-        peerAddressStringStream << InetSocketAddress::ConvertFrom(m_peerAddress).GetIpv4();
-    }
-    else if (Inet6SocketAddress::IsMatchingType(m_peerAddress))
-    {
-        peerAddressStringStream << Inet6SocketAddress::ConvertFrom(m_peerAddress).GetIpv6();
-    }
-    m_peerAddressString = peerAddressStringStream.str();
+    m_peerString = peerAddressStringStream.str();
 #endif // NS3_LOG_ENABLE
 
-    m_socket->SetRecvCallback(MakeNullCallback<void, Ptr<Socket>>());
-    m_socket->SetAllowBroadcast(true);
-    m_sendEvent = Simulator::Schedule(Seconds(0.0), &UdpClient::Send, this);
-}
-
-void
-UdpClient::StopApplication()
-{
-    NS_LOG_FUNCTION(this);
-    Simulator::Cancel(m_sendEvent);
+    m_sendEvent = Simulator::ScheduleNow(&UdpClient::Send, this);
 }
 
 void
@@ -209,7 +195,7 @@ UdpClient::Send()
     SeqTsHeader seqTs;
     seqTs.SetSeq(m_sent);
     NS_ABORT_IF(m_size < seqTs.GetSerializedSize());
-    Ptr<Packet> p = Create<Packet>(m_size - seqTs.GetSerializedSize());
+    auto p = Create<Packet>(m_size - seqTs.GetSerializedSize());
 
     // Trace before adding header, for consistency with PacketSink
     m_txTrace(p);
@@ -222,14 +208,14 @@ UdpClient::Send()
         ++m_sent;
         m_totalTx += p->GetSize();
 #ifdef NS3_LOG_ENABLE
-        NS_LOG_INFO("TraceDelay TX " << m_size << " bytes to " << m_peerAddressString << " Uid: "
+        NS_LOG_INFO("TraceDelay TX " << m_size << " bytes to " << m_peerString << " Uid: "
                                      << p->GetUid() << " Time: " << (Simulator::Now()).As(Time::S));
 #endif // NS3_LOG_ENABLE
     }
 #ifdef NS3_LOG_ENABLE
     else
     {
-        NS_LOG_INFO("Error while sending " << m_size << " bytes to " << m_peerAddressString);
+        NS_LOG_INFO("Error while sending " << m_size << " bytes to " << m_peerString);
     }
 #endif // NS3_LOG_ENABLE
 
@@ -237,6 +223,13 @@ UdpClient::Send()
     {
         m_sendEvent = Simulator::Schedule(m_interval, &UdpClient::Send, this);
     }
+}
+
+void
+UdpClient::CancelEvents()
+{
+    NS_LOG_FUNCTION(this);
+    Simulator::Cancel(m_sendEvent);
 }
 
 uint64_t

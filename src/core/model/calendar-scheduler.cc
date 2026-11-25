@@ -11,17 +11,15 @@
 
 #include "assert.h"
 #include "boolean.h"
-#include "event-impl.h"
 #include "log.h"
 #include "type-id.h"
 
 #include <list>
 #include <string>
-#include <utility>
 
 /**
- * \file
- * \ingroup scheduler
+ * @file
+ * @ingroup scheduler
  * ns3::CalendarScheduler class implementation.
  */
 
@@ -369,7 +367,7 @@ CalendarScheduler::CalculateNewWidth()
     }
 
     totalSeparation *= 3;
-    totalSeparation = std::max(totalSeparation, (uint64_t)1);
+    totalSeparation = std::max(totalSeparation, static_cast<uint64_t>(1));
     return totalSeparation;
 }
 

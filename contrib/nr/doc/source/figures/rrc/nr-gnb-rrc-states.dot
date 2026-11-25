@@ -1,0 +1,74 @@
+digraph NrGnbRrcStates {
+
+    rankdir=TB;
+    node [shape="box", width=3, style="filled", fillcolor="white", fontname="Helvetica"];
+    edge [fontname="Helvetica", fontsize=10];
+
+    // ---- Per-UE state held in NrUeManager (model/nr-gnb-rrc.h) ----
+    NO_CONTEXT        [shape="ellipse", label="no context"]
+    CONTEXT_DESTROYED [shape="ellipse", label="context destroyed\n(RemoveUe)"]
+    INITIAL_RANDOM_ACCESS      [fillcolor="gray92"]
+    CONNECTION_SETUP           [fillcolor="gray92"]
+    CONNECTION_REJECTED        [fillcolor="mistyrose"]
+    ATTACH_REQUEST             [fillcolor="gray92"]
+    CONNECTED_NORMALLY         [fillcolor="lightblue"]
+    CONNECTION_RECONFIGURATION [fillcolor="lightblue"]
+    CONNECTION_REESTABLISHMENT [fillcolor="palegreen"]
+    HANDOVER_PREPARATION       [fillcolor="lightyellow"]
+    HANDOVER_LEAVING           [fillcolor="lightyellow"]
+    HANDOVER_JOINING           [fillcolor="lightgoldenrod"]
+    HANDOVER_PATH_SWITCH       [fillcolor="lightgoldenrod"]
+
+    // ===================== Connection establishment =====================
+    // INITIAL_RANDOM_ACCESS is entry-only (created on RA preamble; SwitchToState forbids re-entry)
+    NO_CONTEXT -> INITIAL_RANDOM_ACCESS [label="rx RA preamble\n(allocate C-RNTI)"]
+    INITIAL_RANDOM_ACCESS -> CONNECTION_SETUP   [label="rx RRC CONN REQ,\nAdmit = true"]
+    INITIAL_RANDOM_ACCESS -> CONNECTION_REJECTED [label="rx RRC CONN REQ,\nAdmit = false"]
+    INITIAL_RANDOM_ACCESS -> CONTEXT_DESTROYED  [color="red", label="connection\nrequest timeout"]
+    CONNECTION_REJECTED -> CONTEXT_DESTROYED     [color="red", label="connection\nrejected timeout"]
+    CONNECTION_SETUP -> CONTEXT_DESTROYED        [color="red", label="connection\nsetup timeout"]
+
+    // EPC / S1 attach branch vs. no-S1 direct
+    CONNECTION_SETUP -> ATTACH_REQUEST     [label="rx RRC CONN SETUP COMPLETED\n(S1 present: send InitialUeMessage)"]
+    ATTACH_REQUEST -> CONNECTED_NORMALLY   [label="MME Initial\nContext Setup Request"]
+    CONNECTION_SETUP -> CONNECTED_NORMALLY [label="rx RRC CONN SETUP COMPLETED\n(no S1)"]
+
+    // ======================= Reconfiguration =======================
+    CONNECTED_NORMALLY -> CONNECTION_RECONFIGURATION [label="reconfiguration trigger\n(send RRC CONN RECONF)"]
+    CONNECTION_RECONFIGURATION -> CONNECTED_NORMALLY [label="rx RRC CONN RECONF\nCOMPLETED"]
+
+    // ===================== Handover - source gNB =====================
+    CONNECTED_NORMALLY -> HANDOVER_PREPARATION [color="blue", fontcolor="blue",
+                          label="PrepareHandover\n(X2 HO REQUEST)"]
+    HANDOVER_PREPARATION -> HANDOVER_LEAVING   [color="blue", fontcolor="blue",
+                          label="rx X2 HO REQ ACK\n(send HO command,\narm leaving timer 500 ms)"]
+    HANDOVER_PREPARATION -> CONNECTED_NORMALLY [color="blue", fontcolor="blue",
+                          label="HO preparation\nfailure (abort)"]
+    HANDOVER_LEAVING -> CONTEXT_DESTROYED      [color="red",
+                          label="rx UE Context Release\n(HO ok); or leaving\ntimeout (HO cancel)"]
+
+    // ===================== Handover - target gNB =====================
+    // HANDOVER_JOINING is entry-only (created when an X2 HO REQUEST is admitted)
+    NO_CONTEXT -> HANDOVER_JOINING [color="blue", fontcolor="blue",
+                          label="X2 HO REQUEST admitted\n(arm joining timer 200 ms)"]
+    HANDOVER_JOINING -> HANDOVER_PATH_SWITCH [color="blue", fontcolor="blue",
+                          label="rx RRC CONN RECONF COMPLETED\n(debuffer X2-U data,\nsend Path Switch Request)"]
+    HANDOVER_PATH_SWITCH -> CONNECTED_NORMALLY [color="blue", fontcolor="blue",
+                          label="Path Switch Ack\n(send UE Context Release\nto source)"]
+    HANDOVER_JOINING -> CONTEXT_DESTROYED [color="red",
+                          label="joining timeout /\nmax-RACH failure\n(HO PREP FAILURE)"]
+
+    // ===================== RRC re-establishment =====================
+    CONNECTED_NORMALLY -> CONNECTION_REESTABLISHMENT [color="darkgreen", fontcolor="darkgreen",
+                          label="rx RRC CONN\nREESTAB REQUEST"]
+    HANDOVER_LEAVING -> CONNECTION_REESTABLISHMENT   [color="darkgreen", fontcolor="darkgreen",
+                          label="rx RRC CONN\nREESTAB REQUEST"]
+    CONNECTION_REESTABLISHMENT -> CONNECTED_NORMALLY [color="darkgreen", fontcolor="darkgreen",
+                          label="rx RRC CONN\nREESTAB COMPLETE"]
+
+    // ============ Stale-context resets (direct m_state =, recovery) ============
+    CONNECTED_NORMALLY -> INITIAL_RANDOM_ACCESS [style="dashed",
+                          label="rx new RRC CONN REQ\n(stale context reset)"]
+    HANDOVER_LEAVING -> INITIAL_RANDOM_ACCESS   [style="dashed",
+                          label="UE returns to source\nafter failed handover"]
+}

@@ -14,6 +14,7 @@
 #include "nr-rrc-sap.h"
 
 #include "ns3/header.h"
+#include "ns3/nr-export.h"
 
 #include <bitset>
 #include <string>
@@ -22,28 +23,28 @@ namespace ns3
 {
 
 /**
- * \ingroup nr
+ * @ingroup nr
  */
 
 /**
  * This class extends NrAsn1Header functions, adding serialization/deserialization
  * of some Information elements defined in 3GPP TS 36.331
  */
-class NrRrcAsn1Header : public NrAsn1Header
+class NR_EXPORT NrRrcAsn1Header : public NrAsn1Header
 {
   public:
     NrRrcAsn1Header();
     /**
      * Get message type
      *
-     * \returns the message type
+     * @returns the message type
      */
     int GetMessageType() const;
 
   protected:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     // Inherited from NrAsn1Header
@@ -53,142 +54,203 @@ class NrRrcAsn1Header : public NrAsn1Header
 
     // Auxiliary functions
     /**
-     * Convert from bandwidth (in RBs) to ENUMERATED value
+     * Convert from channel bandwidth (in units of 100 kHz) to the FR1 leaf of
+     * the SupportedBandwidth CHOICE (TS 38.331):
+     * fr1 ENUMERATED {mhz5, mhz10, mhz15, mhz20, mhz25, mhz30, mhz40, mhz50,
+     * mhz60, mhz80, mhz100} -- 11 values, indices 0..10.
      *
-     * \param bandwidth Bandwidth in RBs: 6, 15, 25, 50, 75, 100
-     * \returns ENUMERATED value: 0, 1, 2, 3, 4, 5
+     * The argument uses the NR module convention of 100 kHz units (e.g. 50 for
+     * 5 MHz, 200 for 20 MHz, 1000 for 100 MHz), matching
+     * NrComponentCarrier::GetDlBandwidth.
+     *
+     * @param bandwidth Bandwidth in units of 100 kHz (MHz * 10)
+     * @returns FR1 ENUMERATED value in [0, 10]
      */
-    int BandwidthToEnum(uint16_t bandwidth) const;
+    int Fr1BandwidthToEnum(uint16_t bandwidth) const;
     /**
-     * Convert from ENUMERATED value to bandwidth (in RBs)
+     * Convert from the FR1 SupportedBandwidth ENUMERATED index back to a channel
+     * bandwidth expressed in units of 100 kHz (MHz * 10).
      *
-     * \param n ENUMERATED value: 0, 1, 2, 3, 4, 5
-     * \returns bandwidth Bandwidth in RBs: 6, 15, 25, 50, 75, 100
+     * @param n FR1 ENUMERATED value in [0, 10]
+     * @returns bandwidth in units of 100 kHz (e.g. 50 == 5 MHz, 1000 == 100 MHz)
      */
-    uint16_t EnumToBandwidth(int n) const;
+    uint16_t EnumToFr1Bandwidth(int n) const;
+    /**
+     * Convert from channel bandwidth (in units of 100 kHz) to the FR2 leaf of
+     * the SupportedBandwidth CHOICE (TS 38.331):
+     * fr2 ENUMERATED {mhz50, mhz100, mhz200, mhz400} -- 4 values, indices 0..3.
+     *
+     * @param bandwidth Bandwidth in units of 100 kHz (MHz * 10)
+     * @returns FR2 ENUMERATED value in [0, 3]
+     */
+    int Fr2BandwidthToEnum(uint16_t bandwidth) const;
+    /**
+     * Convert from the FR2 SupportedBandwidth ENUMERATED index back to a channel
+     * bandwidth expressed in units of 100 kHz (MHz * 10).
+     *
+     * @param n FR2 ENUMERATED value in [0, 3]
+     * @returns bandwidth in units of 100 kHz (e.g. 500 == 50 MHz, 4000 == 400 MHz)
+     */
+    uint16_t EnumToFr2Bandwidth(int n) const;
+    /**
+     * Serialize a SupportedBandwidth CHOICE (TS 38.331). The frequency range
+     * (FR1 vs FR2) is selected from the carrier ARFCN: a carrier at or above the
+     * FR1/FR2 boundary (24.25 GHz, NR-ARFCN >= 2016667) is encoded as FR2,
+     * otherwise FR1. The FR discriminator is written on the wire, so the value
+     * round-trips exactly regardless of the serialize-time FR choice.
+     *
+     * @param bandwidth100kHz Bandwidth in units of 100 kHz (MHz * 10)
+     * @param arfcn Carrier ARFCN adjacent to this bandwidth field
+     */
+    void SerializeSupportedBandwidth(uint16_t bandwidth100kHz, uint32_t arfcn) const;
+    /**
+     * Deserialize a SupportedBandwidth CHOICE (TS 38.331). The FR discriminator
+     * read from the wire selects the FR1 or FR2 leaf enum.
+     *
+     * @param bandwidth100kHz buffer to store the bandwidth in units of 100 kHz
+     * @param bIterator buffer iterator
+     * @returns the modified buffer iterator
+     */
+    Buffer::Iterator DeserializeSupportedBandwidth(uint16_t* bandwidth100kHz,
+                                                   Buffer::Iterator bIterator);
 
     // Serialization functions
     /**
      * Serialize SRB to add mod list function
      *
-     * \param srbToAddModList std::list<NrRrcSap::SrbToAddMod>
+     * @param srbToAddModList std::list<NrRrcSap::SrbToAddMod>
      */
     void SerializeSrbToAddModList(std::list<NrRrcSap::SrbToAddMod> srbToAddModList) const;
     /**
      * Serialize DRB to add mod list function
      *
-     * \param drbToAddModList std::list<NrRrcSap::SrbToAddMod>
+     * @param drbToAddModList std::list<NrRrcSap::SrbToAddMod>
      */
     void SerializeDrbToAddModList(std::list<NrRrcSap::DrbToAddMod> drbToAddModList) const;
     /**
      * Serialize logicala channel config function
      *
-     * \param logicalChannelConfig NrRrcSap::LogicalChannelConfig
+     * @param logicalChannelConfig NrRrcSap::LogicalChannelConfig
      */
     void SerializeLogicalChannelConfig(NrRrcSap::LogicalChannelConfig logicalChannelConfig) const;
     /**
      * Serialize radio resource config function
      *
-     * \param radioResourceConfigDedicated NrRrcSap::RadioResourceConfigDedicated
+     * @param radioResourceConfigDedicated NrRrcSap::RadioResourceConfigDedicated
      */
     void SerializeRadioResourceConfigDedicated(
         NrRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated) const;
     /**
      * Serialize physical config dedicated function
      *
-     * \param physicalConfigDedicated NrRrcSap::PhysicalConfigDedicated
+     * @param physicalConfigDedicated NrRrcSap::PhysicalConfigDedicated
      */
     void SerializePhysicalConfigDedicated(
         NrRrcSap::PhysicalConfigDedicated physicalConfigDedicated) const;
     /**
      * Serialize physical config dedicated function
      *
-     * \param pcdsc NrRrcSap::PhysicalConfigDedicatedSCell
+     * @param pcdsc NrRrcSap::PhysicalConfigDedicatedSCell
      */
     void SerializePhysicalConfigDedicatedSCell(NrRrcSap::PhysicalConfigDedicatedSCell pcdsc) const;
     /**
      * Serialize system information block type 1 function
      *
-     * \param systemInformationBlockType1 NrRrcSap::SystemInformationBlockType1
+     * @param systemInformationBlockType1 NrRrcSap::SystemInformationBlockType1
      */
     void SerializeSystemInformationBlockType1(
         NrRrcSap::SystemInformationBlockType1 systemInformationBlockType1) const;
     /**
      * Serialize system information block type 2 function
      *
-     * \param systemInformationBlockType2 NrRrcSap::SystemInformationBlockType2
+     * @param systemInformationBlockType2 NrRrcSap::SystemInformationBlockType2
      */
     void SerializeSystemInformationBlockType2(
         NrRrcSap::SystemInformationBlockType2 systemInformationBlockType2) const;
     /**
      * Serialize system information block type 2 function
      *
-     * \param radioResourceConfigCommon NrRrcSap::RadioResourceConfigCommon
+     * @param radioResourceConfigCommon NrRrcSap::RadioResourceConfigCommon
      */
     void SerializeRadioResourceConfigCommon(
         NrRrcSap::RadioResourceConfigCommon radioResourceConfigCommon) const;
     /**
+     * Serialize serving cell config common function.
+     *
+     * Encodes the target cell PHY configuration (numerology, symbolsPerSlot,
+     * DL/UL control symbols, RBG size and the variable-length TDD pattern
+     * string) so that the inter-numerology handover target configuration is
+     * carried directly over SRB1, instead of being inferred from the target
+     * cell's periodic MIB. This is a custom (non-3GPP) encoding kept aligned
+     * with the surrounding hand-rolled ASN.1 style.
+     *
+     * @param servingCellConfigCommon NrRrcSap::ServingCellConfigCommon
+     */
+    void SerializeServingCellConfigCommon(
+        NrRrcSap::ServingCellConfigCommon servingCellConfigCommon) const;
+    /**
      * Serialize radio resource config common SIB function
      *
-     * \param radioResourceConfigCommonSib NrRrcSap::RadioResourceConfigCommonSib
+     * @param radioResourceConfigCommonSib NrRrcSap::RadioResourceConfigCommonSib
      */
     void SerializeRadioResourceConfigCommonSib(
         NrRrcSap::RadioResourceConfigCommonSib radioResourceConfigCommonSib) const;
     /**
      * Serialize measure results function
      *
-     * \param measResults NrRrcSap::MeasResults
+     * @param measResults NrRrcSap::MeasResults
      */
     void SerializeMeasResults(NrRrcSap::MeasResults measResults) const;
     /**
      * Serialize PLMN identity function
      *
-     * \param plmnId the PLMN ID
+     * @param plmnId the PLMN ID
      */
     void SerializePlmnIdentity(uint32_t plmnId) const;
     /**
      * Serialize RACH config common function
      *
-     * \param rachConfigCommon NrRrcSap::RachConfigCommon
+     * @param rachConfigCommon NrRrcSap::RachConfigCommon
      */
     void SerializeRachConfigCommon(NrRrcSap::RachConfigCommon rachConfigCommon) const;
     /**
      * Serialize measure config function
      *
-     * \param measConfig NrRrcSap::MeasConfig
+     * @param measConfig NrRrcSap::MeasConfig
      */
     void SerializeMeasConfig(NrRrcSap::MeasConfig measConfig) const;
     /**
      * Serialize non critical extension config function
      *
-     * \param nonCriticalExtensionConfiguration NrRrcSap::NonCriticalExtensionConfiguration
+     * @param nonCriticalExtensionConfiguration NrRrcSap::NonCriticalExtensionConfiguration
      */
     void SerializeNonCriticalExtensionConfiguration(
         NrRrcSap::NonCriticalExtensionConfiguration nonCriticalExtensionConfiguration) const;
     /**
      * Serialize radio resource config common SCell function
      *
-     * \param rrccsc NrRrcSap::RadioResourceConfigCommonSCell
+     * @param rrccsc NrRrcSap::RadioResourceConfigCommonSCell
+     * @param dlArfcn SCell DL carrier ARFCN (for the dl-Bandwidth FR choice)
      */
-    void SerializeRadioResourceConfigCommonSCell(
-        NrRrcSap::RadioResourceConfigCommonSCell rrccsc) const;
+    void SerializeRadioResourceConfigCommonSCell(NrRrcSap::RadioResourceConfigCommonSCell rrccsc,
+                                                 uint32_t dlArfcn) const;
     /**
      * Serialize radio resource dedicated SCell function
      *
-     * \param rrcdsc NrRrcSap::RadioResourceConfigDedicatedSCell
+     * @param rrcdsc NrRrcSap::RadioResourceConfigDedicatedSCell
      */
     void SerializeRadioResourceDedicatedSCell(
         NrRrcSap::RadioResourceConfigDedicatedSCell rrcdsc) const;
     /**
      * Serialize Q offset range function
      *
-     * \param qOffsetRange q offset range
+     * @param qOffsetRange q offset range
      */
     void SerializeQoffsetRange(int8_t qOffsetRange) const;
     /**
      * Serialize threshold eutra function
      *
-     * \param thresholdEutra NrRrcSap::ThresholdEutra
+     * @param thresholdEutra NrRrcSap::ThresholdEutra
      */
     void SerializeThresholdEutra(NrRrcSap::ThresholdEutra thresholdEutra) const;
 
@@ -196,27 +258,27 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize DRB to add mod list function
      *
-     * \param drbToAddModLis std::list<NrRrcSap::DrbToAddMod> *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param drbToAddModLis std::list<NrRrcSap::DrbToAddMod> *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeDrbToAddModList(std::list<NrRrcSap::DrbToAddMod>* drbToAddModLis,
                                                 Buffer::Iterator bIterator);
     /**
      * Deserialize SRB to add mod list function
      *
-     * \param srbToAddModList std::list<NrRrcSap::SrbToAddMod> *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param srbToAddModList std::list<NrRrcSap::SrbToAddMod> *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeSrbToAddModList(std::list<NrRrcSap::SrbToAddMod>* srbToAddModList,
                                                 Buffer::Iterator bIterator);
     /**
      * Deserialize logical channel config function
      *
-     * \param logicalChannelConfig NrRrcSap::LogicalChannelConfig *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param logicalChannelConfig NrRrcSap::LogicalChannelConfig *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeLogicalChannelConfig(
         NrRrcSap::LogicalChannelConfig* logicalChannelConfig,
@@ -224,9 +286,9 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize radio resource config dedicated function
      *
-     * \param radioResourceConfigDedicated NrRrcSap::RadioResourceConfigDedicated *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param radioResourceConfigDedicated NrRrcSap::RadioResourceConfigDedicated *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeRadioResourceConfigDedicated(
         NrRrcSap::RadioResourceConfigDedicated* radioResourceConfigDedicated,
@@ -234,9 +296,9 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize physical config dedicated function
      *
-     * \param physicalConfigDedicated NrRrcSap::PhysicalConfigDedicated *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param physicalConfigDedicated NrRrcSap::PhysicalConfigDedicated *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializePhysicalConfigDedicated(
         NrRrcSap::PhysicalConfigDedicated* physicalConfigDedicated,
@@ -244,9 +306,9 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize system information block type 1 function
      *
-     * \param systemInformationBlockType1 NrRrcSap::SystemInformationBlockType1 *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param systemInformationBlockType1 NrRrcSap::SystemInformationBlockType1 *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeSystemInformationBlockType1(
         NrRrcSap::SystemInformationBlockType1* systemInformationBlockType1,
@@ -254,9 +316,9 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize system information block type 2 function
      *
-     * \param systemInformationBlockType2 NrRrcSap::SystemInformationBlockType2 *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param systemInformationBlockType2 NrRrcSap::SystemInformationBlockType2 *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeSystemInformationBlockType2(
         NrRrcSap::SystemInformationBlockType2* systemInformationBlockType2,
@@ -264,19 +326,29 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize radio resource config common function
      *
-     * \param radioResourceConfigCommon NrRrcSap::RadioResourceConfigCommon *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param radioResourceConfigCommon NrRrcSap::RadioResourceConfigCommon *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeRadioResourceConfigCommon(
         NrRrcSap::RadioResourceConfigCommon* radioResourceConfigCommon,
         Buffer::Iterator bIterator);
     /**
+     * Deserialize serving cell config common function.
+     *
+     * @param servingCellConfigCommon NrRrcSap::ServingCellConfigCommon *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
+     */
+    Buffer::Iterator DeserializeServingCellConfigCommon(
+        NrRrcSap::ServingCellConfigCommon* servingCellConfigCommon,
+        Buffer::Iterator bIterator);
+    /**
      * Deserialize radio resource config common SIB function
      *
-     * \param radioResourceConfigCommonSib NrRrcSap::RadioResourceConfigCommonSib *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param radioResourceConfigCommonSib NrRrcSap::RadioResourceConfigCommonSib *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeRadioResourceConfigCommonSib(
         NrRrcSap::RadioResourceConfigCommonSib* radioResourceConfigCommonSib,
@@ -284,61 +356,61 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize measure results function
      *
-     * \param measResults NrRrcSap::MeasResults *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param measResults NrRrcSap::MeasResults *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeMeasResults(NrRrcSap::MeasResults* measResults,
                                             Buffer::Iterator bIterator);
     /**
      * Deserialize PLMN identity function
      *
-     * \param plmnId the PLMN ID
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param plmnId the PLMN ID
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializePlmnIdentity(uint32_t* plmnId, Buffer::Iterator bIterator);
     /**
      * Deserialize RACH config common function
      *
-     * \param rachConfigCommon NrRrcSap::RachConfigCommon *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param rachConfigCommon NrRrcSap::RachConfigCommon *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeRachConfigCommon(NrRrcSap::RachConfigCommon* rachConfigCommon,
                                                  Buffer::Iterator bIterator);
     /**
      * Deserialize measure config function
      *
-     * \param measConfig NrRrcSap::MeasConfig *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param measConfig NrRrcSap::MeasConfig *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeMeasConfig(NrRrcSap::MeasConfig* measConfig,
                                            Buffer::Iterator bIterator);
     /**
      * Deserialize Qoffset range function
      *
-     * \param qOffsetRange Qoffset range
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param qOffsetRange Qoffset range
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeQoffsetRange(int8_t* qOffsetRange, Buffer::Iterator bIterator);
     /**
      * Deserialize threshold eutra function
      *
-     * \param thresholdEutra NrRrcSap::ThresholdEutra *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param thresholdEutra NrRrcSap::ThresholdEutra *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeThresholdEutra(NrRrcSap::ThresholdEutra* thresholdEutra,
                                                Buffer::Iterator bIterator);
     /**
      * Deserialize non critical extension config function
      *
-     * \param nonCriticalExtension NrRrcSap::NonCriticalExtensionConfiguration *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param nonCriticalExtension NrRrcSap::NonCriticalExtensionConfiguration *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeNonCriticalExtensionConfig(
         NrRrcSap::NonCriticalExtensionConfiguration* nonCriticalExtension,
@@ -346,18 +418,18 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize cell identification function
      *
-     * \param ci NrRrcSap::CellIdentification *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param ci NrRrcSap::CellIdentification *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeCellIdentification(NrRrcSap::CellIdentification* ci,
                                                    Buffer::Iterator bIterator);
     /**
      * Deserialize radio resource config common SCell function
      *
-     * \param rrccsc NrRrcSap::RadioResourceConfigCommonSCell *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param rrccsc NrRrcSap::RadioResourceConfigCommonSCell *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeRadioResourceConfigCommonSCell(
         NrRrcSap::RadioResourceConfigCommonSCell* rrccsc,
@@ -365,9 +437,9 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize radio resource config dedicated SCell function
      *
-     * \param rrcdsc NrRrcSap::RadioResourceConfigDedicatedSCell *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param rrcdsc NrRrcSap::RadioResourceConfigDedicatedSCell *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeRadioResourceConfigDedicatedSCell(
         NrRrcSap::RadioResourceConfigDedicatedSCell* rrcdsc,
@@ -375,9 +447,9 @@ class NrRrcAsn1Header : public NrAsn1Header
     /**
      * Deserialize physical config dedicated SCell function
      *
-     * \param pcdsc NrRrcSap::PhysicalConfigDedicatedSCell *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param pcdsc NrRrcSap::PhysicalConfigDedicatedSCell *
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializePhysicalConfigDedicatedSCell(
         NrRrcSap::PhysicalConfigDedicatedSCell* pcdsc,
@@ -397,14 +469,14 @@ class NrRrcAsn1Header : public NrAsn1Header
                NrRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated) const;
 
     /// Stores RRC message type, according to 3GPP TS 36.331
-    int m_messageType;
+    int m_messageType{0};
 };
 
 /**
  * This class only serves to discriminate which message type has been received
- * in uplink (ue to eNb) for channel DCCH
+ * in uplink (ue to gNB) for channel DCCH
  */
-class NrRrcUlDcchMessage : public NrRrcAsn1Header
+class NR_EXPORT NrRrcUlDcchMessage : public NrRrcAsn1Header
 {
   public:
     NrRrcUlDcchMessage();
@@ -419,23 +491,23 @@ class NrRrcUlDcchMessage : public NrRrcAsn1Header
     /**
      * Serialize UL DCCH message function
      *
-     * \param msgType message type
+     * @param msgType message type
      */
     void SerializeUlDcchMessage(int msgType) const;
     /**
      * Deserialize UL DCCH message function
      *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeUlDcchMessage(Buffer::Iterator bIterator);
 };
 
 /**
  * This class only serves to discriminate which message type has been received
- * in downlink (eNb to ue) for channel DCCH
+ * in downlink (gNB to ue) for channel DCCH
  */
-class NrRrcDlDcchMessage : public NrRrcAsn1Header
+class NR_EXPORT NrRrcDlDcchMessage : public NrRrcAsn1Header
 {
   public:
     NrRrcDlDcchMessage();
@@ -450,23 +522,23 @@ class NrRrcDlDcchMessage : public NrRrcAsn1Header
     /**
      * Serialize DL DCCH message function
      *
-     * \param msgType message type
+     * @param msgType message type
      */
     void SerializeDlDcchMessage(int msgType) const;
     /**
      * Deserialize DL DCCH message function
      *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeDlDcchMessage(Buffer::Iterator bIterator);
 };
 
 /**
  * This class only serves to discriminate which message type has been received
- * in uplink (ue to eNb) for channel CCCH
+ * in uplink (ue to gNB) for channel CCCH
  */
-class NrRrcUlCcchMessage : public NrRrcAsn1Header
+class NR_EXPORT NrRrcUlCcchMessage : public NrRrcAsn1Header
 {
   public:
     NrRrcUlCcchMessage();
@@ -481,23 +553,23 @@ class NrRrcUlCcchMessage : public NrRrcAsn1Header
     /**
      * Serialize UL CCCH message function
      *
-     * \param msgType message type
+     * @param msgType message type
      */
     void SerializeUlCcchMessage(int msgType) const;
     /**
      * Deserialize DL CCCH message function
      *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeUlCcchMessage(Buffer::Iterator bIterator);
 };
 
 /**
  * This class only serves to discriminate which message type has been received
- * in downlink (eNb to ue) for channel CCCH
+ * in downlink (gNB to ue) for channel CCCH
  */
-class NrRrcDlCcchMessage : public NrRrcAsn1Header
+class NR_EXPORT NrRrcDlCcchMessage : public NrRrcAsn1Header
 {
   public:
     NrRrcDlCcchMessage();
@@ -512,14 +584,14 @@ class NrRrcDlCcchMessage : public NrRrcAsn1Header
     /**
      * Serialize DL CCCH message function
      *
-     * \param msgType message type
+     * @param msgType message type
      */
     void SerializeDlCcchMessage(int msgType) const;
     /**
      * Deserialize DL CCCH message function
      *
-     * \param bIterator buffer iterator
-     * \returns buffer iterator
+     * @param bIterator buffer iterator
+     * @returns buffer iterator
      */
     Buffer::Iterator DeserializeDlCcchMessage(Buffer::Iterator bIterator);
 };
@@ -527,15 +599,15 @@ class NrRrcDlCcchMessage : public NrRrcAsn1Header
 /**
  * This class manages the serialization/deserialization of RrcConnectionRequest IE
  */
-class NrRrcConnectionRequestHeader : public NrRrcUlCcchMessage
+class NR_EXPORT NrRrcConnectionRequestHeader : public NrRrcUlCcchMessage
 {
   public:
     NrRrcConnectionRequestHeader();
     ~NrRrcConnectionRequestHeader() override;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     // Inherited from NrRrcAsn1Header
@@ -590,7 +662,7 @@ class NrRrcConnectionRequestHeader : public NrRrcUlCcchMessage
 /**
  * This class manages the serialization/deserialization of RrcConnectionSetup IE
  */
-class NrRrcConnectionSetupHeader : public NrRrcDlCcchMessage
+class NR_EXPORT NrRrcConnectionSetupHeader : public NrRrcDlCcchMessage
 {
   public:
     NrRrcConnectionSetupHeader();
@@ -664,7 +736,7 @@ class NrRrcConnectionSetupHeader : public NrRrcDlCcchMessage
 /**
  * This class manages the serialization/deserialization of RrcConnectionSetupComplete IE
  */
-class NrRrcConnectionSetupCompleteHeader : public NrRrcUlDcchMessage
+class NR_EXPORT NrRrcConnectionSetupCompleteHeader : public NrRrcUlDcchMessage
 {
   public:
     NrRrcConnectionSetupCompleteHeader();
@@ -700,7 +772,7 @@ class NrRrcConnectionSetupCompleteHeader : public NrRrcUlDcchMessage
 /**
  * This class manages the serialization/deserialization of RrcConnectionSetupComplete IE
  */
-class NrRrcConnectionReconfigurationCompleteHeader : public NrRrcUlDcchMessage
+class NR_EXPORT NrRrcConnectionReconfigurationCompleteHeader : public NrRrcUlDcchMessage
 {
   public:
     NrRrcConnectionReconfigurationCompleteHeader();
@@ -731,13 +803,13 @@ class NrRrcConnectionReconfigurationCompleteHeader : public NrRrcUlDcchMessage
     uint8_t GetRrcTransactionIdentifier() const;
 
   private:
-    uint8_t m_rrcTransactionIdentifier; ///< RRC transaction identifier
+    uint8_t m_rrcTransactionIdentifier{0}; ///< RRC transaction identifier
 };
 
 /**
  * This class manages the serialization/deserialization of RrcConnectionReconfiguration IE
  */
-class NrRrcConnectionReconfigurationHeader : public NrRrcDlDcchMessage
+class NR_EXPORT NrRrcConnectionReconfigurationHeader : public NrRrcDlDcchMessage
 {
   public:
     NrRrcConnectionReconfigurationHeader();
@@ -867,7 +939,7 @@ class NrRrcConnectionReconfigurationHeader : public NrRrcDlDcchMessage
 /**
  * This class manages the serialization/deserialization of HandoverPreparationInfo IE
  */
-class NrHandoverPreparationInfoHeader : public NrRrcAsn1Header
+class NR_EXPORT NrHandoverPreparationInfoHeader : public NrRrcAsn1Header
 {
   public:
     NrHandoverPreparationInfoHeader();
@@ -902,7 +974,7 @@ class NrHandoverPreparationInfoHeader : public NrRrcAsn1Header
 /**
  * This class manages the serialization/deserialization of RRCConnectionReestablishmentRequest IE
  */
-class NrRrcConnectionReestablishmentRequestHeader : public NrRrcUlCcchMessage
+class NR_EXPORT NrRrcConnectionReestablishmentRequestHeader : public NrRrcUlCcchMessage
 {
   public:
     NrRrcConnectionReestablishmentRequestHeader();
@@ -946,7 +1018,7 @@ class NrRrcConnectionReestablishmentRequestHeader : public NrRrcUlCcchMessage
 /**
  * This class manages the serialization/deserialization of RrcConnectionReestablishment IE
  */
-class NrRrcConnectionReestablishmentHeader : public NrRrcDlCcchMessage
+class NR_EXPORT NrRrcConnectionReestablishmentHeader : public NrRrcDlCcchMessage
 {
   public:
     NrRrcConnectionReestablishmentHeader();
@@ -990,7 +1062,7 @@ class NrRrcConnectionReestablishmentHeader : public NrRrcDlCcchMessage
 /**
  * This class manages the serialization/deserialization of RrcConnectionReestablishmentComplete IE
  */
-class NrRrcConnectionReestablishmentCompleteHeader : public NrRrcUlDcchMessage
+class NR_EXPORT NrRrcConnectionReestablishmentCompleteHeader : public NrRrcUlDcchMessage
 {
   public:
     NrRrcConnectionReestablishmentCompleteHeader();
@@ -1026,7 +1098,7 @@ class NrRrcConnectionReestablishmentCompleteHeader : public NrRrcUlDcchMessage
 /**
  * This class manages the serialization/deserialization of RrcConnectionReestablishmentReject IE
  */
-class NrRrcConnectionReestablishmentRejectHeader : public NrRrcDlCcchMessage
+class NR_EXPORT NrRrcConnectionReestablishmentRejectHeader : public NrRrcDlCcchMessage
 {
   public:
     NrRrcConnectionReestablishmentRejectHeader();
@@ -1058,7 +1130,7 @@ class NrRrcConnectionReestablishmentRejectHeader : public NrRrcDlCcchMessage
 /**
  * This class manages the serialization/deserialization of RrcConnectionRelease IE
  */
-class NrRrcConnectionReleaseHeader : public NrRrcDlDcchMessage
+class NR_EXPORT NrRrcConnectionReleaseHeader : public NrRrcDlDcchMessage
 {
   public:
     NrRrcConnectionReleaseHeader();
@@ -1088,7 +1160,7 @@ class NrRrcConnectionReleaseHeader : public NrRrcDlDcchMessage
 /**
  * This class manages the serialization/deserialization of RrcConnectionReject IE
  */
-class NrRrcConnectionRejectHeader : public NrRrcDlCcchMessage
+class NR_EXPORT NrRrcConnectionRejectHeader : public NrRrcDlCcchMessage
 {
   public:
     NrRrcConnectionRejectHeader();
@@ -1118,7 +1190,7 @@ class NrRrcConnectionRejectHeader : public NrRrcDlCcchMessage
 /**
  * This class manages the serialization/deserialization of MeasurementReport IE
  */
-class NrMeasurementReportHeader : public NrRrcUlDcchMessage
+class NR_EXPORT NrMeasurementReportHeader : public NrRrcUlDcchMessage
 {
   public:
     NrMeasurementReportHeader();

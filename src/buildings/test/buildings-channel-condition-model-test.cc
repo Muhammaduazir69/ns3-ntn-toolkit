@@ -6,11 +6,15 @@
  */
 
 #include "ns3/abort.h"
+#include "ns3/box.h"
+#include "ns3/building.h"
 #include "ns3/buildings-channel-condition-model.h"
-#include "ns3/buildings-module.h"
+#include "ns3/buildings-helper.h"
 #include "ns3/config.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/log.h"
+#include "ns3/mobility-building-info.h"
+#include "ns3/node-container.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 
@@ -19,7 +23,7 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("BuildingsChannelConditionModelsTest");
 
 /**
- * \ingroup building-test
+ * @ingroup building-test
  *
  * Test case for the class BuildingsChannelConditionModel. It checks if the
  * channel condition is correctly determined when a building is deployed in the
@@ -104,7 +108,7 @@ BuildingsChannelConditionModelTestCase::DoRun()
 
     Ptr<BuildingsChannelConditionModel> condModel = CreateObject<BuildingsChannelConditionModel>();
 
-    Ptr<Building> building = Create<Building>();
+    auto building = CreateObject<Building>();
     building->SetNRoomsX(1);
     building->SetNRoomsY(1);
     building->SetNFloors(1);
@@ -135,7 +139,7 @@ BuildingsChannelConditionModelTestCase::DoRun()
 }
 
 /**
- * \ingroup building-test
+ * @ingroup building-test
  * Test suite for the buildings channel condition model
  */
 class BuildingsChannelConditionModelsTestSuite : public TestSuite

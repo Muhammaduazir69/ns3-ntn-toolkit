@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /**
- * \ingroup examples
- * \file cttc-nr-traffic-ngmn-mixed.cc
- * \brief A hegagonal topology example used to show how to configure different
+ * @ingroup examples
+ * @file cttc-nr-traffic-ngmn-mixed.cc
+ * @brief A hegagonal topology example used to show how to configure different
  * NGMN types of traffics or NGMN mixed scenario
  *
  * The example consists of an hexagonal grid deployment
@@ -34,6 +34,7 @@ $ ./ns3 run "cttc-nr-traffic-ngmn-mixed --PrintHelp"
  * do that by including the name of the module you need with the suffix "-module.h".
  */
 
+#include "ns3/antenna-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/config-store-module.h"
 #include "ns3/config-store.h"
@@ -45,20 +46,19 @@ $ ./ns3 run "cttc-nr-traffic-ngmn-mixed --PrintHelp"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/nr-module.h"
+#include "ns3/nr-radio-environment-map-helper.h"
+#include "ns3/ping-helper.h"
 #include "ns3/point-to-point-module.h"
-#include <ns3/antenna-module.h>
-#include <ns3/nr-radio-environment-map-helper.h>
-#include <ns3/ping-helper.h>
-#include <ns3/rng-seed-manager.h>
-#include <ns3/three-gpp-ftp-m1-helper.h>
-#include <ns3/three-gpp-http-client.h>
-#include <ns3/three-gpp-http-helper.h>
-#include <ns3/three-gpp-http-server.h>
-#include <ns3/three-gpp-http-variables.h>
-#include <ns3/traffic-generator-ngmn-ftp-multi.h>
-#include <ns3/traffic-generator-ngmn-gaming.h>
-#include <ns3/traffic-generator-ngmn-video.h>
-#include <ns3/traffic-generator-ngmn-voip.h>
+#include "ns3/rng-seed-manager.h"
+#include "ns3/three-gpp-ftp-m1-helper.h"
+#include "ns3/three-gpp-http-client.h"
+#include "ns3/three-gpp-http-helper.h"
+#include "ns3/three-gpp-http-server.h"
+#include "ns3/three-gpp-http-variables.h"
+#include "ns3/traffic-generator-ngmn-ftp-multi.h"
+#include "ns3/traffic-generator-ngmn-gaming.h"
+#include "ns3/traffic-generator-ngmn-video.h"
+#include "ns3/traffic-generator-ngmn-voip.h"
 
 #include <algorithm>
 #include <iostream>
@@ -77,27 +77,27 @@ class RadioNetworkParametersHelper
 {
   public:
     /**
-     * \brief Set the main radio network parameters.
-     * \param freqReuse The cell frequency reuse.
+     * @brief Set the main radio network parameters.
+     * @param freqReuse The cell frequency reuse.
      */
     void SetNetworkParams(const std::string scenario,
                           const std::string operationMode,
                           uint16_t numCcs);
     /**
-     * \brief Gets the BS transmit power
-     * \return Transmit power in dBW
+     * @brief Gets the BS transmit power
+     * @return Transmit power in dBW
      */
     double GetTxPower() const;
 
     /**
-     * \brief Gets the operation bandwidth
-     * \return Bandwidth in Hz
+     * @brief Gets the operation bandwidth
+     * @return Bandwidth in Hz
      */
     double GetBandwidth() const;
 
     /**
-     * \brief Gets the central frequency
-     * \return Central frequency in Hz
+     * @brief Gets the central frequency
+     * @return Central frequency in Hz
      */
     double GetCentralFrequency() const;
 
@@ -182,6 +182,7 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
      * - IdealBeamformingHelper, which takes care of the beamforming part
      * - NrHelper, which takes care of creating and connecting the various
      * part of the NR stack
+     * - NrChannelHelper, which takes care of the spectrum channel creation and configuration
      */
 
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
@@ -211,28 +212,7 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     double centralFrequencyBand = ranHelper.GetCentralFrequency();
     double bandwidthBand = ranHelper.GetBandwidth();
     const uint8_t numCcPerBand = 1; // In this example, each cell will have one CC with one BWP
-    BandwidthPartInfo::Scenario scene;
-    if (scenario == "UMi")
-    {
-        scene = BandwidthPartInfo::UMi_StreetCanyon;
-    }
-    else if (scenario == "UMa")
-    {
-        scene = BandwidthPartInfo::UMa;
-    }
-    else
-    {
-        NS_ABORT_MSG("Unsupported scenario");
-    }
-
-    /*
-     * Attributes of ThreeGppChannelModel still cannot be set in our way.
-     * TODO: Coordinate with Tommaso
-     */
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod",
-                       TimeValue(MilliSeconds(0))); // 100ms
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    NS_ABORT_MSG_UNLESS(scenario == "UMa" || scenario == "UMi", "Unsupported scenario");
 
     std::string errorModel = "";
 
@@ -284,40 +264,40 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     uint8_t numBwpPerCc = 1;
     if (operationMode == "FDD")
     {
-        numBwpPerCc = 2; // FDD will have 2 BWPs per CC
-        Config::SetDefault("ns3::NrUeNetDevice::PrimaryUlIndex", UintegerValue(1));
+        numBwpPerCc = 2; // FDD will have 2 BWPs per CC; the UE derives its
+                         // primary UL BWP and routing from the cell configuration
     }
 
     CcBwpCreator::SimpleOperationBandConf bandConf1(centralFrequencyBand1,
                                                     bandwidthBand1,
-                                                    numCcPerBand,
-                                                    scene);
+                                                    numCcPerBand);
     bandConf1.m_numBwp = numBwpPerCc; // FDD will have 2 BWPs per CC
     CcBwpCreator::SimpleOperationBandConf bandConf2(centralFrequencyBand2,
                                                     bandwidthBand2,
-                                                    numCcPerBand,
-                                                    scene);
+                                                    numCcPerBand);
     bandConf2.m_numBwp = numBwpPerCc; // FDD will have 2 BWPs per CC
     CcBwpCreator::SimpleOperationBandConf bandConf3(centralFrequencyBand3,
                                                     bandwidthBand3,
-                                                    numCcPerBand,
-                                                    scene);
+                                                    numCcPerBand);
     bandConf3.m_numBwp = numBwpPerCc; // FDD will have 2 BWPs per CC
 
     // By using the configuration created, it is time to make the operation bands
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
     OperationBandInfo band2 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf2);
     OperationBandInfo band3 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf3);
-
-    /*
-     * Initialize channel and pathloss, plus other things inside band1. If needed,
-     * the band configuration can be done manually, but we leave it for more
-     * sophisticated examples. For the moment, this method will take care
-     * of all the spectrum initialization needs.
+    // Use the channel helper to configure the spectrum channel
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    /**
+     * Set the spectrum channel using the selected scenario
      */
-    nrHelper->InitializeOperationBand(&band1);
-    nrHelper->InitializeOperationBand(&band2);
-    nrHelper->InitializeOperationBand(&band3);
+    channelHelper->ConfigureFactories(scenario, "Default", "ThreeGpp");
+    // Set attributes to the channel
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    // Assign the channel to all created bands
+    channelHelper->AssignChannelsToBands({band1, band2, band3});
+
     allBwps = CcBwpCreator::GetAllBwps({band1, band2, band3});
     bwps1 = CcBwpCreator::GetAllBwps({band1});
     bwps2 = CcBwpCreator::GetAllBwps({band2});
@@ -393,7 +373,7 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     // Set LTE RBG size
     if (radioNetwork == "LTE")
     {
-        nrHelper->SetGnbMacAttribute("NumRbPerRbg", UintegerValue(4));
+        nrHelper->SetAttribute("NumRbPerRbg", UintegerValue(4));
     }
 
     // We assume a common traffic pattern for all UEs
@@ -403,14 +383,10 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
         bwpIdForLowLat = 1;
     }
 
-    // TODO check later when QoS scheduler is in place, that the type of bearer corresponds to the
-    // type of traffic gNb routing between Bearer and bandwidth part
+    // TODO check later when QoS scheduler is in place, that the type of QoS flow corresponds to the
+    // type of traffic gNb routing between QoS flow and bandwidth part
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_VIDEO_TCP_DEFAULT",
                                                  UintegerValue(bwpIdForLowLat));
-
-    // Ue routing between Bearer and bandwidth part
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_VIDEO_TCP_DEFAULT",
-                                                UintegerValue(bwpIdForLowLat));
 
     /*
      * We have configured the attributes we needed. Now, install and get the pointers
@@ -426,13 +402,16 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     ueSector2NetDev = nrHelper->InstallUeDevice(ueSector2Container, bwps2);
     ueSector3NetDev = nrHelper->InstallUeDevice(ueSector3Container, bwps3);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbSector1NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(gnbSector2NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(gnbSector3NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector1NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector2NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector3NetDev, randomStream);
+    NetDeviceContainer gnbNetDevs;
+    gnbNetDevs.Add(gnbSector1NetDev);
+    gnbNetDevs.Add(gnbSector2NetDev);
+    gnbNetDevs.Add(gnbSector3NetDev);
+    NetDeviceContainer ueNetDevs;
+    ueNetDevs.Add(ueSector1NetDev);
+    ueNetDevs.Add(ueSector2NetDev);
+    ueNetDevs.Add(ueSector3NetDev);
+    nrHelper->AssignStreams(
+        {.scenario = &gridScenario, .gnbDevs = gnbNetDevs, .ueDevs = ueNetDevs});
 
     /*
      * Case (iii): Go node for node and change the attributes we have to setup
@@ -444,40 +423,37 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     for (uint32_t numCell = 0; numCell < gnbSector1NetDev.GetN(); ++numCell)
     {
         Ptr<NetDevice> gnb = gnbSector1NetDev.Get(numCell);
-        uint32_t numBwps = nrHelper->GetNumberBwp(gnb);
+        uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
         if (numBwps == 1) // TDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna =
                 DynamicCast<UniformPlanarArray>(phy->GetSpectrumPhy()->GetAntenna());
             antenna->SetAttribute("BearingAngle", DoubleValue(orientationRads));
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern",
                                                       StringValue("F|F|F|F|F|F|F|F|F|F|"));
         }
 
         else if (numBwps == 2) // FDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy0 = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy0 = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna0 =
                 DynamicCast<UniformPlanarArray>(phy0->GetSpectrumPhy()->GetAntenna());
             antenna0->SetAttribute("BearingAngle", DoubleValue(orientationRads));
-            Ptr<NrGnbPhy> phy1 = nrHelper->GetGnbPhy(gnb, 1);
+            Ptr<NrGnbPhy> phy1 = NrHelper::GetGnbPhy(gnb, 1);
             Ptr<UniformPlanarArray> antenna1 =
                 DynamicCast<UniformPlanarArray>(phy1->GetSpectrumPhy()->GetAntenna());
             antenna1->SetAttribute("BearingAngle", DoubleValue(orientationRads));
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute(
                 "Pattern",
                 StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute(
                 "Pattern",
                 StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-
-            // Link the two FDD BWP
-            nrHelper->GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
         }
 
         else
@@ -490,39 +466,37 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     for (uint32_t numCell = 0; numCell < gnbSector2NetDev.GetN(); ++numCell)
     {
         Ptr<NetDevice> gnb = gnbSector2NetDev.Get(numCell);
-        uint32_t numBwps = nrHelper->GetNumberBwp(gnb);
+        uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
         if (numBwps == 1) // TDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna =
                 DynamicCast<UniformPlanarArray>(phy->GetSpectrumPhy()->GetAntenna());
             antenna->SetAttribute("BearingAngle", DoubleValue(orientationRads));
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern",
                                                       StringValue("F|F|F|F|F|F|F|F|F|F|"));
         }
 
         else if (numBwps == 2) // FDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy0 = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy0 = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna0 =
                 DynamicCast<UniformPlanarArray>(phy0->GetSpectrumPhy()->GetAntenna());
             antenna0->SetAttribute("BearingAngle", DoubleValue(orientationRads));
-            Ptr<NrGnbPhy> phy1 = nrHelper->GetGnbPhy(gnb, 1);
+            Ptr<NrGnbPhy> phy1 = NrHelper::GetGnbPhy(gnb, 1);
             Ptr<UniformPlanarArray> antenna1 =
                 DynamicCast<UniformPlanarArray>(phy1->GetSpectrumPhy()->GetAntenna());
             antenna1->SetAttribute("BearingAngle", DoubleValue(orientationRads));
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute(
                 "Pattern",
                 StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute(
                 "Pattern",
                 StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-            // Link the two FDD BWP
-            nrHelper->GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
         }
 
         else
@@ -535,92 +509,43 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     for (uint32_t numCell = 0; numCell < gnbSector3NetDev.GetN(); ++numCell)
     {
         Ptr<NetDevice> gnb = gnbSector3NetDev.Get(numCell);
-        uint32_t numBwps = nrHelper->GetNumberBwp(gnb);
+        uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
         if (numBwps == 1) // TDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna =
                 DynamicCast<UniformPlanarArray>(phy->GetSpectrumPhy()->GetAntenna());
             antenna->SetAttribute("BearingAngle", DoubleValue(orientationRads));
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern",
                                                       StringValue("F|F|F|F|F|F|F|F|F|F|"));
         }
 
         else if (numBwps == 2) // FDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy0 = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy0 = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna0 =
                 DynamicCast<UniformPlanarArray>(phy0->GetSpectrumPhy()->GetAntenna());
             antenna0->SetAttribute("BearingAngle", DoubleValue(orientationRads));
-            Ptr<NrGnbPhy> phy1 = nrHelper->GetGnbPhy(gnb, 1);
+            Ptr<NrGnbPhy> phy1 = NrHelper::GetGnbPhy(gnb, 1);
             Ptr<UniformPlanarArray> antenna1 =
                 DynamicCast<UniformPlanarArray>(phy1->GetSpectrumPhy()->GetAntenna());
             antenna1->SetAttribute("BearingAngle", DoubleValue(orientationRads));
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute(
                 "Pattern",
                 StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute(
                 "Pattern",
                 StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-            // Link the two FDD BWP
-            nrHelper->GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
         }
 
         else
         {
             NS_ABORT_MSG("Incorrect number of BWPs per CC");
         }
-    }
-
-    // Set the UE routing:
-
-    if (operationMode == "FDD")
-    {
-        for (uint32_t i = 0; i < ueSector1NetDev.GetN(); i++)
-        {
-            nrHelper->GetBwpManagerUe(ueSector1NetDev.Get(i))->SetOutputLink(0, 1);
-        }
-
-        for (uint32_t i = 0; i < ueSector2NetDev.GetN(); i++)
-        {
-            nrHelper->GetBwpManagerUe(ueSector2NetDev.Get(i))->SetOutputLink(0, 1);
-        }
-
-        for (uint32_t i = 0; i < ueSector3NetDev.GetN(); i++)
-        {
-            nrHelper->GetBwpManagerUe(ueSector3NetDev.Get(i))->SetOutputLink(0, 1);
-        }
-    }
-
-    // When all the configuration is done, explicitly call UpdateConfig ()
-
-    for (auto it = gnbSector1NetDev.Begin(); it != gnbSector1NetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = gnbSector2NetDev.Begin(); it != gnbSector2NetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = gnbSector3NetDev.Begin(); it != gnbSector3NetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = ueSector1NetDev.Begin(); it != ueSector1NetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = ueSector2NetDev.Begin(); it != ueSector2NetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = ueSector3NetDev.Begin(); it != ueSector3NetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
     }
 }
 
@@ -637,10 +562,10 @@ enum TrafficTypeConf
 };
 
 /**
- * \brief operator << for TrafficTypeConf
- * \param os output stream
- * \param item TrafficType to print
- * \return a copy of the output stream
+ * @brief operator << for TrafficTypeConf
+ * @param os output stream
+ * @param item TrafficType to print
+ * @return a copy of the output stream
  */
 static inline std::ostream&
 operator<<(std::ostream& os, const TrafficTypeConf& item)
@@ -709,7 +634,7 @@ main(int argc, char* argv[])
     Time serverAppStartTime = MilliSeconds(400);
     // Simulation parameters. Please don't use double to indicate seconds, use
     // milliseconds and integers to avoid representation errors.
-    uint32_t simTimeMs = 1400;
+    uint32_t simTimeMs = 3000;
     Time appStartTime = MilliSeconds(400);
     std::string direction = "DL";
     bool uniformLambda = true;
@@ -858,6 +783,10 @@ main(int argc, char* argv[])
     }
 
     Time simTime = MilliSeconds(simTimeMs);
+    // The applications start at 400 ms and stop 400 ms before the end of the
+    // simulation, and need time to transfer anything in between
+    NS_ABORT_MSG_IF(simTime <= MilliSeconds(800),
+                    "simTimeMs must be larger than 800 ms so the applications can run");
 
     std::cout << "\n  Traffic configuration selected is: " << trafficTypeConf << std::endl;
 
@@ -875,7 +804,6 @@ main(int argc, char* argv[])
     uint32_t ueNum = uesPerGnb * gNbNum;
     std::cout << "  UE num: " << ueNum << std::endl;
     gridScenario.SetUtNumber(ueNum);
-    gridScenario.AssignStreams(RngSeedManager::GetRun());
     gridScenario.CreateScenario(); //!< Creates and plots the network deployment
     const uint16_t ffr =
         3; // Fractional Frequency Reuse scheme to mitigate intra-site inter-sector interferences
@@ -971,29 +899,11 @@ main(int argc, char* argv[])
 
     // From here, it is standard NS3. In the future, we will create helpers
     // for this part as well.
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
+    auto remoteHostContainer = NodeContainer(remoteHost);
 
-    // create the internet and install the IP stack on the UEs
-    // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
     InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
-
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
     internet.Install(gridScenario.GetUserTerminals());
 
     // if the mixed traffic type selected then determine for each which container IDs correposnd to
@@ -1065,16 +975,6 @@ main(int argc, char* argv[])
         nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueSector2NetDev));
     Ipv4InterfaceContainer ueSector3IpIface =
         nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueSector3NetDev));
-
-    Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress(1);
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < gridScenario.GetUserTerminals().GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(
-            gridScenario.GetUserTerminals().Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to their gNB. Try to attach them per cellId order
     for (uint32_t u = 0; u < ueNum; ++u)
@@ -1157,30 +1057,29 @@ main(int argc, char* argv[])
      * Low-Latency configuration and object creation:
      */
     UdpClientHelper dlClientLowLat;
-    dlClientLowLat.SetAttribute("RemotePort", UintegerValue(dlPortLowLat));
     dlClientLowLat.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientLowLat.SetAttribute("PacketSize", UintegerValue(udpPacketSize));
     // dlClientLowLat.SetAttribute ("Interval", TimeValue (Seconds (1.0/lambda)));
 
-    // The bearer that will carry low latency traffic
-    NrEpsBearer lowLatBearer(NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT);
+    // The QoS flow that will carry low latency traffic
+    NrQosFlow lowLatFlow(NrQosFlow::NGBR_VIDEO_TCP_DEFAULT);
 
     // The filter for the low-latency traffic
-    Ptr<NrEpcTft> lowLatTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfLowLat;
+    Ptr<NrQosRule> lowLatRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfLowLat;
     if (direction == "DL")
     {
         dlpfLowLat.localPortStart = dlPortLowLat;
         dlpfLowLat.localPortEnd = dlPortLowLat;
-        dlpfLowLat.direction = NrEpcTft::DOWNLINK;
+        dlpfLowLat.direction = NrQosRule::DOWNLINK;
     }
     else
     {
         dlpfLowLat.remotePortStart = dlPortLowLat;
         dlpfLowLat.remotePortEnd = dlPortLowLat;
-        dlpfLowLat.direction = NrEpcTft::UPLINK;
+        dlpfLowLat.direction = NrQosRule::UPLINK;
     }
-    lowLatTft->Add(dlpfLowLat);
+    lowLatRule->Add(dlpfLowLat);
 
     std::vector<uint32_t> lambdaPerCell(gridScenario.GetNumCells());
 
@@ -1205,6 +1104,9 @@ main(int argc, char* argv[])
             }
         }
     }
+
+    // We need to increase RLC buffer sizes for large files
+    Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
 
     /*
      * Let's install the applications!
@@ -1306,11 +1208,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector1IpIface.GetAddress(i, 0);
                 AddressValue ueAddress(InetSocketAddress(ipAddress, portFtpNgmn));
                 ftpHelper.SetAttribute("Remote", ueAddress);
-                clientApps.Add(ftpHelper.Install(remoteHostContainer));
+                clientApps.Add(ftpHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
             // configure clients on sector 2
             for (uint32_t i = 0; i < ueSector2IpIface.GetN(); i++)
@@ -1324,11 +1226,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector2IpIface.GetAddress(i, 0);
                 AddressValue ueAddress(InetSocketAddress(ipAddress, portFtpNgmn));
                 ftpHelper.SetAttribute("Remote", ueAddress);
-                clientApps.Add(ftpHelper.Install(remoteHostContainer));
+                clientApps.Add(ftpHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
             // configure clients on sector 3
             for (uint32_t i = 0; i < ueSector3IpIface.GetN(); i++)
@@ -1343,11 +1245,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector3IpIface.GetAddress(i, 0);
                 AddressValue ueAddress(InetSocketAddress(ipAddress, portFtpNgmn));
                 ftpHelper.SetAttribute("Remote", ueAddress);
-                clientApps.Add(ftpHelper.Install(remoteHostContainer));
+                clientApps.Add(ftpHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
 
             // configure FTP servers
@@ -1403,11 +1305,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector1IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnVideo));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
             // configure clients on sector 2
             for (uint32_t i = 0; i < ueSector2IpIface.GetN(); i++)
@@ -1423,11 +1325,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector2IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnVideo));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
             // configure clients on sector 3
             for (uint32_t i = 0; i < ueSector3IpIface.GetN(); i++)
@@ -1443,11 +1345,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector3IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnVideo));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
 
             // configure servers
@@ -1516,11 +1418,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector1IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnGaming));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
             // configure clients on sector 2
             for (uint32_t i = 0; i < ueSector2IpIface.GetN(); i++)
@@ -1536,11 +1438,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector2IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnGaming));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
             // configure clients on sector 3
             for (uint32_t i = 0; i < ueSector3IpIface.GetN(); i++)
@@ -1556,11 +1458,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector3IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnGaming));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
 
             // configure GAMING servers
@@ -1630,11 +1532,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector1IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnVoip));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
             // configure clients on sector 2
             for (uint32_t i = 0; i < ueSector2IpIface.GetN(); i++)
@@ -1649,11 +1551,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector2IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnVoip));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
             // configure clients on sector 3
             for (uint32_t i = 0; i < ueSector3IpIface.GetN(); i++)
@@ -1668,11 +1570,11 @@ main(int argc, char* argv[])
                 Ipv4Address ipAddress = ueSector3IpIface.GetAddress(i, 0);
                 AddressValue remoteAddress(InetSocketAddress(ipAddress, portNgmnVoip));
                 trafficGeneratorHelper.SetAttribute("Remote", remoteAddress);
-                clientApps.Add(trafficGeneratorHelper.Install(remoteHostContainer));
+                clientApps.Add(trafficGeneratorHelper.Install(remoteHost));
                 // Seed the ARP cache by pinging early in the simulation
                 // This is a workaround until a static ARP capability is provided
                 PingHelper ping(ipAddress);
-                pingApps.Add(ping.Install(remoteHostContainer));
+                pingApps.Add(ping.Install(remoteHost));
             }
 
             // configure servers
@@ -1733,14 +1635,14 @@ main(int argc, char* argv[])
         }
 
         // 1. Create HTTP client applications
-        ThreeGppHttpClientHelper clientHelper(remoteHostAddr);
+        ThreeGppHttpClientHelper clientHelper(remoteHostIpv4Address);
         // Install HTTP clients on UEs
         ApplicationContainer clientApps = clientHelper.Install(httpUeContainer);
 
         // 2. Create HTTP server applications
-        ThreeGppHttpServerHelper serverHelper(remoteHostAddr);
+        ThreeGppHttpServerHelper serverHelper(remoteHostIpv4Address);
         // Install HTTP server on a remote host node
-        ApplicationContainer serverApps = serverHelper.Install(remoteHostContainer.Get(0));
+        ApplicationContainer serverApps = serverHelper.Install(remoteHost);
         Ptr<ThreeGppHttpServer> httpServer = serverApps.Get(0)->GetObject<ThreeGppHttpServer>();
 
         // 3. Setup HTTP variables for the server according to NGMN white paper
@@ -1768,7 +1670,7 @@ main(int argc, char* argv[])
 
             Ipv4Address ipAddress = ueSector1IpIface.GetAddress(i, 0);
             PingHelper ping(ipAddress);
-            pingApps.Add(ping.Install(remoteHostContainer));
+            pingApps.Add(ping.Install(remoteHost));
         }
         // configure clients on sector 2
         for (uint32_t i = 0; i < ueSector2IpIface.GetN(); i++)
@@ -1782,7 +1684,7 @@ main(int argc, char* argv[])
 
             Ipv4Address ipAddress = ueSector2IpIface.GetAddress(i, 0);
             PingHelper ping(ipAddress);
-            pingApps.Add(ping.Install(remoteHostContainer));
+            pingApps.Add(ping.Install(remoteHost));
         }
         // configure clients on sector 3
         for (uint32_t i = 0; i < ueSector3IpIface.GetN(); i++)
@@ -1796,7 +1698,7 @@ main(int argc, char* argv[])
 
             Ipv4Address ipAddress = ueSector3IpIface.GetAddress(i, 0);
             PingHelper ping(ipAddress);
-            pingApps.Add(ping.Install(remoteHostContainer));
+            pingApps.Add(ping.Install(remoteHost));
         }
     }
 
@@ -1822,16 +1724,21 @@ main(int argc, char* argv[])
             // with destination address set to the address of the UE
             if (direction == "DL")
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(remoteHost));
             }
             else
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(remoteHostAddr));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(
+                        addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(ue));
             }
-            // Activate a dedicated bearer for the traffic type
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, lowLatBearer, lowLatTft);
+            // Activate a dedicated QoS flow for the traffic type
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, lowLatFlow, lowLatRule);
         }
 
         for (uint32_t i = 0; i < ueSector2Container.GetN(); ++i)
@@ -1856,16 +1763,21 @@ main(int argc, char* argv[])
             // host, with destination address set to the address of the UE
             if (direction == "DL")
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(remoteHost));
             }
             else
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(remoteHostAddr));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(
+                        addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(ue));
             }
-            // Activate a dedicated bearer for the traffic type
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, lowLatBearer, lowLatTft);
+            // Activate a dedicated QoS flow for the traffic type
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, lowLatFlow, lowLatRule);
         }
 
         for (uint32_t i = 0; i < ueSector3Container.GetN(); ++i)
@@ -1890,16 +1802,21 @@ main(int argc, char* argv[])
             // with destination address set to the address of the UE
             if (direction == "DL")
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(remoteHost));
             }
             else
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(remoteHostAddr));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(
+                        addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(ue));
             }
-            // Activate a dedicated bearer for the traffic type
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, lowLatBearer, lowLatTft);
+            // Activate a dedicated QoS flow for the traffic type
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, lowLatFlow, lowLatRule);
         }
     }
 
@@ -1938,6 +1855,7 @@ main(int argc, char* argv[])
 
     double averageFlowThroughput = 0.0;
     double averageFlowDelay = 0.0;
+    double averageUpt = 0.0; // average user perceived throughput per file transfer
 
     std::ofstream outFile;
     std::string filename = outputDir + "/" + simTag;
@@ -1953,9 +1871,7 @@ main(int argc, char* argv[])
 
     outFile.setf(std::ios_base::fixed);
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;
@@ -1982,10 +1898,27 @@ main(int argc, char* argv[])
         if (i->second.rxPackets > 0)
         {
             // Measure the duration of the flow from receiver's perspective
-            // double rxDuration = i->second.timeLastRxPacket.GetSeconds () -
-            // i->second.timeFirstTxPacket.GetSeconds ();
-            double rxDuration = (simTime - appStartTime).GetSeconds();
+            double rxDuration =
+                (i->second.timeLastRxPacket - i->second.timeFirstRxPacket).GetSeconds();
 
+            auto binsCount = i->second.flowInterruptionsHistogram.GetNBins();
+            double rxDurationWoInterruptions = 0;
+            for (uint32_t bi = 0; bi < binsCount; bi++)
+            {
+                // interruptions threshold to count time between file transferes of the same flow
+                if ((i->second.flowInterruptionsHistogram.GetBinStart(bi)) >= 0.050)
+                {
+                    rxDurationWoInterruptions +=
+                        i->second.flowInterruptionsHistogram.GetBinEnd(bi) *
+                        i->second.flowInterruptionsHistogram.GetBinCount(bi);
+                }
+            }
+            double upt =
+                ((i->second.rxBytes * 8.0) /
+                 (((i->second.timeLastRxPacket - i->second.timeFirstRxPacket).GetSeconds()) -
+                  rxDurationWoInterruptions)) /
+                1e6;
+            averageUpt += upt;
             averageFlowThroughput += i->second.rxBytes * 8.0 / rxDuration / 1000 / 1000;
             averageFlowDelay += 1000 * i->second.delaySum.GetSeconds() / i->second.rxPackets;
             delayValues[cont] = 1000 * i->second.delaySum.GetSeconds() / i->second.rxPackets;
@@ -1996,31 +1929,30 @@ main(int argc, char* argv[])
             std::cout << "  Mean delay:  "
                       << double(1000 * i->second.delaySum.GetSeconds()) / (i->second.rxPackets)
                       << " ms\n";
-            std::cout << "  Last packet delay: " << i->second.lastDelay.As(Time::MS) << "\n";
-            // std::cout << "  Mean upt:  " << i->second.uptSum / i->second.rxPackets / 1000/1000 <<
-            // " Mbps \n";
+            std::cout << "  Last packet delay: " << i->second.lastDelay.As(Time::MS) << " ms\n";
             std::cout << "  Mean jitter:  "
                       << 1000 * i->second.jitterSum.GetSeconds() / i->second.rxPackets << " ms\n";
+            std::cout << "  UPT: " << upt << " Mbps\n";
         }
         else
         {
-            // outFile << "  Throughput:  0 Mbps\n";
-            // outFile << "  Mean delay:  0 ms\n";
-            // outFile << "  Mean jitter: 0 ms\n";
+            outFile << "  Throughput:  0 Mbps\n";
+            outFile << "  Mean delay:  0 ms\n";
+            outFile << "  Mean jitter: 0 ms\n";
         }
-        // outFile << "  Rx Packets: " << i->second.rxPackets << "\n";
+        outFile << "  Rx Packets: " << i->second.rxPackets << "\n";
     }
+    // Only flows that received packets contributed a delay sample
+    delayValues.resize(cont);
+    NS_ABORT_MSG_IF(delayValues.empty(), "No flow received any packet during the simulation");
     std::stable_sort(delayValues.begin(), delayValues.end());
-    // for (uint32_t i = 0; i < stats.size(); i++)
-    //   {
-    //     std::cout << delayValues[i] << " ";
-    //   }
-    // double FiftyTileFlowDelay = (delayValues[stats.size()/2] + delayValues[stats.size()/2 -1])/2;
-    double FiftyTileFlowDelay = delayValues[stats.size() / 2];
-
-    outFile << "\n\n  Mean flow throughput: " << averageFlowThroughput / stats.size() << "\n";
-    outFile << "  Mean flow delay: " << averageFlowDelay / stats.size() << "\n";
-    outFile << "  Median flow delay: " << FiftyTileFlowDelay << "\n";
+    double FiftyTileFlowDelay = delayValues[delayValues.size() / 2];
+    // Make sure that traffic was actually transmitted
+    NS_ASSERT(averageUpt != 0.0 && averageFlowThroughput != 0.0 && averageFlowDelay != 0.0);
+    outFile << "\n\n  Mean flow throughput: " << averageFlowThroughput / stats.size() << " Mbps\n";
+    outFile << "  Mean UPT: " << averageUpt / stats.size() << " Mbps\n";
+    outFile << "  Mean delay: " << averageFlowDelay / stats.size() << " ms\n";
+    outFile << "  Median delay: " << FiftyTileFlowDelay << " ms\n";
 
     outFile.close();
 

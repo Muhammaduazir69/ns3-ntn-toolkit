@@ -12,18 +12,20 @@
 #include "ns3/trace-source-accessor.h"
 #include "ns3/traced-value.h"
 
+#include <limits>
+
 using namespace ns3;
 
 namespace
 {
 
 /**
- * \ingroup network-test
- * \ingroup tests
+ * @ingroup network-test
+ * @ingroup tests
  *
- * \brief Test object using sequence numbers
+ * @brief Test object using sequence numbers
  *
- * \note Class internal to sequence-number-test-suite.cc
+ * @note Class internal to sequence-number-test-suite.cc
  */
 class SequenceNumberTestObj : public Object
 {
@@ -37,8 +39,8 @@ class SequenceNumberTestObj : public Object
     }
 
     /**
-     * \brief Get the type ID.
-     * \return The object TypeId.
+     * @brief Get the type ID.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId()
     {
@@ -54,11 +56,6 @@ class SequenceNumberTestObj : public Object
         return tid;
     }
 
-    TypeId GetInstanceTypeId() const override
-    {
-        return GetTypeId();
-    }
-
     /// Increment the sequence number.
     void IncSequenceNumber()
     {
@@ -69,10 +66,10 @@ class SequenceNumberTestObj : public Object
 } // namespace
 
 /**
- * \ingroup network-test
- * \ingroup tests
+ * @ingroup network-test
+ * @ingroup tests
  *
- * \brief Sequence Number Unit Test
+ * @brief Sequence Number Unit Test
  */
 class SequenceNumberTestCase : public TestCase
 {
@@ -81,8 +78,8 @@ class SequenceNumberTestCase : public TestCase
 
     /**
      * Sequence number tracker
-     * \param oldval Old value
-     * \param newval New value
+     * @param oldval Old value
+     * @param newval New value
      */
     void SequenceNumberTracer(SequenceNumber32 oldval, SequenceNumber32 newval);
 
@@ -203,13 +200,67 @@ SequenceNumberTestCase::DoRun()
         SEQ_TEST_ASSERT_EQUAL(m_newval, SequenceNumber32(1));
         obj->Dispose();
     }
+
+    {
+        SequenceNumber16 num1(0);
+        SequenceNumber16 num2(0);
+
+        for (uint32_t index = 0; index <= std::numeric_limits<uint16_t>::max(); index++)
+        {
+            NS_TEST_ASSERT_MSG_EQ(((num1 - num2) < 0 && (num1 > num2)) ||
+                                      ((num1 - num2) > 0 && (num2 > num1)),
+                                  false,
+                                  "Sequence number: difference and <=> are not agreeing for "
+                                      << num1.GetValue() << " and " << num2.GetValue());
+            num2++;
+        }
+
+        num2 = 0;
+        for (uint32_t index = 0; index <= std::numeric_limits<uint16_t>::max(); index++)
+        {
+            NS_TEST_ASSERT_MSG_EQ(((num1 - num2) < 0 && (num1 > num2)) ||
+                                      ((num1 - num2) > 0 && (num2 > num1)),
+                                  false,
+                                  "Sequence number: difference and <=> are not agreeing for "
+                                      << num1.GetValue() << " and " << num2.GetValue());
+            num1++;
+        }
+    }
+
+    {
+        SequenceNumber<uint16_t, 5> num1(0);
+        SequenceNumber<uint16_t, 5> num2 = num1;
+
+        for (uint32_t index = 0; index < (1 << 5) - 1; index++)
+        {
+            {
+                NS_TEST_ASSERT_MSG_EQ(((num1 - num2) < 0 && (num1 > num2)) ||
+                                          ((num1 - num2) > 0 && (num2 > num1)),
+                                      false,
+                                      "Sequence number: difference and <=> are not agreeing for "
+                                          << num1.GetValue() << " and " << num2.GetValue());
+            }
+            num2++;
+        }
+
+        num2 = 0;
+        for (uint32_t index = 0; index < (1 << 5) - 1; index++)
+        {
+            NS_TEST_ASSERT_MSG_EQ(((num1 - num2) < 0 && (num1 > num2)) ||
+                                      ((num1 - num2) > 0 && (num2 > num1)),
+                                  false,
+                                  "Sequence number: difference and <=> are not agreeing for "
+                                      << num1.GetValue() << " and " << num2.GetValue());
+            num1++;
+        }
+    }
 }
 
 /**
- * \ingroup network-test
- * \ingroup tests
+ * @ingroup network-test
+ * @ingroup tests
  *
- * \brief Sequence Number TestSuite
+ * @brief Sequence Number TestSuite
  */
 class SequenceNumberTestSuite : public TestSuite
 {

@@ -1,0 +1,14 @@
+
+diagram {
+   GnbRrc; GnbRlcAm; UeRlcAm; UeRrc;
+
+   GnbRrc ->> GnbRlcAm [label="SendPdu (RrcConnectionReconfiguration)"]
+   GnbRlcAm ->>   UeRlcAm  [label="AM transfer of RLC SDU over DCCH1"]
+   UeRlcAm ->> UeRrc  [label="RecvPdu (RrcConnectionReconfiguration)"]
+   UeRrc => UeMac  [label="perform reconfiguration"]
+   UeRlcAm <<- UeRrc  [label="SendPdu (RrcConnectionReconfigurationCompleted)"]
+   GnbRlcAm <<- UeRlcAm [label="AM transfer of RLC SDU over DCCH1"]
+   GnbRrc <<- GnbRlcAm [label="RecvPdu (RrcConnectionReconfigurationCompleted)"]
+}
+
+

@@ -28,15 +28,15 @@
  * ED range: 0 - 255
  */
 
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/core-module.h>
-#include <ns3/log.h>
-#include <ns3/lr-wpan-module.h>
-#include <ns3/packet.h>
-#include <ns3/propagation-delay-model.h>
-#include <ns3/propagation-loss-model.h>
-#include <ns3/simulator.h>
-#include <ns3/single-model-spectrum-channel.h>
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/core-module.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-module.h"
+#include "ns3/packet.h"
+#include "ns3/propagation-delay-model.h"
+#include "ns3/propagation-loss-model.h"
+#include "ns3/simulator.h"
+#include "ns3/single-model-spectrum-channel.h"
 
 #include <iostream>
 
@@ -122,7 +122,7 @@ main(int argc, char* argv[])
     params.m_sfrmOrd = 3;
     params.m_logCh = 12;
     Simulator::ScheduleWithContext(1,
-                                   Seconds(2.0),
+                                   Seconds(2),
                                    &LrWpanMac::MlmeStartRequest,
                                    dev0->GetMac(),
                                    params);
@@ -135,7 +135,7 @@ main(int argc, char* argv[])
     params2.m_sfrmOrd = 3;
     params2.m_logCh = 14;
     Simulator::ScheduleWithContext(1,
-                                   Seconds(2.0),
+                                   Seconds(2),
                                    &LrWpanMac::MlmeStartRequest,
                                    dev2->GetMac(),
                                    params2);
@@ -152,7 +152,7 @@ main(int argc, char* argv[])
     scanParams.m_scanDuration = 14;
     scanParams.m_scanType = MLMESCAN_ED;
     Simulator::ScheduleWithContext(1,
-                                   Seconds(2.0),
+                                   Seconds(2),
                                    &LrWpanMac::MlmeScanRequest,
                                    dev1->GetMac(),
                                    scanParams);

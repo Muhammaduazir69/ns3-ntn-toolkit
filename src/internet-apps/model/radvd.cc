@@ -77,13 +77,19 @@ Radvd::DoDispose()
 {
     NS_LOG_FUNCTION(this);
 
-    m_recvSocket->Close();
-    m_recvSocket = nullptr;
+    if (m_recvSocket)
+    {
+        m_recvSocket->Close();
+        m_recvSocket = nullptr;
+    }
 
     for (auto it = m_sendSockets.begin(); it != m_sendSockets.end(); ++it)
     {
-        it->second->Close();
-        it->second = nullptr;
+        if (it->second)
+        {
+            it->second->Close();
+            it->second = nullptr;
+        }
     }
 
     Application::DoDispose();
@@ -172,8 +178,10 @@ int64_t
 Radvd::AssignStreams(int64_t stream)
 {
     NS_LOG_FUNCTION(this << stream);
-    m_jitter->SetStream(stream);
-    return 1;
+    auto currentStream = stream;
+    m_jitter->SetStream(currentStream++);
+    currentStream += Application::AssignStreams(currentStream);
+    return (currentStream - stream);
 }
 
 void
@@ -257,10 +265,7 @@ Radvd::Send(Ptr<RadvdInterface> config, Ipv6Address dst, bool reschedule)
      * we always send RA with router's link-local address, we can
      * calculate checksum here.
      */
-    raHdr.CalculatePseudoHeaderChecksum(src,
-                                        dst,
-                                        p->GetSize() + raHdr.GetSerializedSize(),
-                                        58 /* ICMPv6 */);
+    raHdr.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + raHdr.GetSerializedSize());
     p->AddHeader(raHdr);
 
     /* Router advertisements MUST always have a ttl of 255

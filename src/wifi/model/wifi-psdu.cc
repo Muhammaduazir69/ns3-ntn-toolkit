@@ -107,7 +107,7 @@ WifiPsdu::GetAddr1() const
     {
         if (m_mpduList.at(i)->GetHeader().GetAddr1() != ra)
         {
-            NS_ABORT_MSG("MPDUs in an A-AMPDU must have the same receiver address");
+            NS_ABORT_MSG("MPDUs in an A-MPDU must have the same receiver address");
         }
     }
     return ra;
@@ -122,7 +122,7 @@ WifiPsdu::GetAddr2() const
     {
         if (m_mpduList.at(i)->GetHeader().GetAddr2() != ta)
         {
-            NS_ABORT_MSG("MPDUs in an A-AMPDU must have the same transmitter address");
+            NS_ABORT_MSG("MPDUs in an A-MPDU must have the same transmitter address");
         }
     }
     return ta;
@@ -131,11 +131,7 @@ WifiPsdu::GetAddr2() const
 bool
 WifiPsdu::HasNav() const
 {
-    // When the contents of a received Duration/ID field, treated as an unsigned integer,
-    // are greater than 32 768, the contents are interpreted as appropriate for the frame
-    // type and subtype or ignored if the receiving MAC entity does not have a defined
-    // interpretation for that type and subtype (IEEE 802.11-2016 sec. 10.27.3)
-    return (m_mpduList.at(0)->GetHeader().GetRawDuration() & 0x8000) == 0;
+    return m_mpduList.at(0)->GetHeader().HasNav();
 }
 
 Time
@@ -147,7 +143,7 @@ WifiPsdu::GetDuration() const
     {
         if (m_mpduList.at(i)->GetHeader().GetDuration() != duration)
         {
-            NS_ABORT_MSG("MPDUs in an A-AMPDU must have the same Duration/ID");
+            NS_ABORT_MSG("MPDUs in an A-MPDU must have the same Duration/ID");
         }
     }
     return duration;
@@ -160,6 +156,16 @@ WifiPsdu::SetDuration(Time duration)
     for (auto& mpdu : m_mpduList)
     {
         mpdu->GetHeader().SetDuration(duration);
+    }
+}
+
+void
+WifiPsdu::IncrementRetryCount()
+{
+    NS_LOG_FUNCTION(this);
+    for (auto& mpdu : m_mpduList)
+    {
+        mpdu->IncrementRetryCount();
     }
 }
 
@@ -365,6 +371,42 @@ std::ostream&
 operator<<(std::ostream& os, const WifiPsdu& psdu)
 {
     psdu.Print(os);
+    return os;
+}
+
+std::ostream&
+operator<<(std::ostream& os, const WifiPsduMap& psduMap)
+{
+    for (const auto& [staId, psdu] : psduMap)
+    {
+        if (staId != SU_STA_ID)
+        {
+            os << "[PSDU for STA_ID=" << staId << ", ";
+        }
+        psdu->Print(os);
+        if (staId != SU_STA_ID)
+        {
+            os << "]";
+        }
+    }
+    return os;
+}
+
+std::ostream&
+operator<<(std::ostream& os, const WifiConstPsduMap& psduMap)
+{
+    for (const auto& [staId, psdu] : psduMap)
+    {
+        if (staId != SU_STA_ID)
+        {
+            os << "[PSDU for STA_ID=" << staId << ", ";
+        }
+        psdu->Print(os);
+        if (staId != SU_STA_ID)
+        {
+            os << "]";
+        }
+    }
     return os;
 }
 

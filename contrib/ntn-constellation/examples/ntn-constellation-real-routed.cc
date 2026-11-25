@@ -29,6 +29,7 @@
  *   ./ns3 run "ntn-constellation-real-routed --duration=40"
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/ntn-range-delay-channel.h"
@@ -429,6 +430,8 @@ main(int argc, char* argv[])
 
     Simulator::Schedule(Seconds(0.5), &Tick);
     Simulator::Stop(Seconds(duration));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
 
     g_sched->Stop();
@@ -598,6 +601,9 @@ main(int argc, char* argv[])
         std::cout << "  TR 38.821 calib:   within_gate=" << (calibWithinGate ? "YES" : "NO")
                   << " over " << calibRows << " link-budget rows (zenith FSPL gated)\n";
     }
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "ntn-constellation-real-routed", "measured", argc, argv);
 
     Simulator::Destroy();
     return 0;

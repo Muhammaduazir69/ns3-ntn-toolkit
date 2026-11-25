@@ -7,16 +7,18 @@
  *  Sascha Alexander Jopen <jopen@cs.uni-bonn.de>
  */
 
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-helper.h"
+#include "ns3/lr-wpan-net-device.h"
+#include "ns3/node.h"
+#include "ns3/packet.h"
+#include "ns3/propagation-delay-model.h"
+#include "ns3/propagation-loss-model.h"
 #include "ns3/rng-seed-manager.h"
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/core-module.h>
-#include <ns3/log.h>
-#include <ns3/lr-wpan-module.h>
-#include <ns3/packet.h>
-#include <ns3/propagation-delay-model.h>
-#include <ns3/propagation-loss-model.h>
-#include <ns3/simulator.h>
-#include <ns3/single-model-spectrum-channel.h>
+#include "ns3/simulator.h"
+#include "ns3/single-model-spectrum-channel.h"
+#include "ns3/test.h"
 
 #include <iostream>
 
@@ -26,10 +28,10 @@ using namespace ns3::lrwpan;
 NS_LOG_COMPONENT_DEFINE("lr-wpan-energy-detection-test");
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan Energy Detection Test
+ * @brief LrWpan Energy Detection Test
  */
 class LrWpanEdTestCase : public TestCase
 {
@@ -40,9 +42,9 @@ class LrWpanEdTestCase : public TestCase
     void DoRun() override;
 
     /**
-     * \brief Function called when PlmeEdConfirm is hit.
-     * \param status The PHY status.
-     * \param level The ED level.
+     * @brief Function called when PlmeEdConfirm is hit.
+     * @param status The PHY status.
+     * @param level The ED level.
      */
     void PlmeEdConfirm(PhyEnumeration status, uint8_t level);
 
@@ -244,10 +246,10 @@ LrWpanEdTestCase::DoRun()
 }
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan Energy Detection TestSuite
+ * @brief LrWpan Energy Detection TestSuite
  */
 class LrWpanEdTestSuite : public TestSuite
 {

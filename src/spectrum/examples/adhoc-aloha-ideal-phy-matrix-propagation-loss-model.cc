@@ -6,21 +6,21 @@
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
 
-#include <ns3/adhoc-aloha-noack-ideal-phy-helper.h>
-#include <ns3/applications-module.h>
-#include <ns3/core-module.h>
-#include <ns3/friis-spectrum-propagation-loss.h>
-#include <ns3/ism-spectrum-value-helper.h>
-#include <ns3/log.h>
-#include <ns3/mobility-module.h>
-#include <ns3/network-module.h>
-#include <ns3/propagation-delay-model.h>
-#include <ns3/single-model-spectrum-channel.h>
-#include <ns3/spectrum-analyzer.h>
-#include <ns3/spectrum-helper.h>
-#include <ns3/spectrum-model-300kHz-300GHz-log.h>
-#include <ns3/spectrum-model-ism2400MHz-res1MHz.h>
-#include <ns3/waveform-generator.h>
+#include "ns3/adhoc-aloha-noack-ideal-phy-helper.h"
+#include "ns3/applications-module.h"
+#include "ns3/core-module.h"
+#include "ns3/friis-spectrum-propagation-loss.h"
+#include "ns3/ism-spectrum-value-helper.h"
+#include "ns3/log.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/propagation-delay-model.h"
+#include "ns3/single-model-spectrum-channel.h"
+#include "ns3/spectrum-analyzer.h"
+#include "ns3/spectrum-helper.h"
+#include "ns3/spectrum-model-300kHz-300GHz-log.h"
+#include "ns3/spectrum-model-ism2400MHz-res1MHz.h"
+#include "ns3/waveform-generator.h"
 
 #include <iomanip>
 #include <iostream>
@@ -36,8 +36,8 @@ static uint64_t g_rxBytes;     //!< Rx bytes counter.
 /**
  * Trace for PHY Rx successful end.
  *
- * \param context The context.
- * \param p The packet.
+ * @param context The context.
+ * @param p The packet.
  */
 void
 PhyRxEndOkTrace(std::string context, Ptr<const Packet> p)
@@ -50,7 +50,7 @@ PhyRxEndOkTrace(std::string context, Ptr<const Packet> p)
 }
 
 /**
- * \ingroup spectrum
+ * @ingroup spectrum
  *
  * Store the last pathloss value for each TX-RX pair. This is an
  * example of how the PathlossTrace (provided by some SpectrumChannel
@@ -63,10 +63,10 @@ class GlobalPathlossDatabase
     /**
      * update the pathloss value
      *
-     * \param context
-     * \param txPhy the transmitting PHY
-     * \param rxPhy the receiving PHY
-     * \param lossDb the loss in dB
+     * @param context
+     * @param txPhy the transmitting PHY
+     * @param rxPhy the receiving PHY
+     * @param lossDb the loss in dB
      */
     void UpdatePathloss(std::string context,
                         Ptr<const SpectrumPhy> txPhy,
@@ -179,7 +179,7 @@ main(int argc, char** argv)
     onoff.SetAttribute("PacketSize", UintegerValue(pktSize));
 
     ApplicationContainer apps = onoff.Install(c.Get(0));
-    apps.Start(Seconds(0.0));
+    apps.Start(Seconds(0));
     apps.Stop(Seconds(simDuration));
 
     Config::Connect("/NodeList/*/DeviceList/*/Phy/RxEndOk", MakeCallback(&PhyRxEndOkTrace));

@@ -1,0 +1,342 @@
+// Copyright (c) 2011 CTTC
+// Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
+//
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Authors:
+//   Nicola Baldo <nbaldo@cttc.es> (the NrQosRuleClassifier class)
+//   Giuseppe Piro <g.piro@poliba.it> (part of the code in NrQosRuleClassifier::Classify ()
+//       which comes from RrcEntity::Classify of the GSoC 2010 LTE module)
+
+#include "nr-qos-rule-classifier.h"
+
+#include "nr-qos-rule.h"
+
+#include "ns3/iana-ieee802-numbers.h"
+#include "ns3/iana-internet-protocol-numbers.h"
+#include "ns3/icmpv4-l4-protocol.h"
+#include "ns3/icmpv6-l4-protocol.h"
+#include "ns3/ipv4-header.h"
+#include "ns3/ipv6-header.h"
+#include "ns3/log.h"
+#include "ns3/packet.h"
+#include "ns3/tcp-header.h"
+#include "ns3/udp-header.h"
+
+namespace ns3
+{
+
+NS_LOG_COMPONENT_DEFINE("NrQosRuleClassifier");
+
+NrQosRuleClassifier::NrQosRuleClassifier()
+{
+    NS_LOG_FUNCTION(this);
+}
+
+void
+NrQosRuleClassifier::Add(Ptr<NrQosRule> rule, uint8_t qfi)
+{
+    NS_LOG_FUNCTION(this << rule << +qfi);
+    NS_ASSERT_MSG(qfi >= 0 && qfi <= 63, "QFI must be in range 0-63");
+
+    // Set the QFI in the rule for later retrieval during classification
+    rule->SetQfi(qfi);
+
+    // Extract the rule precedence and insert into multimap
+    uint8_t precedence = rule->GetPrecedence();
+    m_qosRuleMap.insert({precedence, rule});
+    NS_LOG_INFO("Added rule with QFI " << +qfi << " and precedence " << +precedence);
+
+    // simple sanity check: there shouldn't be more than 64 flows per UE
+    NS_ASSERT(m_qosRuleMap.size() <= 64);
+}
+
+bool
+NrQosRuleClassifier::Delete(uint8_t qfi)
+{
+    NS_LOG_FUNCTION(this << +qfi);
+
+    // Iterate through the multimap to find the rule with matching QFI
+    for (auto it = m_qosRuleMap.begin(); it != m_qosRuleMap.end(); ++it)
+    {
+        if (it->second->GetQfi() == qfi)
+        {
+            NS_LOG_INFO("Deleting rule with QFI " << +qfi << " and precedence " << +it->first);
+            m_qosRuleMap.erase(it);
+            return true;
+        }
+    }
+    NS_LOG_WARN("Attempted to delete rule with QFI " << +qfi << " but no matching rule found");
+    return false;
+}
+
+void
+NrQosRuleClassifier::Clear()
+{
+    NS_LOG_FUNCTION(this);
+    m_qosRuleMap.clear();
+}
+
+std::optional<uint8_t>
+NrQosRuleClassifier::Classify(Ptr<Packet> p,
+                              NrQosRule::Direction direction,
+                              uint16_t protocolNumber)
+{
+    NS_LOG_FUNCTION(this << p << p->GetSize() << direction);
+
+    Ptr<Packet> pCopy = p->Copy();
+
+    Ipv4Address localAddressIpv4;
+    Ipv4Address remoteAddressIpv4;
+
+    Ipv6Address localAddressIpv6;
+    Ipv6Address remoteAddressIpv6;
+
+    uint8_t protocol;
+    uint8_t tos;
+
+    uint16_t localPort = 0;
+    uint16_t remotePort = 0;
+
+    if (protocolNumber == iana::ieee802numbers::IPV4)
+    {
+        Ipv4Header ipv4Header;
+        pCopy->RemoveHeader(ipv4Header);
+
+        if (direction == NrQosRule::UPLINK)
+        {
+            localAddressIpv4 = ipv4Header.GetSource();
+            remoteAddressIpv4 = ipv4Header.GetDestination();
+        }
+        else
+        {
+            NS_ASSERT(direction == NrQosRule::DOWNLINK);
+            remoteAddressIpv4 = ipv4Header.GetSource();
+            localAddressIpv4 = ipv4Header.GetDestination();
+        }
+        NS_LOG_INFO("local address: " << localAddressIpv4
+                                      << " remote address: " << remoteAddressIpv4);
+
+        uint16_t payloadSize = ipv4Header.GetPayloadSize();
+        uint16_t fragmentOffset = ipv4Header.GetFragmentOffset();
+        bool isLastFragment = ipv4Header.IsLastFragment();
+
+        // NS_LOG_DEBUG ("PayloadSize = " << payloadSize);
+        // NS_LOG_DEBUG ("fragmentOffset " << fragmentOffset << " isLastFragment " <<
+        // isLastFragment);
+
+        protocol = ipv4Header.GetProtocol();
+        tos = ipv4Header.GetTos();
+
+        // Port info only can be get if it is the first fragment and
+        // there is enough data in the payload
+        // We keep the port info for fragmented packets,
+        // i.e. it is the first one but it is not the last one
+        if (fragmentOffset == 0)
+        {
+            if (protocol == iana::internetprotocolnumbers::UDP && payloadSize >= 8)
+            {
+                UdpHeader udpHeader;
+                pCopy->RemoveHeader(udpHeader);
+                if (direction == NrQosRule::UPLINK)
+                {
+                    localPort = udpHeader.GetSourcePort();
+                    remotePort = udpHeader.GetDestinationPort();
+                }
+                else
+                {
+                    remotePort = udpHeader.GetSourcePort();
+                    localPort = udpHeader.GetDestinationPort();
+                }
+                if (!isLastFragment)
+                {
+                    std::tuple<uint32_t, uint32_t, uint8_t, uint16_t> fragmentKey =
+                        std::make_tuple(ipv4Header.GetSource().Get(),
+                                        ipv4Header.GetDestination().Get(),
+                                        protocol,
+                                        ipv4Header.GetIdentification());
+
+                    m_classifiedIpv4Fragments[fragmentKey] = std::make_pair(localPort, remotePort);
+                }
+            }
+            else if (protocol == iana::internetprotocolnumbers::TCP && payloadSize >= 20)
+            {
+                TcpHeader tcpHeader;
+                pCopy->RemoveHeader(tcpHeader);
+                if (direction == NrQosRule::UPLINK)
+                {
+                    localPort = tcpHeader.GetSourcePort();
+                    remotePort = tcpHeader.GetDestinationPort();
+                }
+                else
+                {
+                    remotePort = tcpHeader.GetSourcePort();
+                    localPort = tcpHeader.GetDestinationPort();
+                }
+
+                if (!isLastFragment)
+                {
+                    std::tuple<uint32_t, uint32_t, uint8_t, uint16_t> fragmentKey =
+                        std::make_tuple(ipv4Header.GetSource().Get(),
+                                        ipv4Header.GetDestination().Get(),
+                                        protocol,
+                                        ipv4Header.GetIdentification());
+
+                    m_classifiedIpv4Fragments[fragmentKey] = std::make_pair(localPort, remotePort);
+                }
+            }
+
+            // else
+            //   First fragment but not enough data for port info or not UDP/TCP protocol.
+            //   Nothing can be done, i.e. we cannot get port info from packet.
+        }
+        else
+        {
+            // Not first fragment, so port info is not available but
+            // port info should already be known (if there is not fragment reordering)
+            std::tuple<uint32_t, uint32_t, uint8_t, uint16_t> fragmentKey =
+                std::make_tuple(ipv4Header.GetSource().Get(),
+                                ipv4Header.GetDestination().Get(),
+                                protocol,
+                                ipv4Header.GetIdentification());
+
+            auto it = m_classifiedIpv4Fragments.find(fragmentKey);
+
+            if (it != m_classifiedIpv4Fragments.end())
+            {
+                localPort = it->second.first;
+                remotePort = it->second.second;
+
+                if (isLastFragment)
+                {
+                    m_classifiedIpv4Fragments.erase(fragmentKey);
+                }
+            }
+        }
+    }
+    else if (protocolNumber == iana::ieee802numbers::IPV6)
+    {
+        Ipv6Header ipv6Header;
+        pCopy->RemoveHeader(ipv6Header);
+
+        if (direction == NrQosRule::UPLINK)
+        {
+            localAddressIpv6 = ipv6Header.GetSource();
+            remoteAddressIpv6 = ipv6Header.GetDestination();
+        }
+        else
+        {
+            NS_ASSERT(direction == NrQosRule::DOWNLINK);
+            remoteAddressIpv6 = ipv6Header.GetSource();
+            localAddressIpv6 = ipv6Header.GetDestination();
+        }
+        NS_LOG_INFO("local address: " << localAddressIpv6
+                                      << " remote address: " << remoteAddressIpv6);
+
+        protocol = ipv6Header.GetNextHeader();
+        tos = ipv6Header.GetTrafficClass();
+
+        if (protocol == iana::internetprotocolnumbers::UDP)
+        {
+            UdpHeader udpHeader;
+            pCopy->RemoveHeader(udpHeader);
+
+            if (direction == NrQosRule::UPLINK)
+            {
+                localPort = udpHeader.GetSourcePort();
+                remotePort = udpHeader.GetDestinationPort();
+            }
+            else
+            {
+                remotePort = udpHeader.GetSourcePort();
+                localPort = udpHeader.GetDestinationPort();
+            }
+        }
+        else if (protocol == iana::internetprotocolnumbers::TCP)
+        {
+            TcpHeader tcpHeader;
+            pCopy->RemoveHeader(tcpHeader);
+            if (direction == NrQosRule::UPLINK)
+            {
+                localPort = tcpHeader.GetSourcePort();
+                remotePort = tcpHeader.GetDestinationPort();
+            }
+            else
+            {
+                remotePort = tcpHeader.GetSourcePort();
+                localPort = tcpHeader.GetDestinationPort();
+            }
+        }
+    }
+    else
+    {
+        NS_ABORT_MSG("NrQosRuleClassifier::Classify - Unknown IP type...");
+    }
+
+    if (protocolNumber == iana::ieee802numbers::IPV4)
+    {
+        NS_LOG_INFO("Classifying packet:" << " localAddr=" << localAddressIpv4 << " remoteAddr="
+                                          << remoteAddressIpv4 << " localPort=" << localPort
+                                          << " remotePort=" << remotePort << " tos=0x"
+                                          << (uint16_t)tos);
+
+        // Classify the packet by iterating rules in precedence order (ascending).
+        // Per 3GPP TS 24.501, rules with lower precedence values are evaluated first.
+        // The multimap is already ordered by precedence (key), so we iterate forward.
+        NS_LOG_LOGIC("QoS rule MAP size: " << m_qosRuleMap.size());
+
+        for (auto it = m_qosRuleMap.begin(); it != m_qosRuleMap.end(); ++it)
+        {
+            uint8_t precedence = it->first;
+            Ptr<NrQosRule> rule = it->second;
+            uint8_t qfi = rule->GetQfi();
+            NS_LOG_LOGIC("Checking QoS rule with precedence " << +precedence << " and QFI "
+                                                              << +qfi);
+            if (rule->Matches(direction,
+                              remoteAddressIpv4,
+                              localAddressIpv4,
+                              remotePort,
+                              localPort,
+                              tos))
+            {
+                NS_LOG_LOGIC("Packet matches QoS rule with QFI " << +qfi);
+                return std::optional<uint8_t>(qfi);
+            }
+        }
+    }
+    else if (protocolNumber == iana::ieee802numbers::IPV6)
+    {
+        NS_LOG_INFO("Classifying packet:" << " localAddr=" << localAddressIpv6 << " remoteAddr="
+                                          << remoteAddressIpv6 << " localPort=" << localPort
+                                          << " remotePort=" << remotePort << " tos=0x"
+                                          << (uint16_t)tos);
+
+        // Classify the packet by iterating rules in precedence order (ascending).
+        // Per 3GPP TS 24.501, rules with lower precedence values are evaluated first.
+        // The multimap is already ordered by precedence (key), so we iterate forward.
+        NS_LOG_LOGIC("QoS rule MAP size: " << m_qosRuleMap.size());
+
+        for (auto it = m_qosRuleMap.begin(); it != m_qosRuleMap.end(); ++it)
+        {
+            uint8_t precedence = it->first;
+            Ptr<NrQosRule> rule = it->second;
+            uint8_t qfi = rule->GetQfi();
+            NS_LOG_LOGIC("Checking QoS rule with precedence " << +precedence << " and QFI "
+                                                              << +qfi);
+            if (rule->Matches(direction,
+                              remoteAddressIpv6,
+                              localAddressIpv6,
+                              remotePort,
+                              localPort,
+                              tos))
+            {
+                NS_LOG_LOGIC("Packet matches QoS rule with QFI " << +qfi);
+                return std::optional<uint8_t>(qfi);
+            }
+        }
+    }
+    NS_LOG_LOGIC("no match");
+    return std::nullopt; // no match
+}
+
+} // namespace ns3

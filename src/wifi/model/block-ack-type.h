@@ -9,6 +9,8 @@
 #ifndef BLOCK_ACK_TYPE_H
 #define BLOCK_ACK_TYPE_H
 
+#include "ns3/wifi-export.h"
+
 #include <cstdint>
 #include <ostream>
 #include <vector>
@@ -17,21 +19,22 @@ namespace ns3
 {
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  * The different BlockAck variants.
  */
-struct BlockAckType
+struct WIFI_EXPORT BlockAckType
 {
     /**
-     * \enum Variant
-     * \brief The BlockAck variants
+     * @enum Variant
+     * @brief The BlockAck variants
      */
-    enum Variant
+    enum Variant : uint8_t
     {
         BASIC,
         COMPRESSED,
         EXTENDED_COMPRESSED,
         MULTI_TID,
+        GCR,
         MULTI_STA
     };
 
@@ -45,35 +48,36 @@ struct BlockAckType
     /**
      * Constructor for BlockAckType with given variant.
      *
-     * \param v the Block Ack variant
+     * @param v the Block Ack variant
      */
     BlockAckType(Variant v);
     /**
      * Constructor for BlockAckType with given variant
      * and bitmap length.
      *
-     * \param v the Block Ack variant
-     * \param l the length (bytes) of included bitmaps
+     * @param v the Block Ack variant
+     * @param l the length (bytes) of included bitmaps
      */
     BlockAckType(Variant v, std::vector<uint8_t> l);
 };
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  * The different BlockAckRequest variants.
  */
-struct BlockAckReqType
+struct WIFI_EXPORT BlockAckReqType
 {
     /**
-     * \enum Variant
-     * \brief The BlockAckReq variants
+     * @enum Variant
+     * @brief The BlockAckReq variants
      */
-    enum Variant
+    enum Variant : uint8_t
     {
         BASIC,
         COMPRESSED,
         EXTENDED_COMPRESSED,
-        MULTI_TID
+        MULTI_TID,
+        GCR
     };
 
     Variant m_variant;      //!< Block Ack Request variant
@@ -87,15 +91,15 @@ struct BlockAckReqType
     /**
      * Constructor for BlockAckReqType with given variant.
      *
-     * \param v the Block Ack Request variant
+     * @param v the Block Ack Request variant
      */
     BlockAckReqType(Variant v);
     /**
      * Constructor for BlockAckReqType with given variant
      * and number of SSC fields.
      *
-     * \param v the Block Ack Request variant
-     * \param nSeqControls the number of included Starting Sequence Control fields
+     * @param v the Block Ack Request variant
+     * @param nSeqControls the number of included Starting Sequence Control fields
      */
     BlockAckReqType(Variant v, uint8_t nSeqControls);
 };
@@ -103,20 +107,20 @@ struct BlockAckReqType
 /**
  * Serialize BlockAckType to ostream in a human-readable form.
  *
- * \param os std::ostream
- * \param type block ack type
- * \return std::ostream
+ * @param os std::ostream
+ * @param type block ack type
+ * @return std::ostream
  */
-std::ostream& operator<<(std::ostream& os, const BlockAckType& type);
+WIFI_EXPORT std::ostream& operator<<(std::ostream& os, const BlockAckType& type);
 
 /**
  * Serialize BlockAckReqType to ostream in a human-readable form.
  *
- * \param os std::ostream
- * \param type block ack request type
- * \return std::ostream
+ * @param os std::ostream
+ * @param type block ack request type
+ * @return std::ostream
  */
-std::ostream& operator<<(std::ostream& os, const BlockAckReqType& type);
+WIFI_EXPORT std::ostream& operator<<(std::ostream& os, const BlockAckReqType& type);
 
 } // namespace ns3
 

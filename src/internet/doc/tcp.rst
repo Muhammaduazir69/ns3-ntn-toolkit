@@ -49,7 +49,7 @@ Vegas, Scalable, Veno, Binary Increase Congestion Control (BIC), Yet Another
 HighSpeed TCP (YeAH), Illinois, H-TCP, Low Extra Delay Background Transport
 (LEDBAT), TCP Low Priority (TCP-LP), Data Center TCP (DCTCP) and Bottleneck
 Bandwidth and RTT (BBR) also supported. The model also supports Selective
-Acknowledgements (SACK), Proportional Rate Reduction (PRR) and Explicit
+Acknowledgements (SACK), Forward Acknowledgement (FACK), Proportional Rate Reduction (PRR) and Explicit
 Congestion Notification (ECN). Multipath-TCP is not yet supported in the |ns3|
 releases.
 
@@ -124,8 +124,8 @@ Using the helper functions defined in ``src/applications/helper`` and
   Address sinkLocalAddress(InetSocketAddress(Ipv4Address::GetAny(), port));
   PacketSinkHelper sinkHelper("ns3::TcpSocketFactory", sinkLocalAddress);
   ApplicationContainer sinkApp = sinkHelper.Install(serverNode);
-  sinkApp.Start(Seconds(1.0));
-  sinkApp.Stop(Seconds(10.0));
+  sinkApp.Start(Seconds(1));
+  sinkApp.Stop(Seconds(10));
 
 Similarly, the below snippet configures OnOffApplication traffic source to use
 TCP::
@@ -1005,7 +1005,7 @@ The following unit tests have been written to validate the implementation of DCT
 
 * ECT flags should be set for SYN, SYN+ACK, ACK and data packets for DCTCP traffic
 * ECT flags should not be set for SYN, SYN+ACK and pure ACK packets, but should be set on data packets for ECN enabled traditional TCP flows
-* ECE should be set only when CE flags are received at receiver and even if sender doesn’t send CWR, receiver should not send ECE if it doesn’t receive packets with CE flags
+* ECE should be set only when CE flags are received at receiver and even if sender doesn't send CWR, receiver should not send ECE if it doesn't receive packets with CE flags
 
 An example program, ``examples/tcp/tcp-validation.cc``, can be used to
 experiment with DCTCP for long-running flows with different bottleneck
@@ -1124,6 +1124,36 @@ For an academic peer-reviewed paper on the BBR implementation in ns-3,
 please refer to:
 
 * Vivek Jain, Viyom Mittal and Mohit P. Tahiliani. "Design and Implementation of TCP BBR in ns-3." In Proceedings of the 10th Workshop on ns-3, pp. 16-22. 2018. (https://dl.acm.org/doi/abs/10.1145/3199902.3199911)
+
+Integration with TcpRateOps
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In the older version of the TCP BBR algorithm, the ``appLimited`` variable was handled directly inside the ``TcpBbr`` class. To make the code more modular and similar to how things are done in Linux TCP, a pointer to the ``TcpRateOps`` class called ``Ptr<TcpRateOps> m_rateOps`` was introduced. This change helps manage the ``appLimited`` state through the rate operations interface instead of directly in ``TcpBbr``.
+
+Now, the ``appLimited`` value can be accessed with:
+
+.. code-block:: cpp
+
+    m_rateOps->GetConnectionRate().m_appLimited;
+
+And it can be updated using:
+
+.. code-block:: cpp
+
+    m_rateOps->SetAppLimited(tcb->m_bytesInFlight.Get());
+
+The ``SetAppLimited`` function, which is part of the ``TcpRateLinux`` class, takes care of updating the ``appLimited`` value based on the current amount of data in flight.
+
+Here's an example of the ``SetRateOps`` method in ``TcpBbr``:
+
+.. code-block:: cpp
+
+    void TcpBbr::SetRateOps(Ptr<TcpRateOps> rateOps)
+    {
+        m_rateOps = rateOps;
+    }
+
+This setup makes the code more organized and reflects how Linux TCP handles the ``appLimited`` state, where it's managed within the TCP socket and updated by rate operations.
 
 Support for Explicit Congestion Notification (ECN)
 ++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1377,6 +1407,7 @@ section below on :ref:`Writing-tcp-tests`.
 * **tcp-cong-avoid-test:** TCP congestion avoidance for different packet sizes
 * **tcp-datasentcb:** Check TCP's 'data sent' callback
 * **tcp-endpoint-bug2211-test:** A test for an issue that was causing stack overflow
+* **tcp-fack-test:** Unit tests on FACK
 * **tcp-fast-retr-test:** Fast Retransmit testing
 * **tcp-header:** Unit tests on the TCP header
 * **tcp-highspeed-test:** Unit tests on the HighSpeed congestion control
@@ -1597,6 +1628,184 @@ implementation.
 For an academic peer-reviewed paper on the SACK implementation in ns-3,
 please refer to https://dl.acm.org/citation.cfm?id=3067666.
 
+Forward Acknowledgement (FACK)
+++++++++++++++++++++++++++++++
+
+FACK is designed to be used with the TCP SACK option.
+It keeps count of the total number of bytes of outstanding data in the network. It
+achieves this by using the additional information provided by TCP SACK.
+
+FACK maintains two state variables: sndFack and retranData.
+
+sndFack is updated to reflect the highest sequence number that has been selectively acknowledged.
+In non-recovery state, the sndFack variable is updated from the acknowledgment
+number in the TCP header whereas during the recovery state, the sender utilizes
+information contained in TCP SACK options to update sndFack.
+
+retranData is the amount of outstanding retransmitted data in the
+network. Each time a segment is retransmitted, retranData is increased by the
+segment's size; when a retransmitted segment is determined to have left the
+network, retranData is decreased by the segment's size.
+
+awnd variable is defined to be the data sender’s estimate of the actual quantity
+of data outstanding in the network.
+
+Assuming that all the unacknowledged data has left the network:
+
+.. math::
+
+   awnd = sndNxt - sndFack
+
+sndNxt holds the sequence number of the first byte of unsent data.
+
+In recovery state, data which is retransmitted must also be included in the
+calculation of awnd.
+
+.. math::
+
+   awnd = sndNxt - sndFack + retranData
+
+Using this measure of outstanding data, the FACK algorithm can regulate the
+amount of data outstanding in the network to be within one MSS of the current
+value of cwnd.
+
+In the FACK version, the cwnd adjustment and retransmission are also triggered
+when the receiver reports that the reassembly queue is longer than 3 segments:
+
+.. code-block:: c++
+
+   if ((m_fackEnabled && fackDiff > m_tcb->m_segmentSize * 3) ||
+            ((m_dupAckCount == m_retxThresh) &&
+             (m_highRxAckMark >= m_recover || (!m_recoverActive))))
+        {
+            EnterRecovery(currentDelivered);
+            NS_ASSERT(m_tcb->m_congState == TcpSocketState::CA_RECOVERY);
+        }
+
+By default the FACK option is disabled. To enable FACK, the following
+configuration can be used:
+
+::
+
+  Config::SetDefault ("ns3::TcpSocketBase::Fack", BooleanValue (true));
+
+Note that FACK requires SACK to be enabled as well:
+
+::
+
+  Config::SetDefault ("ns3::TcpSocketBase::Sack", BooleanValue (true));
+
+
+The following unit tests have been written to verify the implementation of FACK:
+
+* This unit test creates a short packet flow and forces four consecutive lost
+  segments, and verifies that the snd.fack variable is updated to the highest sequence
+  number present in the incoming SACK blocks, and that its external calculation of
+  awnd matches the internal state variable.
+
+  The test monitors the sender's ACK processing and performs two key checks:
+
+  1. snd.fack: It parses incoming SACK blocks to determine the highest
+     acknowledged sequence number and verifies that the implementation updates
+     `snd.fack` correctly.
+
+  2. awnd: It recomputes the in-flight data window using the FACK formula
+     (`awnd = snd.nxt - snd.fack + retransmitted_data`) and confirms that this
+     matches the implementation's internal value.
+
+A successful test run ensures that the TCP FACK implementation accurately tracks
+the forward acknowledgment point and the amount of data in flight during
+recovery.
+
+Example and Performance Verification
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The example ``examples/tcp/fack-example.cc`` can be used to observe the
+FACK algorithm's influence on congestion control, specifically regarding the
+preservation of the "Self-Clock" and the "Overdamping" mechanism described
+in the Mathis & Mahdavi paper.
+
+The example simulates a bottleneck link where an initial Slow Start phase results
+in a significant packet overshoot (buffer overflow).
+
+**Reproducing the Data:**
+
+To generate the comparison data, the simulation should be run twice:
+
+1. **With FACK (Red Line):**
+   Ensure ``bool fack = true;`` in the example code.
+   Run the simulation and plot the ``fackAwnd.dat`` trace file using gnuplot. This file tracks
+   the FACK-specific `awnd` variable.
+
+2. **Without FACK (Blue Line):**
+   Modify the code to set ``bool fack = false;``.
+   Run the simulation and plot the ``bytesInFlight.dat`` trace file using gnuplot. This file
+   tracks the standard TCP `BytesInFlight` (SND.NXT - SND.UNA).
+
+**Plotting:**
+
+To generate the overlapping plot shown in **Figure 1**, you can use the following Gnuplot script. Save this as ``plot_inflight.gp`` and run it using ``gnuplot plot_inflight.gp``.
+
+.. code-block:: gnuplot
+
+   set terminal pngcairo enhanced color lw 1.5 font 'Times Roman'
+   set xrange [0:10]
+   set yrange [0:60]
+   set output "inflight.png"
+
+   set xlabel "Time (sec)"
+   set ylabel "Inflight (Packets)"
+   set key top right vertical
+
+   plot \
+     "bytesInFlight.dat" using 1:2 title "Without FACK" with lines lw 1.5 lc rgb "blue", \
+     "fackAwnd.dat" using 1:2 title "With FACK" with lines lw 1.5 lc rgb "red"
+
+.. note::
+   To generate the Congestion Window plot (**Figure 2**), use the same script logic but change the output filename to ``"cwnd.png"``, update the y-label to "Cwnd (Packets)", and replace the input files in the plot command with the saved CWND traces (e.g., ``cwnd_nofack.dat`` and ``cwnd_fack.dat``).
+
+**Interpretation of Results:**
+
+To fully appreciate the FACK algorithm's behavior, it is essential to analyze the relationship between the data outstanding in the network (`awnd`) and the sender's target window (`cwnd`). The following figures, generated from this example, illustrate the distinct phases of **Overshoot**, **Stall**, and **Overdamping**.
+
+.. _fig-fack-inflight:
+
+.. figure:: figures/fack-inflight.png
+   :align: center
+   :scale: 70 %
+   :alt: Comparison of FACK awnd vs Standard BytesInFlight
+
+   **Figure 1:** Comparison of Inflight Data. The Blue line represents the standard TCP `BytesInFlight`. The Red line represents the FACK-specific `awnd` (Active Window), which accurately tracks the ~50 packet backlog caused by the Slow-Start overshoot.
+
+.. _fig-fack-cwnd:
+
+.. figure:: figures/fack-cwnd.png
+   :align: center
+   :scale: 70 %
+   :alt: Congestion Window Trace
+
+   **Figure 2:** Congestion Window (`cwnd`). Note the sharp reduction to ~10 packets at t=1.0s. This low target `cwnd`, combined with the high `awnd` in Figure 1, triggers the Overdamping mechanism.
+
+
+As shown in **Figure 1** and **Figure 2**, distinct behaviors are observed during the recovery phase (1.0s - 3.0s):
+
+* **Blue Line (Without FACK):** The sharp drop in **Figure 1** indicates a loss of the TCP "Self-Clock." When losses occur, the standard algorithm cannot infer that packets have left the network, causing transmission to stall until the pipe drains.
+
+* **Red Line (With FACK):** The `awnd` in **Figure 1** remains high (~50 packets), significantly exceeding the Congestion Window (`cwnd`, approx. 10 packets, visible in **Figure 2**) during this interval. This demonstrates the **"Overdamping"** mechanism (Section 4.4 of the paper):
+
+    1.  **The Overshoot:** The initial Slow Start phase ramped up aggressively, pushing ~50 packets into the network before losses were detected (visible as the peak in the Red line).
+
+    2.  **The Detection:** FACK's `awnd` correctly measured this ~50-packet backlog. Simultaneously, the congestion control algorithm cut the `cwnd` to ~10 packets in response to the losses. This behavior matches the FACK paper’s statement:
+
+        *"In the case when cwnd has been halved immediately following a lost segment, awnd will be significantly larger than cwnd".*
+
+    3.  **The Damping Action:** Because `awnd` was significantly larger than `cwnd`, the FACK algorithm inhibited new transmissions. The gradual downward slope of the Red line represents the queue draining as packets left the network. This behavior is governed by the core FACK transmission rule (*while awnd < cwnd*) defined in Section 3, which forces the sender to stop transmitting whenever the `awnd` exceeds the target window (`cwnd`).
+
+This confirms that FACK successfully decouples data recovery from congestion control, maintaining an accurate picture of the network state even during heavy loss.
+
+More information (paper): https://dl.acm.org/citation.cfm?id=248181
+
+
 Loss Recovery Algorithms
 ++++++++++++++++++++++++
 The following loss recovery algorithms are supported in ns-3 TCP.  The current
@@ -1701,6 +1910,28 @@ For reference, the Linux TCP PRR implementation is entirely contained in tcp_ini
 More information (paper): https://dl.acm.org/citation.cfm?id=2068832
 
 More information (RFC): https://tools.ietf.org/html/rfc6937
+
+Alternative Backoff with ECN (ABE)
+++++++++++++++++++++++++++++++++++
+
+RFC 8511 recommends using an alternate ``m_betaEcn`` for calculation of the
+ssthresh  when the congestion control algorithm detects congestion using ECN.
+There is an  attribute ``ns3::TcpSocketBase::UseAbe`` which can be set to true
+to enable this feature. When enabled, the congestion control algorithm
+(NewReno or CUBIC) will use the ``m_betaEcn`` value to calculate the ssthresh when
+congestion is detected using ECN. The default value of ``m_betaEcn`` is set to
+0.85 for CUBIC and 0.7 for NewReno as recommended by the RFC, but can be changed
+using the attribute ``ns3::TcpNewReno::BetaEcn`` for NewReno or using
+``ns3::TcpCubic::BetaEcn`` for CUBIC.
+
+For example, to enable ABE for NewReno, you can set the attribute as follows:
+::
+
+  Config::SetDefault("ns3::TcpSocketBase::UseAbe", BooleanValue(true));
+  Config::SetDefault("ns3::TcpNewReno::BetaEcn", DoubleValue(0.7));
+
+
+More information (RFC): https://tools.ietf.org/html/rfc8511
 
 Adding a new loss recovery algorithm in ns-3
 ++++++++++++++++++++++++++++++++++++++++++++
@@ -1855,7 +2086,7 @@ the method ConfigureEnvironment:
       TcpGeneralTest::ConfigureEnvironment();
       SetAppPktCount(20);
       SetMTU(500);
-      SetTransmitStart(Seconds(2.0));
+      SetTransmitStart(Seconds(2));
       SetPropagationDelay(MilliSeconds(50));
   }
 
@@ -1901,7 +2132,7 @@ following code):
        Ptr<TcpSocketMsgBase> socket = TcpGeneralTest::CreateReceiverSocket(node);
 
        socket->SetAttribute("RcvBufSize", UintegerValue(0));
-       Simulator::Schedule(Seconds(10.0),
+       Simulator::Schedule(Seconds(10),
                          &TcpZeroWindowTest::IncreaseBufSize, this);
 
        return socket;

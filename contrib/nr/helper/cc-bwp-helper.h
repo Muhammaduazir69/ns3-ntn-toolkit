@@ -5,10 +5,11 @@
 #ifndef CC_BWP_HELPER_H
 #define CC_BWP_HELPER_H
 
-#include <ns3/propagation-loss-model.h>
-#include <ns3/ptr.h>
-#include <ns3/spectrum-channel.h>
-#include <ns3/spectrum-propagation-loss-model.h>
+#include "ns3/nr-export.h"
+#include "ns3/propagation-loss-model.h"
+#include "ns3/ptr.h"
+#include "ns3/spectrum-channel.h"
+#include "ns3/spectrum-propagation-loss-model.h"
 
 #include <memory>
 #include <vector>
@@ -28,8 +29,8 @@ static const uint8_t MAX_CC_INTER_BAND =
         //!< one operation band)
 
 /**
- * \ingroup helper
- * \brief Spectrum part
+ * @ingroup helper
+ * @brief Spectrum part
  *
  * This is the minimum unit of usable spectrum by a PHY class. For creating
  * any GNB or UE, you will be asked to provide a list of BandwidthPartInfo
@@ -41,10 +42,8 @@ static const uint8_t MAX_CC_INTER_BAND =
  * have to indicate the central frequency and the higher/lower frequency, as
  * well as the entire bandwidth plus the modeling.
  *
- * The pointers to the channels, if left empty, will be initialized by
- * NrHelper::InitializeOperationBand().
  */
-struct BandwidthPartInfo
+struct NR_EXPORT BandwidthPartInfo
 {
     uint8_t m_bwpId{0};             //!< BWP id
     double m_centralFrequency{0.0}; //!< BWP central frequency
@@ -52,108 +51,48 @@ struct BandwidthPartInfo
     double m_higherFrequency{0.0};  //!< BWP higher frequency
     double m_channelBandwidth{0.0}; //!< BWP bandwidth
 
-    /**
-     * \brief Different types for the propagation loss model of this bandwidth part
-     */
-    enum Scenario
-    {
-        RMa,                   //!< RMa
-        RMa_LoS,               //!< RMa where all the nodes will be in Line-of-Sight
-        RMa_nLoS,              //!< RMA where all the nodes will not be in Line-of-Sight
-        UMa_LoS,               //!< UMa where all the nodes will be in Line-of-Sight
-        UMa_nLoS,              //!< UMa where all the nodes will not be in Line-of-Sight
-        UMa,                   //!< UMa
-        UMi_StreetCanyon,      //!< UMi_StreetCanyon
-        UMi_StreetCanyon_LoS,  //!< UMi_StreetCanyon where all the nodes will be in Line-of-Sight
-        UMi_StreetCanyon_nLoS, //!< UMi_StreetCanyon where all the nodes will not be in
-                               //!< Line-of-Sight
-        InH_OfficeOpen,        //!< InH_OfficeOpen
-        InH_OfficeOpen_LoS,    //!< indoor office where all the nodes will be in Line-of-Sight
-        InH_OfficeOpen_nLoS,   //!< indoor office where all the nodes will not be in Line-of-Sight
-        InH_OfficeMixed,       //!< InH_OfficeMixed
-        InH_OfficeMixed_LoS,   //!< indoor office where all the nodes will be in Line-of-Sight
-        InH_OfficeMixed_nLoS,  //!< indoor office where all the nodes will not be in Line-of-Sight
-        UMa_Buildings,         //!< UMa with buildings
-        UMi_Buildings,         //!< UMi_StreetCanyon with buildings
-        V2V_Highway,           //!< V2V_Highway
-        V2V_Urban,             //!< V2V_Urban
-        Custom                 //!< User-defined custom scenario
-    } m_scenario{RMa};
-
-    /**
-     * \brief Retrieve a string version of the scenario
-     * \return the string-fied version of the scenario
-     */
-    std::string GetScenario() const;
-
     BandwidthPartInfo() = default;
-    /**
-     * Parameterized constructor, for directly defining BandwidthPartInfo outside of CcBwpCreator
-     *
-     * Use this constructor if you want to customize the propagation models outside of the
-     * ThreeGppPropagationModel framework (e.g., s simple Friis loss model with no shadowing
-     * or other fading models).
-     * After calling this constructor, the user is responsible for setting the m_channel pointer
-     * after adding any desired loss and delay models to it; the m_propagation and m_3GppChannel
-     * pointers may be left null.
-     *
-     * \param bwpId Bandwidth Part ID
-     * \param centralFrequency Central frequency in Hz
-     * \param channelBandwidth Channel bandwidth in Hz
-     * \param scenario The 3GPP scenario (if applicable).  If unset, will default to 'Custom'.
-     *
-     * If a 3GPP scenario is desired, the CcBwpCreator should probably be used to initialize
-     * the 3GPP propagation modesl properly; this constructor is more aimed at providing an
-     * option to configure a non-3GPP model.
-     *
-     * An example usage of this constructor to set up a Friis propagation loss model is:
-     * \code
-     *   std::vector<std::reference_wrapper<std::unique_ptr<BandwidthPartInfo> > > bwps;
-     *   std::unique_ptr<BandwidthPartInfo> bwpi (new BandwidthPartInfo (bwpId, centralFrequency,
-     * bandwidth)); auto spectrumChannel = CreateObject<MultiModelSpectrumChannel> (); auto
-     * propagationLoss = CreateObject<FriisPropagationLossModel> ();
-     *   propagationLoss->SetAttributeFailSafe ("Frequency", DoubleValue (centralFrequencyBand1));
-     *   spectrumChannel->AddPropagationLossModel (propagationLoss);
-     *   bwpi->m_channel = spectrumChannel;
-     *   bwps.push_back(bwpi);
-     * \endcode
-     */
-    BandwidthPartInfo(uint8_t bwpId,
-                      double centralFrequency,
-                      double channelBandwidth,
-                      enum Scenario scenario = BandwidthPartInfo::Custom);
 
+    /**
+     * @brief Set the spectrum channel for the BWP
+     * @param channel The spectrum channel to be set for the BWP
+     */
+    void SetChannel(Ptr<SpectrumChannel> channel);
+
+    /**
+     * @brief Get the spectrum channel associated with the BWP
+     * @return The spectrum channel associated with the BWP
+     */
+    Ptr<SpectrumChannel> GetChannel() const;
+
+  private:
     Ptr<SpectrumChannel>
         m_channel; //!< Channel for the Bwp. Leave it nullptr to let the helper fill it
-    Ptr<PropagationLossModel>
-        m_propagation; //!< Propagation model. Leave it nullptr to let the helper fill it
-    Ptr<PhasedArraySpectrumPropagationLossModel>
-        m_3gppChannel; //!< Nr Channel. Leave it nullptr to let the helper fill it
 };
 
 /**
- * \ingroup utils
- * \brief unique_ptr of BandwidthPartInfo
+ * @ingroup utils
+ * @brief unique_ptr of BandwidthPartInfo
  */
 typedef std::unique_ptr<BandwidthPartInfo> BandwidthPartInfoPtr;
 /**
- * \ingroup utils
- * \brief unique_ptr of a const BandwidthPartInfo
+ * @ingroup utils
+ * @brief unique_ptr of a const BandwidthPartInfo
  */
 typedef std::unique_ptr<const BandwidthPartInfo> BandwidthPartInfoConstPtr;
 /**
- * \ingroup utils
- * \brief vector of unique_ptr of BandwidthPartInfo
+ * @ingroup utils
+ * @brief vector of unique_ptr of BandwidthPartInfo
  */
 typedef std::vector<std::reference_wrapper<BandwidthPartInfoPtr>> BandwidthPartInfoPtrVector;
 
-std::ostream& operator<<(std::ostream& os, const BandwidthPartInfo& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const BandwidthPartInfo& item);
 
 /**
- * \ingroup helper
- * \brief Component carrier configuration element
+ * @ingroup helper
+ * @brief Component carrier configuration element
  */
-struct ComponentCarrierInfo
+struct NR_EXPORT ComponentCarrierInfo
 {
     uint8_t m_ccId{0};            //!< CC id
     double m_centralFrequency{0}; //!< BWP central frequency
@@ -164,29 +103,29 @@ struct ComponentCarrierInfo
     std::vector<BandwidthPartInfoPtr> m_bwp; //!< Space for BWP
 
     /**
-     * \brief Adds a bandwidth part configuration to the carrier
+     * @brief Adds a bandwidth part configuration to the carrier
      *
-     * \param bwp Description of the BWP to be added
+     * @param bwp Description of the BWP to be added
      */
     bool AddBwp(BandwidthPartInfoPtr&& bwp);
 };
 
 /**
- * \ingroup utils
- * \brief unique_ptr of ComponentCarrierInfo
+ * @ingroup utils
+ * @brief unique_ptr of ComponentCarrierInfo
  */
 typedef std::unique_ptr<ComponentCarrierInfo> ComponentCarrierInfoPtr;
 
-std::ostream& operator<<(std::ostream& os, const ComponentCarrierInfo& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const ComponentCarrierInfo& item);
 
 /**
- * \ingroup utils
- * \brief Operation band information structure
+ * @ingroup utils
+ * @brief Operation band information structure
  *
  * Defines the range of frequencies of an operation band and includes a list of
  * component carriers (CC) and their contiguousness
  */
-struct OperationBandInfo
+struct NR_EXPORT OperationBandInfo
 {
     uint8_t m_bandId{0};            //!< Operation band id
     double m_centralFrequency{0.0}; //!< Operation band central frequency
@@ -197,72 +136,68 @@ struct OperationBandInfo
     std::vector<ComponentCarrierInfoPtr> m_cc; //!< Operation band component carriers
 
     /**
-     * \brief Adds the component carrier definition given as an input reference
+     * @brief Adds the component carrier definition given as an input reference
      * to the current operation band configuration
      *
-     * \param cc The information of the component carrier to be created
+     * @param cc The information of the component carrier to be created
      */
     bool AddCc(ComponentCarrierInfoPtr&& cc);
 
     /**
-     * \brief Get the BWP at the cc/bwp specified
-     * \param ccId Component carrier Index
-     * \param bwpId Bandwidth Part index
-     * \return a pointer to the BWP
+     * @brief Get the BWP at the cc/bwp specified
+     * @param ccId Component carrier Index
+     * @param bwpId Bandwidth Part index
+     * @return a pointer to the BWP
      */
     BandwidthPartInfoPtr& GetBwpAt(uint32_t ccId, uint32_t bwpId) const;
 
     /**
-     * \brief Get the list of all the BWPs to pass to NrHelper
-     * \return a list of BWP to pass to NrHelper::InitializeOperationBand()
+     * @brief Get the list of all the BWPs to pass to NrHelper
+     * @return a list of BWP to pass to NrHelper::InitializeOperationBand()
      */
     BandwidthPartInfoPtrVector GetBwps() const;
 };
 
-std::ostream& operator<<(std::ostream& os, const OperationBandInfo& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const OperationBandInfo& item);
 
 /**
- * \ingroup helper
- * \brief Manages the correct creation of operation bands, component carriers and bandwidth parts
+ * @ingroup helper
+ * @brief Manages the correct creation of operation bands, component carriers and bandwidth parts
  *
  * This class can be used to setup in an easy way the operational bands needed
  * for a simple scenario. The first thing is to setup a simple configuration,
  * specified by the struct SimpleOperationBandConf. Then, this configuration can
  * be passed to CreateOperationBandContiguousCc.
  */
-class CcBwpCreator
+class NR_EXPORT CcBwpCreator
 {
   public:
     /**
-     * \ingroup helper
-     * \brief Minimum configuration requirements for a OperationBand
+     * @ingroup helper
+     * @brief Minimum configuration requirements for a OperationBand
      *
      * For instance, here is the simple configuration for a single operation band
      * at 28 GHz and 100 MHz of width:
      *
-     * `CcBwpCreator::SimpleOperationBandConf bandConf1 (28e9, 100e6, 1,
-     * BandwidthPartInfo::UMi_StreetCanyon);`
+     * `CcBwpCreator::SimpleOperationBandConf bandConf1 (28e9, 100e6, 1)`
      *
      * The possible values of the scenario are depicted in BandwidthPartInfo
      * documentation.
      */
-    struct SimpleOperationBandConf
+    struct NR_EXPORT SimpleOperationBandConf
     {
         /**
-         * \brief Default constructor
-         * \param centralFreq Central Frequency
-         * \param channelBw Bandwidth
-         * \param numCc number of component carriers in this operation band
-         * \param scenario which 3gpp scenario path loss model will be installed for this band
+         * @brief Default constructor
+         * @param centralFreq Central Frequency
+         * @param channelBw Bandwidth
+         * @param numCc number of component carriers in this operation band
          */
         SimpleOperationBandConf(double centralFreq = 28e9,
                                 double channelBw = 400e6,
-                                uint8_t numCc = 1,
-                                BandwidthPartInfo::Scenario scenario = BandwidthPartInfo::RMa)
+                                uint8_t numCc = 1)
             : m_centralFrequency(centralFreq),
               m_channelBandwidth(channelBw),
-              m_numCc(numCc),
-              m_scenario(scenario)
+              m_numCc(numCc)
         {
         }
 
@@ -270,12 +205,11 @@ class CcBwpCreator
         double m_channelBandwidth{400e6}; //!< Total Bandwidth of the operation band
         uint8_t m_numCc{1};               //!< Number of CC in this OpBand
         uint8_t m_numBwp{1};              //!< Number of BWP per CC
-        BandwidthPartInfo::Scenario m_scenario{BandwidthPartInfo::RMa}; //!< Scenario
     };
 
     /**
-     * \brief Create an operation band with the CC specified
-     * \param conf Minimum configuration
+     * @brief Create an operation band with the CC specified
+     * @param conf Minimum configuration
      *
      * Creates an operation band by splitting the available bandwidth into
      * equally-large contiguous carriers. Carriers will have common parameters like numerology.
@@ -285,36 +219,36 @@ class CcBwpCreator
     OperationBandInfo CreateOperationBandContiguousCc(const SimpleOperationBandConf& conf);
 
     /**
-     * \brief Creates an operation band with non-contiguous CC.
+     * @brief Creates an operation band with non-contiguous CC.
      *
-     * \param configuration Minimum configuration for every CC.
+     * @param configuration Minimum configuration for every CC.
      */
     OperationBandInfo CreateOperationBandNonContiguousCc(
         const std::vector<SimpleOperationBandConf>& configuration);
 
     /**
-     * \brief Get all the BWP pointers from the specified vector of operation bands
-     * \param operationBands the operation bands
-     * \return the pointers to the BWP to be passed to NrHelper
+     * @brief Get all the BWP pointers from the specified vector of operation bands
+     * @param operationBands the operation bands
+     * @return the pointers to the BWP to be passed to NrHelper
      *
      */
     static BandwidthPartInfoPtrVector GetAllBwps(
         const std::vector<std::reference_wrapper<OperationBandInfo>>& operationBands);
 
     /**
-     * \brief Plots the CA/BWP configuration using GNUPLOT. There must be a valid
+     * @brief Plots the CA/BWP configuration using GNUPLOT. There must be a valid
      * configuration
      *
-     * \param filename The path to write the output gnuplot file
+     * @param filename The path to write the output gnuplot file
      */
     static void PlotNrCaBwpConfiguration(const std::vector<OperationBandInfo*>& bands,
                                          const std::string& filename);
 
     /**
-     * \brief Plots the CA/BWP configuration using GNUPLOT. There must be a valid
+     * @brief Plots the CA/BWP configuration using GNUPLOT. There must be a valid
      * configuration
      *
-     * \param filename The path to write the output gnuplot file
+     * @param filename The path to write the output gnuplot file
      */
     static void PlotLteCaConfiguration(const std::vector<OperationBandInfo*>& bands,
                                        const std::string& filename);
@@ -325,7 +259,7 @@ class CcBwpCreator
                       double lowerFreq,
                       uint8_t ccPosition,
                       uint8_t ccId) const;
-    void InitializeBwp(std::unique_ptr<BandwidthPartInfo>& bwp,
+    void InitializeBwp(BandwidthPartInfoPtr& bwp,
                        double bwOfBwp,
                        double lowerFreq,
                        uint8_t bwpPosition,
@@ -334,19 +268,17 @@ class CcBwpCreator
                                                    double lowerFreq,
                                                    uint8_t ccPosition,
                                                    uint8_t ccId,
-                                                   uint8_t bwpNumber,
-                                                   BandwidthPartInfo::Scenario scenario);
-
+                                                   uint8_t bwpNumber);
     /**
-     * \brief Plots a 2D rectangle defined by the input points and places a label
+     * @brief Plots a 2D rectangle defined by the input points and places a label
      *
-     * \param outFile The output
-     * \param index The drawn rectangle id
-     * \param xmin The minimum value of the rectangle in the horizontal (x) axis
-     * \param xmax The maximum value of the rectangle in the horizontal (x) axis
-     * \param ymin The minimum value of the rectangle in the vertical (y) axis
-     * \param ymax The minimum value of the rectangle in the vertical (y) axis
-     * \param label The text to be printed inside the rectangle
+     * @param outFile The output
+     * @param index The drawn rectangle id
+     * @param xmin The minimum value of the rectangle in the horizontal (x) axis
+     * @param xmax The maximum value of the rectangle in the horizontal (x) axis
+     * @param ymin The minimum value of the rectangle in the vertical (y) axis
+     * @param ymax The minimum value of the rectangle in the vertical (y) axis
+     * @param label The text to be printed inside the rectangle
      */
     static void PlotFrequencyBand(std::ofstream& outFile,
                                   uint16_t index,

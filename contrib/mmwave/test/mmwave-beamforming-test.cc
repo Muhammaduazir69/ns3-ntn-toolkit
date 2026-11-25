@@ -331,6 +331,12 @@ MmWaveSvdBeamformingTestCase::DoRun(void)
     PhasedArrayModel::ComplexVector manualRxBfVector =
         GetManualBfVector(rxAntenna,
                           Angles(DegreesToRadians(aoaAz[0]), DegreesToRadians(aoaEl[0])));
+    // Since ns-3.48 (#1314) the receive (u-side) array combines with the conjugate of its
+    // weights, w^H H, so the coherent receive weights are the conjugate of the steering weights.
+    for (size_t i = 0; i < manualRxBfVector.GetSize(); ++i)
+    {
+        manualRxBfVector[i] = std::conj(manualRxBfVector[i]);
+    }
 
     // Check if the beamforming vectors are as expected (minus a constant phase difference)
     double tol = 1e-10;

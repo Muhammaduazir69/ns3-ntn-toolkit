@@ -7,18 +7,17 @@
  */
 #include "object-base.h"
 
-#include "assert.h"
+#include "abort.h"
 #include "attribute-construction-list.h"
 #include "environment-variable.h"
+#include "fatal-error.h"
 #include "log.h"
 #include "string.h"
 #include "trace-source-accessor.h"
 
-#include "ns3/core-config.h"
-
 /**
- * \file
- * \ingroup object
+ * @file
+ * @ingroup object
  * ns3::ObjectBase class implementation.
  */
 
@@ -27,10 +26,10 @@ namespace ns3
 // Explicit instantiation declaration
 
 /**
- * \ingroup callback
+ * @ingroup callback
  * Explicit instantiation for ObjectBase
- * \return A wrapper Callback
- * \sa ns3::MakeCallback
+ * @return A wrapper Callback
+ * @sa ns3::MakeCallback
  */
 template Callback<ObjectBase*> MakeCallback<ObjectBase*>(ObjectBase* (*)());
 template Callback<ObjectBase*>::Callback();
@@ -44,9 +43,9 @@ NS_OBJECT_ENSURE_REGISTERED(ObjectBase);
  * Ensure the TypeId for ObjectBase gets fully configured
  * to anchor the inheritance tree properly.
  *
- * \relates ns3::ObjectBase
+ * @relates ns3::ObjectBase
  *
- * \return The TypeId for ObjectBase.
+ * @return The TypeId for ObjectBase.
  */
 static TypeId
 GetObjectIid()
@@ -83,6 +82,19 @@ ObjectBase::ConstructSelf(const AttributeConstructionList& attributes)
     // loop over the inheritance tree back to the Object base class.
     NS_LOG_FUNCTION(this << &attributes);
     TypeId tid = GetInstanceTypeId();
+    TypeId objectTid;
+    // the TypeId of a class derived from Object is initialized to "ns3::Object"; for a class
+    // deriving from Object, check that this function is called after that the correct TypeId is set
+    // to ensure that the attributes of the class are initialized
+    NS_ABORT_MSG_IF(TypeId::LookupByNameFailSafe("ns3::Object", &objectTid) && tid == objectTid,
+                    "ObjectBase::ConstructSelf() has been called on an object of a class derived "
+                    "from the Object class, but the TypeId is still set to ns3::Object.\n"
+                    "This is known to happen in two cases:\n"
+                    "- ObjectBase::ConstructSelf() is called in the class constructor; in this "
+                    "case, override ObjectBase::NotifyConstructionCompleted() to access the "
+                    "initial values of the object attributes as soon as object construction is "
+                    "completed (see issue #1249)\n"
+                    "- the class deriving from Object does not define a static GetTypeId() method");
     do // Do this tid and all parents
     {
         // loop over all attributes in object type
@@ -174,8 +186,7 @@ ObjectBase::ConstructSelf(const AttributeConstructionList& attributes)
                                                           << "'");
                 */
             }
-
-        } // for i attributes
+        }
         tid = tid.GetParent();
     } while (tid != ObjectBase::GetTypeId());
     NotifyConstructionCompleted();

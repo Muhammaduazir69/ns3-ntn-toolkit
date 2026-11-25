@@ -7,22 +7,34 @@
  *
  */
 
+/**
+ * @ingroup test
+ * @file nr-simple-spectrum-phy.h
+ *
+ * @brief Test support class, not a test suite. NrSimpleSpectrumPhy is a bare-bones SpectrumPhy
+ * that can be attached to a spectrum channel to observe transmissions: instead of demodulating,
+ * its StartRx() exports the received power spectral density of NR data frames through the
+ * "RxStart" trace source. When a non-zero cell ID is configured only signals from that cell are
+ * traced, letting test scripts verify per-cell transmitted spectra (e.g. frequency reuse or
+ * power allocation checks) without instantiating a full NR receiver.
+ */
+
 #ifndef NR_SIMPLE_SPECTRUM_PHY_H
 #define NR_SIMPLE_SPECTRUM_PHY_H
 
-#include <ns3/event-id.h>
-#include <ns3/mobility-model.h>
-#include <ns3/net-device.h>
-#include <ns3/spectrum-channel.h>
-#include <ns3/spectrum-phy.h>
-#include <ns3/spectrum-value.h>
-#include <ns3/traced-callback.h>
+#include "ns3/event-id.h"
+#include "ns3/mobility-model.h"
+#include "ns3/net-device.h"
+#include "ns3/spectrum-channel.h"
+#include "ns3/spectrum-phy.h"
+#include "ns3/spectrum-value.h"
+#include "ns3/traced-callback.h"
 
 namespace ns3
 {
 
 /**
- * \ingroup nr
+ * @ingroup nr
  *
  * The NrSimpleSpectrumPhy models the physical layer of LTE
  * This class is used to test Frequency Reuse Algorithms,
@@ -40,8 +52,8 @@ class NrSimpleSpectrumPhy : public SpectrumPhy
     ~NrSimpleSpectrumPhy() override;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     // inherited from Object
@@ -58,14 +70,14 @@ class NrSimpleSpectrumPhy : public SpectrumPhy
     void StartRx(Ptr<SpectrumSignalParameters> params) override;
 
     /**
-     * \brief Set receive spectrum model.
-     * \param model the spectrum model
+     * @brief Set receive spectrum model.
+     * @param model the spectrum model
      */
     void SetRxSpectrumModel(Ptr<const SpectrumModel> model);
 
     /**
-     * \brief Set cell ID.
-     * \param cellId the cell ID
+     * @brief Set cell ID.
+     * @param cellId the cell ID
      */
     void SetCellId(uint16_t cellId);
 

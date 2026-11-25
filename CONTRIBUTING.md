@@ -29,12 +29,11 @@ The full documentation about how to contribute to ns-3 is available in the [ns-3
 
 ## I do not want to read this whole thing, I just have a question
 
-> **Note:** Please don't file an issue to ask a question.
-            You'll get faster results by using the resources below.
+> **Note:** Please don't file an issue to ask a question. You'll get faster results by using the resources below.
 
 We have an official message board where the community chimes in with helpful advice if you have questions.
 
-* [ns-3-users, the official ns-3 message board](https://groups.google.com/forum/#!forum/ns-3-users)
+* [ns-3-users, the official ns-3 message board](https://groups.google.com/g/ns-3-users)
 * [ns-3 manual](https://www.nsnam.org/docs/manual/html/index.html)
 
 If chat is more your speed, you can join the ns-3 Zulip channel:
@@ -151,8 +150,9 @@ The process described here has several goals:
 
 Please follow these steps to have your contribution considered by the maintainers:
 
-1. Follow the [styleguides](#styleguides)
-2. After you submit your merge request, verify that all status checks are passing <details><summary>What if the status checks are failing?</summary>If a status check is failing, and you believe that the failure is unrelated to your change, please leave a comment on the merge request explaining why you believe the failure is unrelated. A maintainer will re-run the status check for you. If we conclude that the failure was a false positive, then we will open an issue to track that problem with our status check suite.</details>
+* Follow the [styleguides](#styleguides)
+* After you submit your merge request, verify that all status checks are passing.
+  * If a status check is failing, and you believe that the failure is unrelated to your change, please leave a comment on the merge request explaining why you believe the failure is unrelated. A maintainer will re-run the status check for you. If we conclude that the failure was a false positive, then we will open an issue to track that problem with our status check suite.
 
 While the prerequisites above must be satisfied prior to having your merge request reviewed, the reviewer(s) may ask you to complete additional design work, tests, or other changes before your merge request can be ultimately accepted.
 
@@ -216,7 +216,7 @@ Please open an issue on `infrastructure` if you have suggestions for new labels,
 
 #### Merge Request Labels
 
-| Label name | Description
+| Label name | Description |
 | --- | --- |
 | `work-in-progress` | Merge requests which are still being worked on, more changes will follow. |
 | `needs-review` | Merge requests which need code review, and approval from maintainers or ns-3 core team. |
@@ -286,4 +286,3 @@ Please open an issue on `infrastructure` if you have suggestions for new labels,
 | `visualizer` | Any issue related to this module |
 | `wave module` | Any issue related to this module |
 | `wifi` | Any issue related to this module |
-| `wimax` | Any issue related to this module |

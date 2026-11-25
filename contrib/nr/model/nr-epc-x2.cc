@@ -46,9 +46,9 @@ NrX2IfaceInfo::operator=(const NrX2IfaceInfo& value)
 
 ///////////////////////////////////////////
 
-NrX2CellInfo::NrX2CellInfo(std::vector<uint16_t> localCellIds, std::vector<uint16_t> remoteCellIds)
-    : m_localCellIds{localCellIds},
-      m_remoteCellIds{remoteCellIds}
+NrX2CellInfo::NrX2CellInfo(uint16_t localCellId, uint16_t remoteCellId)
+    : m_localCellId{localCellId},
+      m_remoteCellId{remoteCellId}
 {
 }
 
@@ -60,8 +60,8 @@ NrX2CellInfo&
 NrX2CellInfo::operator=(const NrX2CellInfo& value)
 {
     NS_LOG_FUNCTION(this);
-    m_localCellIds = value.m_localCellIds;
-    m_remoteCellIds = value.m_remoteCellIds;
+    m_localCellId = value.m_localCellId;
+    m_remoteCellId = value.m_remoteCellId;
     return *this;
 }
 
@@ -117,10 +117,9 @@ NrEpcX2::GetEpcX2SapProvider()
 void
 NrEpcX2::AddX2Interface(uint16_t localCellId,
                         Ipv4Address localX2Address,
-                        std::vector<uint16_t> remoteCellIds,
+                        uint16_t remoteCellId,
                         Ipv4Address remoteX2Address)
 {
-    uint16_t remoteCellId = remoteCellIds.at(0);
     NS_LOG_FUNCTION(this << localCellId << localX2Address << remoteCellId << remoteX2Address);
 
     int retval;
@@ -142,25 +141,20 @@ NrEpcX2::AddX2Interface(uint16_t localCellId,
     NS_ASSERT(retval == 0);
     localX2uSocket->SetRecvCallback(MakeCallback(&NrEpcX2::RecvFromX2uSocket, this));
 
-    std::vector<uint16_t> localCellIds;
-    localCellIds.push_back(localCellId);
-
     NS_ASSERT_MSG(m_x2InterfaceSockets.find(remoteCellId) == m_x2InterfaceSockets.end(),
                   "Mapping for remoteCellId = " << remoteCellId << " is already known");
-    for (uint16_t remoteCellId : remoteCellIds)
-    {
-        m_x2InterfaceSockets[remoteCellId] =
-            Create<NrX2IfaceInfo>(remoteX2Address, localX2cSocket, localX2uSocket);
-    }
+
+    m_x2InterfaceSockets[remoteCellId] =
+        Create<NrX2IfaceInfo>(remoteX2Address, localX2cSocket, localX2uSocket);
 
     NS_ASSERT_MSG(m_x2InterfaceCellIds.find(localX2cSocket) == m_x2InterfaceCellIds.end(),
                   "Mapping for control plane localSocket = " << localX2cSocket
                                                              << " is already known");
-    m_x2InterfaceCellIds[localX2cSocket] = Create<NrX2CellInfo>(localCellIds, remoteCellIds);
+    m_x2InterfaceCellIds[localX2cSocket] = Create<NrX2CellInfo>(localCellId, remoteCellId);
 
     NS_ASSERT_MSG(m_x2InterfaceCellIds.find(localX2uSocket) == m_x2InterfaceCellIds.end(),
                   "Mapping for data plane localSocket = " << localX2uSocket << " is already known");
-    m_x2InterfaceCellIds[localX2uSocket] = Create<NrX2CellInfo>(localCellIds, remoteCellIds);
+    m_x2InterfaceCellIds[localX2uSocket] = Create<NrX2CellInfo>(localCellId, remoteCellId);
 }
 
 void
@@ -198,7 +192,7 @@ NrEpcX2::RecvFromX2cSocket(Ptr<Socket> socket)
             NrEpcX2SapUser::HandoverRequestParams params;
             params.oldGnbUeX2apId = x2HoReqHeader.GetOldGnbUeX2apId();
             params.cause = x2HoReqHeader.GetCause();
-            params.sourceCellId = cellsInfo->m_remoteCellIds.at(0);
+            params.sourceCellId = cellsInfo->m_remoteCellId;
             params.targetCellId = x2HoReqHeader.GetTargetCellId();
             params.mmeUeS1apId = x2HoReqHeader.GetMmeUeS1apId();
             params.ueAggregateMaxBitRateDownlink = x2HoReqHeader.GetUeAggregateMaxBitRateDownlink();
@@ -210,7 +204,7 @@ NrEpcX2::RecvFromX2cSocket(Ptr<Socket> socket)
             NS_LOG_LOGIC("sourceCellId = " << params.sourceCellId);
             NS_LOG_LOGIC("targetCellId = " << params.targetCellId);
             NS_LOG_LOGIC("mmeUeS1apId = " << params.mmeUeS1apId);
-            NS_LOG_LOGIC("cellsInfo->m_localCellId = " << cellsInfo->m_localCellIds.at(0));
+            NS_LOG_LOGIC("cellsInfo->m_localCellId = " << cellsInfo->m_localCellId);
 
             m_x2SapUser->RecvHandoverRequest(params);
         }
@@ -226,8 +220,8 @@ NrEpcX2::RecvFromX2cSocket(Ptr<Socket> socket)
             NrEpcX2SapUser::HandoverRequestAckParams params;
             params.oldGnbUeX2apId = x2HoReqAckHeader.GetOldGnbUeX2apId();
             params.newGnbUeX2apId = x2HoReqAckHeader.GetNewGnbUeX2apId();
-            params.sourceCellId = cellsInfo->m_localCellIds.at(0);
-            params.targetCellId = cellsInfo->m_remoteCellIds.at(0);
+            params.sourceCellId = cellsInfo->m_localCellId;
+            params.targetCellId = cellsInfo->m_remoteCellId;
             params.admittedBearers = x2HoReqAckHeader.GetAdmittedBearers();
             params.notAdmittedBearers = x2HoReqAckHeader.GetNotAdmittedBearers();
             params.rrcContext = packet;
@@ -250,8 +244,8 @@ NrEpcX2::RecvFromX2cSocket(Ptr<Socket> socket)
 
             NrEpcX2SapUser::HandoverPreparationFailureParams params;
             params.oldGnbUeX2apId = x2HoPrepFailHeader.GetOldGnbUeX2apId();
-            params.sourceCellId = cellsInfo->m_localCellIds.at(0);
-            params.targetCellId = cellsInfo->m_remoteCellIds.at(0);
+            params.sourceCellId = cellsInfo->m_localCellId;
+            params.targetCellId = cellsInfo->m_remoteCellId;
             params.cause = x2HoPrepFailHeader.GetCause();
             params.criticalityDiagnostics = x2HoPrepFailHeader.GetCriticalityDiagnostics();
 
@@ -297,8 +291,8 @@ NrEpcX2::RecvFromX2cSocket(Ptr<Socket> socket)
             NrEpcX2SapUser::SnStatusTransferParams params;
             params.oldGnbUeX2apId = x2SnStatusXferHeader.GetOldGnbUeX2apId();
             params.newGnbUeX2apId = x2SnStatusXferHeader.GetNewGnbUeX2apId();
-            params.sourceCellId = cellsInfo->m_remoteCellIds.at(0);
-            params.targetCellId = cellsInfo->m_localCellIds.at(0);
+            params.sourceCellId = cellsInfo->m_remoteCellId;
+            params.targetCellId = cellsInfo->m_localCellId;
             params.erabsSubjectToStatusTransferList =
                 x2SnStatusXferHeader.GetErabsSubjectToStatusTransferList();
 
@@ -371,8 +365,8 @@ NrEpcX2::RecvFromX2cSocket(Ptr<Socket> socket)
             NrEpcX2SapUser::HandoverCancelParams params;
             params.oldGnbUeX2apId = x2HoCancelHeader.GetOldGnbUeX2apId();
             params.newGnbUeX2apId = x2HoCancelHeader.GetNewGnbUeX2apId();
-            params.sourceCellId = cellsInfo->m_localCellIds.at(0);
-            params.targetCellId = cellsInfo->m_remoteCellIds.at(0);
+            params.sourceCellId = cellsInfo->m_localCellId;
+            params.targetCellId = cellsInfo->m_remoteCellId;
             params.cause = x2HoCancelHeader.GetCause();
 
             NS_LOG_LOGIC("oldGnbUeX2apId = " << params.oldGnbUeX2apId);
@@ -409,8 +403,8 @@ NrEpcX2::RecvFromX2uSocket(Ptr<Socket> socket)
     NS_LOG_LOGIC("GTP-U header: " << gtpu);
 
     NrEpcX2SapUser::UeDataParams params;
-    params.sourceCellId = cellsInfo->m_remoteCellIds.at(0);
-    params.targetCellId = cellsInfo->m_localCellIds.at(0);
+    params.sourceCellId = cellsInfo->m_remoteCellId;
+    params.targetCellId = cellsInfo->m_localCellId;
     params.gtpTeid = gtpu.GetTeid();
     params.ueData = packet;
 

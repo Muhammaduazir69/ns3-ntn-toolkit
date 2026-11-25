@@ -25,10 +25,10 @@
 #include "ns3/simulator.h"
 #include "ns3/wifi-mac.h"
 #include "ns3/wifi-phy.h"
+#include "ns3/wifi-psdu.h"
 
 #include <iomanip>
-
-#define Min(a, b) ((a < b) ? a : b)
+#include <limits>
 
 namespace ns3
 {
@@ -109,7 +109,7 @@ MinstrelWifiManager::SetupPhy(const Ptr<WifiPhy> phy)
         WifiTxVector txVector;
         txVector.SetMode(mode);
         txVector.SetPreambleType(WIFI_PREAMBLE_LONG);
-        AddCalcTxTime(mode, phy->CalculateTxDuration(m_pktLen, txVector, phy->GetPhyBand()));
+        AddCalcTxTime(mode, WifiPhy::CalculateTxDuration(m_pktLen, txVector, phy->GetPhyBand()));
     }
     WifiRemoteStationManager::SetupPhy(phy);
 }
@@ -375,9 +375,9 @@ MinstrelWifiManager::GetDataTxVector(MinstrelWifiRemoteStation* station)
 {
     NS_LOG_FUNCTION(this << station);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     if (!station->m_initialized)
     {
@@ -408,9 +408,9 @@ MinstrelWifiManager::GetRtsTxVector(MinstrelWifiRemoteStation* station)
     NS_LOG_FUNCTION(this << station);
     NS_LOG_DEBUG("DoGetRtsMode m_txrate=" << station->m_txrate);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     WifiMode mode;
     if (!GetUseNonErpProtection())
@@ -936,6 +936,27 @@ MinstrelWifiManager::DoGetRtsTxVector(WifiRemoteStation* st)
     return GetRtsTxVector(station);
 }
 
+std::list<Ptr<WifiMpdu>>
+MinstrelWifiManager::DoGetMpdusToDropOnTxFailure(WifiRemoteStation* station, Ptr<WifiPsdu> psdu)
+{
+    NS_LOG_FUNCTION(this << *psdu);
+
+    std::list<Ptr<WifiMpdu>> mpdusToDrop;
+
+    for (const auto& mpdu : *PeekPointer(psdu))
+    {
+        if (!DoNeedRetransmission(station,
+                                  mpdu->GetPacket(),
+                                  (mpdu->GetRetryCount() < GetMac()->GetFrameRetryLimit())))
+        {
+            // this MPDU needs to be dropped
+            mpdusToDrop.push_back(mpdu);
+        }
+    }
+
+    return mpdusToDrop;
+}
+
 bool
 MinstrelWifiManager::DoNeedRetransmission(WifiRemoteStation* st,
                                           Ptr<const Packet> packet,
@@ -1009,13 +1030,13 @@ MinstrelWifiManager::RateInit(MinstrelWifiRemoteStation* station)
         // Emulating minstrel.c::ath_rate_ctl_reset
         // We only check from 2 to 10 retries. This guarantee that
         // at least one retry is permitted.
-        Time totalTxTimeWithGivenRetries = Seconds(0.0); // tx_time in minstrel.c
+        Time totalTxTimeWithGivenRetries; // tx_time in minstrel.c
         NS_LOG_DEBUG(" Calculating the number of retries");
         for (uint32_t retries = 2; retries < 11; retries++)
         {
             NS_LOG_DEBUG("  Checking " << retries << " retries");
             totalTxTimeWithGivenRetries =
-                CalculateTimeUnicastPacket(station->m_minstrelTable[i].perfectTxTime, 0, retries);
+                CalculateTimeUnicastPacket(GetSupported(station, i), 0, retries);
             NS_LOG_DEBUG("   totalTxTimeWithGivenRetries = " << totalTxTimeWithGivenRetries);
             if (totalTxTimeWithGivenRetries > MilliSeconds(6))
             {
@@ -1030,22 +1051,28 @@ MinstrelWifiManager::RateInit(MinstrelWifiRemoteStation* station)
 }
 
 Time
-MinstrelWifiManager::CalculateTimeUnicastPacket(Time dataTransmissionTime,
+MinstrelWifiManager::CalculateTimeUnicastPacket(WifiMode mode,
                                                 uint32_t shortRetries,
                                                 uint32_t longRetries)
 {
-    NS_LOG_FUNCTION(this << dataTransmissionTime << shortRetries << longRetries);
+    NS_LOG_FUNCTION(this << mode << shortRetries << longRetries);
     // See rc80211_minstrel.c
 
     // First transmission (Data + Ack timeout)
-    Time tt = dataTransmissionTime + GetPhy()->GetSifs() + GetPhy()->GetAckTxTime();
+    WifiTxVector txVector;
+    txVector.SetMode(mode);
+    txVector.SetPreambleType(
+        GetPreambleForTransmission(mode.GetModulationClass(), GetShortPreambleEnabled()));
+    const auto oneTxTime =
+        GetCalcTxTime(mode) + GetPhy()->GetSifs() + GetEstimatedAckTxTime(txVector);
+    auto tt = oneTxTime;
 
     uint32_t cwMax = 1023;
     uint32_t cw = 31;
     for (uint32_t retry = 0; retry < longRetries; retry++)
     {
         // Add one re-transmission (Data + Ack timeout)
-        tt += dataTransmissionTime + GetPhy()->GetSifs() + GetPhy()->GetAckTxTime();
+        tt += oneTxTime;
 
         // Add average back off (half the current contention window)
         tt += (cw / 2.0) * GetPhy()->GetSlot();

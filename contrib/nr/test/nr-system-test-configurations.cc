@@ -15,10 +15,10 @@
 using namespace ns3;
 
 /**
- * \file nr-system-test-configurations.cc
- * \ingroup test
+ * @file nr-system-test-configurations.cc
+ * @ingroup test
  *
- * \brief Test the configuration for 5G-LENA. Test that does nothing at the moment.
+ * @brief Test the configuration for 5G-LENA. Test that does nothing at the moment.
  */
 
 // This is an example TestCase.
@@ -87,27 +87,26 @@ NrSystemTestConfigurationsTestCase1::DoRun()
     // Put the pointers inside nrHelper
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Set the channel with UMi scenario
+    channelHelper->ConfigureFactories("UMi");
+    // Set spectrum attributes
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(100)));
 
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     BandwidthPartInfoPtrVector allBwps;
     CcBwpCreator ccBwpCreator;
     const uint8_t numCcPerBand = 1; // in this example, both bands have a single CC
 
     // Create the configuration for the CcBwpHelper. SimpleOperationBandConf creates
     // a single BWP per CC
-    CcBwpCreator::SimpleOperationBandConf bandConf1(28e9,
-                                                    100e6,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon);
+    CcBwpCreator::SimpleOperationBandConf bandConf1(28e9, 100e6, numCcPerBand);
 
     // By using the configuration created, it is time to make the operation bands
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
-
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(100)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    nrHelper->InitializeOperationBand(&band1);
-
+    // Set the channel for the band
+    channelHelper->AssignChannelsToBands({band1});
     allBwps = CcBwpCreator::GetAllBwps({band1});
 
     nrHelper->SetGnbPhyAttribute("Numerology", UintegerValue(m_numerology));
@@ -117,51 +116,20 @@ NrSystemTestConfigurationsTestCase1::DoRun()
     NetDeviceContainer gnbNetDev = nrHelper->InstallGnbDevice(gnbNode, allBwps);
     NetDeviceContainer ueNetDev = nrHelper->InstallUeDevice(ueNode, allBwps);
 
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
     internet.Install(ueNode);
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
+
     // assign IP address to UEs, and install UDP downlink applications
     uint16_t dlPort = 1234;
     ApplicationContainer clientApps;
     ApplicationContainer serverApps;
-
-    Ptr<Node> ue = ueNode.Get(0);
-    // Set the default gateway for the UE
-    Ptr<Ipv4StaticRouting> ueStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(ue->GetObject<Ipv4>());
-    ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
 
     UdpServerHelper dlPacketSinkHelper(dlPort);
     serverApps.Add(dlPacketSinkHelper.Install(ueNode.Get(0)));

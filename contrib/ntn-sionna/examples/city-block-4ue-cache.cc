@@ -23,6 +23,7 @@
  *   python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
  *   ./ns3 run "city-block-4ue-cache --freqHz=2e9 --steps=60"
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -30,6 +31,7 @@
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
+#include "ns3/node-container.h"
 
 #include <iostream>
 #include "ns3/simulator.h"
@@ -40,8 +42,12 @@
 #include "ns3/sionna-caching-transport.h"
 #include "ns3/sionna-udp-transport.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
+#include <fstream>
+#include <limits>
+#include <string>
 #include <vector>
 
 using namespace ns3;
@@ -225,8 +231,82 @@ main(int argc, char* argv[])
                             cache,
                             &samples);
     }
+    // Globe scene (ntn-dataset@1): the channel queries take bare mobility models, so
+    // device-less context nodes carry copies of them in the scenario's ENU frame (the LEO's
+    // sub-satellite point at t = 0): the four UEs on their grid and the SGP4 satellite. The
+    // copies leave the queried models, and so the received powers, untouched.
+    NodeContainer ctxNodes;
+    ctxNodes.Create(5);
+    const Vector uePositions[4] = {ueA->GetPosition(),
+                                   ueB->GetPosition(),
+                                   ueC->GetPosition(),
+                                   ueD->GetPosition()};
+    for (uint32_t k = 0; k < 4; ++k)
+    {
+        Ptr<ConstantPositionMobilityModel> m = CreateObject<ConstantPositionMobilityModel>();
+        m->SetPosition(uePositions[k]);
+        ctxNodes.Get(k)->AggregateObject(m);
+    }
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satCtxSgp4 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satCtxSgp4->SetElementsSgp4(satElements[0]);
+    Ptr<NtnEnuProjectionMobilityModel> satCtx = CreateObject<NtnEnuProjectionMobilityModel>();
+    satCtx->SetSource(satCtxSgp4);
+    satCtx->SetReference(satSubLat, satSubLon, 0.0);
+    ctxNodes.Get(4)->AggregateObject(satCtx);
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Stop(MilliSeconds(100 * steps + 200));
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    // The per-sample table as a dataset, and the headline cache and received-power
+    // numbers as metrics, so the run's results follow its parameters.
+    std::ofstream sampleCsv("city-block-4ue-cache.csv");
+    sampleCsv << "i,t_s,rx_ne_dbm,rx_nw_dbm,rx_se_dbm,rx_sw_dbm,hits,misses,hit_rate\n";
+    double rxSum = 0.0;
+    double rxMin = std::numeric_limits<double>::infinity();
+    double rxMax = -std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < samples.size(); ++i)
+    {
+        const auto& s = samples[i];
+        const uint64_t total = s.hits + s.misses;
+        const double hitRate = total ? static_cast<double>(s.hits) / total : 0.0;
+        sampleCsv << (i + 1) << "," << s.t_s << "," << s.rx_dbm[0] << "," << s.rx_dbm[1] << ","
+                  << s.rx_dbm[2] << "," << s.rx_dbm[3] << "," << s.hits << "," << s.misses << ","
+                  << hitRate << "\n";
+        for (double rx : s.rx_dbm)
+        {
+            rxSum += rx;
+            rxMin = std::min(rxMin, rx);
+            rxMax = std::max(rxMax, rx);
+        }
+    }
+    sampleCsv.close();
+    uint64_t fbRecord = 0;
+    for (const auto& b : bases)
+    {
+        fbRecord += b->GetFallbacks();
+    }
+    const double rxMean = samples.empty() ? 0.0 : rxSum / (4.0 * samples.size());
+    if (samples.empty())
+    {
+        rxMin = 0.0;
+        rxMax = 0.0;
+    }
+    ns3::ntnobs::WriteDatasetRecord(
+        ".",
+        "city-block-4ue-cache",
+        "analytic",
+        argc,
+        argv,
+        {{"samples", std::to_string(samples.size()), "analytic"},
+         {"mean_rx_dbm", std::to_string(rxMean), "analytic"},
+         {"min_rx_dbm", std::to_string(rxMin), "analytic"},
+         {"max_rx_dbm", std::to_string(rxMax), "analytic"},
+         {"cache_hits", std::to_string(cache->GetHits()), "analytic"},
+         {"cache_misses", std::to_string(cache->GetMisses()), "analytic"},
+         {"cache_evictions", std::to_string(cache->GetEvictions()), "analytic"},
+         {"cache_hit_rate", std::to_string(cache->GetHitRate()), "analytic"},
+         {"raytrace_live", fbRecord > 0 ? "0" : "1", "analytic"}});
     Simulator::Destroy();
 
     std::printf("# city-block-4ue-cache: freq=%.3f GHz alt=%.0f km rain=%.1f mm/h "

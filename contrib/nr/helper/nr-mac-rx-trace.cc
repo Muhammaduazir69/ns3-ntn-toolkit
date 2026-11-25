@@ -4,8 +4,8 @@
 
 #include "nr-mac-rx-trace.h"
 
-#include <ns3/log.h>
-#include <ns3/simulator.h>
+#include "ns3/log.h"
+#include "ns3/simulator.h"
 
 #include <fstream>
 
@@ -64,6 +64,7 @@ NrMacRxTrace::GetTypeId()
 void
 NrMacRxTrace::RxedGnbMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
                                          std::string path,
+                                         uint64_t imsi,
                                          SfnSf sfn,
                                          uint16_t nodeId,
                                          uint16_t rnti,
@@ -137,6 +138,7 @@ NrMacRxTrace::RxedGnbMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
 void
 NrMacRxTrace::TxedGnbMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
                                          std::string path,
+                                         uint64_t imsi,
                                          SfnSf sfn,
                                          uint16_t nodeId,
                                          uint16_t rnti,
@@ -199,6 +201,7 @@ NrMacRxTrace::TxedGnbMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
 void
 NrMacRxTrace::RxedUeMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
                                         std::string path,
+                                        uint64_t imsi,
                                         SfnSf sfn,
                                         uint16_t nodeId,
                                         uint16_t rnti,
@@ -264,6 +267,7 @@ NrMacRxTrace::RxedUeMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
 void
 NrMacRxTrace::TxedUeMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
                                         std::string path,
+                                        uint64_t imsi,
                                         SfnSf sfn,
                                         uint16_t nodeId,
                                         uint16_t rnti,

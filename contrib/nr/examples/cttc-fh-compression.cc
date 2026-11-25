@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /**
- * \ingroup examples
- * \file cttc-fh-compression.cc
- * \brief A multi-cell network deployment with site sectorization
+ * @ingroup examples
+ * @file cttc-fh-compression.cc
+ * @brief A multi-cell network deployment with site sectorization
  *
  * This example describes how to setup a simulation using the 3GPP channel model
  * from TR 38.901. This example consists of an hexagonal grid deployment
@@ -35,6 +35,7 @@ $ ./ns3 run "cttc-fh-compression --PrintHelp"
  * do that by including the name of the module you need with the suffix "-module.h".
  */
 
+#include "ns3/antenna-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/config-store-module.h"
 #include "ns3/config-store.h"
@@ -46,9 +47,8 @@ $ ./ns3 run "cttc-fh-compression --PrintHelp"
 #include "ns3/mobility-module.h"
 #include "ns3/nr-module.h"
 #include "ns3/point-to-point-module.h"
-#include <ns3/antenna-module.h>
-#include <ns3/rng-seed-manager.h>
-#include <ns3/three-gpp-ftp-m1-helper.h>
+#include "ns3/rng-seed-manager.h"
+#include "ns3/three-gpp-ftp-m1-helper.h"
 
 #include <algorithm>
 #include <iostream>
@@ -74,18 +74,18 @@ class RadioNetworkParametersHelper
 {
   public:
     /**
-     * \brief Set the radio network parameters to LTE.
-     * \param freqReuse The cell frequency reuse.
+     * @brief Set the radio network parameters to LTE.
+     * @param freqReuse The cell frequency reuse.
      */
     void SetNetworkToLte(const std::string scenario,
                          const std::string operationMode,
                          uint16_t numCcs);
 
     /**
-     * \brief Set the radio network parameters to NR.
-     * \param scenario Urban scenario (UMa or UMi).
-     * \param numerology Numerology to use.
-     * \param freqReuse The cell frequency reuse.
+     * @brief Set the radio network parameters to NR.
+     * @param scenario Urban scenario (UMa or UMi).
+     * @param numerology Numerology to use.
+     * @param freqReuse The cell frequency reuse.
      */
     void SetNetworkToNr(const std::string scenario,
                         const std::string operationMode,
@@ -93,31 +93,31 @@ class RadioNetworkParametersHelper
                         uint16_t numCcs);
 
     /**
-     * \brief Gets the BS transmit power
-     * \return Transmit power in dBW
+     * @brief Gets the BS transmit power
+     * @return Transmit power in dBW
      */
     double GetTxPower() const;
 
     /**
-     * \brief Gets the operation bandwidth
-     * \return Bandwidth in Hz
+     * @brief Gets the operation bandwidth
+     * @return Bandwidth in Hz
      */
     double GetBandwidth() const;
 
     /**
-     * \brief Gets the central frequency
-     * \return Central frequency in Hz
+     * @brief Gets the central frequency
+     * @return Central frequency in Hz
      */
     double GetCentralFrequency() const;
 
     /**
-     * \brief Gets the band numerology
-     * \return Numerology
+     * @brief Gets the band numerology
+     * @return Numerology
      */
     uint16_t GetNumerology() const;
 
     /**
-     * \brief Converts the maxMcsVectorInput (string) into an std::vector of maximum MCS used per
+     * @brief Converts the maxMcsVectorInput (string) into an std::vector of maximum MCS used per
      * cell \return maxMcsVector
      */
     std::vector<int16_t> GetMcsVectorFromInput();
@@ -304,6 +304,7 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
      * - IdealBeamformingHelper, which takes care of the beamforming part
      * - NrHelper, which takes care of creating and connecting the various
      * part of the NR stack
+     * - NrChannelHelper, which takes care of the spectrum channel
      */
 
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
@@ -315,7 +316,6 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     Ptr<NrPointToPointEpcHelper> nrEpcHelper =
         DynamicCast<NrPointToPointEpcHelper>(baseNrEpcHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
-
     /*
      * Spectrum division. We create one operational band containing three
      * component carriers, and each CC containing a single bandwidth part
@@ -333,28 +333,8 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     double centralFrequencyBand = ranHelper.GetCentralFrequency();
     double bandwidthBand = ranHelper.GetBandwidth();
     const uint8_t numCcPerBand = 1; // In this example, each cell will have one CC with one BWP
-    BandwidthPartInfo::Scenario scene;
-    if (scenario == "UMi")
-    {
-        scene = BandwidthPartInfo::UMi_StreetCanyon;
-    }
-    else if (scenario == "UMa")
-    {
-        scene = BandwidthPartInfo::UMa;
-    }
-    else
-    {
-        NS_ABORT_MSG("Unsupported scenario");
-    }
 
-    /*
-     * Attributes of ThreeGppChannelModel still cannot be set in our way.
-     * TODO: Coordinate with Tommaso
-     */
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod",
-                       TimeValue(MilliSeconds(0))); // 100ms
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    NS_ABORT_MSG_UNLESS(scenario == "UMa" || scenario == "UMi", "Unsupported scenario");
 
     // Error Model: UE and GNB with same spectrum error model.
     nrHelper->SetUlErrorModel(errorModel);
@@ -395,40 +375,38 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     uint8_t numBwpPerCc = 1;
     if (operationMode == "FDD")
     {
-        numBwpPerCc = 2; // FDD will have 2 BWPs per CC
-        Config::SetDefault("ns3::NrUeNetDevice::PrimaryUlIndex", UintegerValue(1));
+        numBwpPerCc = 2; // FDD will have 2 BWPs per CC; the UE derives its
+                         // primary UL BWP and routing from the cell configuration
     }
 
     CcBwpCreator::SimpleOperationBandConf bandConf1(centralFrequencyBand1,
                                                     bandwidthBand1,
-                                                    numCcPerBand,
-                                                    scene);
+                                                    numCcPerBand);
     bandConf1.m_numBwp = numBwpPerCc; // FDD will have 2 BWPs per CC
     CcBwpCreator::SimpleOperationBandConf bandConf2(centralFrequencyBand2,
                                                     bandwidthBand2,
-                                                    numCcPerBand,
-                                                    scene);
+                                                    numCcPerBand);
     bandConf2.m_numBwp = numBwpPerCc; // FDD will have 2 BWPs per CC
     CcBwpCreator::SimpleOperationBandConf bandConf3(centralFrequencyBand3,
                                                     bandwidthBand3,
-                                                    numCcPerBand,
-                                                    scene);
+                                                    numCcPerBand);
     bandConf3.m_numBwp = numBwpPerCc; // FDD will have 2 BWPs per CC
 
     // By using the configuration created, it is time to make the operation bands
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
     OperationBandInfo band2 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf2);
     OperationBandInfo band3 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf3);
-
-    /*
-     * Initialize channel and pathloss, plus other things inside band1. If needed,
-     * the band configuration can be done manually, but we leave it for more
-     * sophisticated examples. For the moment, this method will take care
-     * of all the spectrum initialization needs.
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigureFactories(scenario);
+    // Set the attributes for the channel model
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    /**
+     * Set the channel model for the bands. The channel model is the same for all the bands.
+     * Initialize both fading and propagation
      */
-    nrHelper->InitializeOperationBand(&band1);
-    nrHelper->InitializeOperationBand(&band2);
-    nrHelper->InitializeOperationBand(&band3);
+    channelHelper->AssignChannelsToBands({band1, band2, band3});
     allBwps = CcBwpCreator::GetAllBwps({band1, band2, band3});
     bwps1 = CcBwpCreator::GetAllBwps({band1});
     bwps2 = CcBwpCreator::GetAllBwps({band2});
@@ -514,7 +492,7 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     // Set LTE RBG size
     if (radioNetwork == "LTE")
     {
-        nrHelper->SetGnbMacAttribute("NumRbPerRbg", UintegerValue(4));
+        nrHelper->SetAttribute("NumRbPerRbg", UintegerValue(4));
     }
 
     // We assume a common traffic pattern for all UEs
@@ -527,10 +505,6 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     // gNb routing between Bearer and bandwidth part
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_VIDEO_TCP_DEFAULT",
                                                  UintegerValue(bwpIdForLowLat));
-
-    // Ue routing between Bearer and bandwidth part
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_VIDEO_TCP_DEFAULT",
-                                                UintegerValue(bwpIdForLowLat));
 
     /*
      * We miss many other parameters. By default, not configuring them is equivalent
@@ -558,13 +532,16 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     ueSector2NetDev = nrHelper->InstallUeDevice(ueSector2Container, bwps2);
     ueSector3NetDev = nrHelper->InstallUeDevice(ueSector3Container, bwps3);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbSector1NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(gnbSector2NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(gnbSector3NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector1NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector2NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector3NetDev, randomStream);
+    NetDeviceContainer gnbNetDevs;
+    gnbNetDevs.Add(gnbSector1NetDev);
+    gnbNetDevs.Add(gnbSector2NetDev);
+    gnbNetDevs.Add(gnbSector3NetDev);
+    NetDeviceContainer ueNetDevs;
+    ueNetDevs.Add(ueSector1NetDev);
+    ueNetDevs.Add(ueSector2NetDev);
+    ueNetDevs.Add(ueSector3NetDev);
+    nrHelper->AssignStreams(
+        {.scenario = &gridScenario, .gnbDevs = gnbNetDevs, .ueDevs = ueNetDevs});
 
     /*
      * Case (iii): Go node for node and change the attributes we have to setup
@@ -624,36 +601,36 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     for (uint32_t numCell = 0; numCell < gnbSector1NetDev.GetN(); ++numCell)
     {
         Ptr<NetDevice> gnb = gnbSector1NetDev.Get(numCell);
-        uint32_t numBwps = nrHelper->GetNumberBwp(gnb);
+        uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
         if (numBwps == 1) // TDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna =
                 DynamicCast<UniformPlanarArray>(phy->GetSpectrumPhy()->GetAntenna());
             antenna->SetAttribute("BearingAngle", DoubleValue(orientationRads));
 
             // Set numerology
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
 
             // Set TX power
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
 
             // Set TDD pattern
             if (uniformPattern || (globalCellId % 2 == 1))
             {
-                nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern1));
+                NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern1));
             }
             else
             {
-                nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern2));
+                NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern2));
             }
 
             // Set max MCS
-            nrHelper->GetScheduler(gnb, 0)->SetAttribute("MaxDlMcs",
+            NrHelper::GetScheduler(gnb, 0)->SetAttribute("MaxDlMcs",
                                                          IntegerValue(maxMcsPerCell[globalCellId]));
-            // nrHelper->GetGnbMac (gnb, 0)->SetAttribute ("MaxDlMcs", UintegerValue (10));  // 27,
+            // NrHelper::GetGnbMac (gnb, 0)->SetAttribute ("MaxDlMcs", UintegerValue (10));  // 27,
             // 19, 10, 4 for mcsT2,
             //  28, 16, 9 for mcsT1
         }
@@ -661,34 +638,31 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
         else if (numBwps == 2) // FDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy0 = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy0 = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna0 =
                 DynamicCast<UniformPlanarArray>(phy0->GetSpectrumPhy()->GetAntenna());
             antenna0->SetAttribute("BearingAngle", DoubleValue(orientationRads));
-            Ptr<NrGnbPhy> phy1 = nrHelper->GetGnbPhy(gnb, 1);
+            Ptr<NrGnbPhy> phy1 = NrHelper::GetGnbPhy(gnb, 1);
             Ptr<UniformPlanarArray> antenna1 =
                 DynamicCast<UniformPlanarArray>(phy1->GetSpectrumPhy()->GetAntenna());
             antenna1->SetAttribute("BearingAngle", DoubleValue(orientationRads));
 
             // Set numerology
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
 
             // Set TX power
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute("TxPower", DoubleValue(-30.0));
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute("TxPower", DoubleValue(-30.0));
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute(
                 "Pattern",
                 StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute(
                 "Pattern",
                 StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-
-            // Link the two FDD BWP
-            nrHelper->GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
         }
 
         else
@@ -702,36 +676,36 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     for (uint32_t numCell = 0; numCell < gnbSector2NetDev.GetN(); ++numCell)
     {
         Ptr<NetDevice> gnb = gnbSector2NetDev.Get(numCell);
-        uint32_t numBwps = nrHelper->GetNumberBwp(gnb);
+        uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
         if (numBwps == 1) // TDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna =
                 DynamicCast<UniformPlanarArray>(phy->GetSpectrumPhy()->GetAntenna());
             antenna->SetAttribute("BearingAngle", DoubleValue(orientationRads));
 
             // Set numerology
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
 
             // Set TX power
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
 
             // Set TDD pattern
             if (uniformPattern || (globalCellId % 2 == 1))
             {
-                nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern1));
+                NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern1));
             }
             else
             {
-                nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern2));
+                NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern2));
             }
 
             // Set max MCS
-            nrHelper->GetScheduler(gnb, 0)->SetAttribute("MaxDlMcs",
+            NrHelper::GetScheduler(gnb, 0)->SetAttribute("MaxDlMcs",
                                                          IntegerValue(maxMcsPerCell[globalCellId]));
-            // nrHelper->GetGnbMac (gnb, 0)->SetAttribute ("MaxDlMcs", UintegerValue (10));  // 27,
+            // NrHelper::GetGnbMac (gnb, 0)->SetAttribute ("MaxDlMcs", UintegerValue (10));  // 27,
             // 19, 10, 4 for mcsT2,
             //  28, 16, 9 for mcsT1
         }
@@ -739,35 +713,32 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
         else if (numBwps == 2) // FDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy0 = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy0 = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna0 =
                 DynamicCast<UniformPlanarArray>(phy0->GetSpectrumPhy()->GetAntenna());
             antenna0->SetAttribute("BearingAngle", DoubleValue(orientationRads));
-            Ptr<NrGnbPhy> phy1 = nrHelper->GetGnbPhy(gnb, 1);
+            Ptr<NrGnbPhy> phy1 = NrHelper::GetGnbPhy(gnb, 1);
             Ptr<UniformPlanarArray> antenna1 =
                 DynamicCast<UniformPlanarArray>(phy1->GetSpectrumPhy()->GetAntenna());
             antenna1->SetAttribute("BearingAngle", DoubleValue(orientationRads));
 
             // Set numerology
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
 
             // Set TX power
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute("TxPower", DoubleValue(-30.0));
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute("TxPower", DoubleValue(-30.0));
 
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute(
                 "Pattern",
                 StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute(
                 "Pattern",
                 StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-
-            // Link the two FDD BWP
-            nrHelper->GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
         }
 
         else
@@ -781,36 +752,36 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
     for (uint32_t numCell = 0; numCell < gnbSector3NetDev.GetN(); ++numCell)
     {
         Ptr<NetDevice> gnb = gnbSector3NetDev.Get(numCell);
-        uint32_t numBwps = nrHelper->GetNumberBwp(gnb);
+        uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
         if (numBwps == 1) // TDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna =
                 DynamicCast<UniformPlanarArray>(phy->GetSpectrumPhy()->GetAntenna());
             antenna->SetAttribute("BearingAngle", DoubleValue(orientationRads));
 
             // Set numerology
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
 
             // Set TX power
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
 
             // Set TDD pattern
             if (uniformPattern || (globalCellId % 2 == 1))
             {
-                nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern1));
+                NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern1));
             }
             else
             {
-                nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern2));
+                NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern2));
             }
 
             // Set max MCS
-            nrHelper->GetScheduler(gnb, 0)->SetAttribute("MaxDlMcs",
+            NrHelper::GetScheduler(gnb, 0)->SetAttribute("MaxDlMcs",
                                                          IntegerValue(maxMcsPerCell[globalCellId]));
-            // nrHelper->GetGnbMac (gnb, 0)->SetAttribute ("MaxDlMcs", UintegerValue (10));  // 27,
+            // NrHelper::GetGnbMac (gnb, 0)->SetAttribute ("MaxDlMcs", UintegerValue (10));  // 27,
             // 19, 10, 4 for mcsT2,
             //  28, 16, 9 for mcsT1
         }
@@ -818,35 +789,32 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
         else if (numBwps == 2) // FDD
         {
             // Change the antenna orientation
-            Ptr<NrGnbPhy> phy0 = nrHelper->GetGnbPhy(gnb, 0);
+            Ptr<NrGnbPhy> phy0 = NrHelper::GetGnbPhy(gnb, 0);
             Ptr<UniformPlanarArray> antenna0 =
                 DynamicCast<UniformPlanarArray>(phy0->GetSpectrumPhy()->GetAntenna());
             antenna0->SetAttribute("BearingAngle", DoubleValue(orientationRads));
-            Ptr<NrGnbPhy> phy1 = nrHelper->GetGnbPhy(gnb, 1);
+            Ptr<NrGnbPhy> phy1 = NrHelper::GetGnbPhy(gnb, 1);
             Ptr<UniformPlanarArray> antenna1 =
                 DynamicCast<UniformPlanarArray>(phy1->GetSpectrumPhy()->GetAntenna());
             antenna1->SetAttribute("BearingAngle", DoubleValue(orientationRads));
 
             // Set numerology
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute("Numerology",
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute("Numerology",
                                                       UintegerValue(ranHelper.GetNumerology()));
 
             // Set TX power
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute("TxPower", DoubleValue(-30.0));
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute("TxPower", DoubleValue(-30.0));
 
             // Set TDD pattern
-            nrHelper->GetGnbPhy(gnb, 0)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 0)->SetAttribute(
                 "Pattern",
                 StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
-            nrHelper->GetGnbPhy(gnb, 1)->SetAttribute(
+            NrHelper::GetGnbPhy(gnb, 1)->SetAttribute(
                 "Pattern",
                 StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
-
-            // Link the two FDD BWP
-            nrHelper->GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
         }
 
         else
@@ -855,34 +823,6 @@ Set5gLenaSimulatorParameters(HexagonalGridScenarioHelper gridScenario,
         }
         globalCellId++;
     }
-
-    // Set the UE routing:
-
-    if (operationMode == "FDD")
-    {
-        for (uint32_t i = 0; i < ueSector1NetDev.GetN(); i++)
-        {
-            nrHelper->GetBwpManagerUe(ueSector1NetDev.Get(i))->SetOutputLink(0, 1);
-        }
-
-        for (uint32_t i = 0; i < ueSector2NetDev.GetN(); i++)
-        {
-            nrHelper->GetBwpManagerUe(ueSector2NetDev.Get(i))->SetOutputLink(0, 1);
-        }
-
-        for (uint32_t i = 0; i < ueSector3NetDev.GetN(); i++)
-        {
-            nrHelper->GetBwpManagerUe(ueSector3NetDev.Get(i))->SetOutputLink(0, 1);
-        }
-    }
-
-    // When all the configuration is done, explicitly call UpdateConfig ()
-    nrHelper->UpdateDeviceConfigs(gnbSector1NetDev);
-    nrHelper->UpdateDeviceConfigs(gnbSector2NetDev);
-    nrHelper->UpdateDeviceConfigs(gnbSector3NetDev);
-    nrHelper->UpdateDeviceConfigs(ueSector1NetDev);
-    nrHelper->UpdateDeviceConfigs(ueSector2NetDev);
-    nrHelper->UpdateDeviceConfigs(ueSector3NetDev);
 }
 
 template <typename T>
@@ -909,7 +849,7 @@ CreateLowLatTft(uint16_t start, uint16_t end, std::string dir)
 }
 
 template Ptr<ns3::EpcTft> CreateLowLatTft<ns3::EpcTft>(uint16_t, uint16_t, std::string);
-template Ptr<ns3::NrEpcTft> CreateLowLatTft<ns3::NrEpcTft>(uint16_t, uint16_t, std::string);
+template Ptr<ns3::NrQosRule> CreateLowLatTft<ns3::NrQosRule>(uint16_t, uint16_t, std::string);
 
 int
 main(int argc, char* argv[])
@@ -1074,7 +1014,6 @@ main(int argc, char* argv[])
     uint32_t ueNum = ueNumPergNb * gNbNum;
     std::cout << "numUEs: " << ueNum << std::endl;
     gridScenario.SetUtNumber(ueNum);
-    gridScenario.AssignStreams(RngSeedManager::GetRun());
     gridScenario.CreateScenario(); //!< Creates and plots the network deployment
     const uint16_t ffr =
         3; // Fractional Frequency Reuse scheme to mitigate intra-site inter-sector interferences
@@ -1184,28 +1123,12 @@ main(int argc, char* argv[])
     // From here, it is standard NS3. In the future, we will create helpers
     // for this part as well.
 
-    // create the internet and install the IP stack on the UEs
-    // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
+    auto remoteHostContainer = NodeContainer(remoteHost);
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
+
     internet.Install(gridScenario.GetUserTerminals());
 
     Ipv4InterfaceContainer ueSector1IpIface =
@@ -1214,16 +1137,6 @@ main(int argc, char* argv[])
         nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueSector2NetDev));
     Ipv4InterfaceContainer ueSector3IpIface =
         nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueSector3NetDev));
-
-    Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress(1);
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < gridScenario.GetUserTerminals().GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(
-            gridScenario.GetUserTerminals().Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to their gNB. Try to attach them per cellId order
     for (uint32_t u = 0; u < ueNum; ++u)
@@ -1337,18 +1250,17 @@ main(int argc, char* argv[])
      * Low-Latency configuration and object creation:
      */
     UdpClientHelper dlClientLowLat;
-    dlClientLowLat.SetAttribute("RemotePort", UintegerValue(dlPortLowLat));
     dlClientLowLat.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientLowLat.SetAttribute("PacketSize", UintegerValue(udpPacketSize));
     // dlClientLowLat.SetAttribute ("Interval", TimeValue (Seconds (1.0/lambda)));
 
     // The bearer that will carry low latency traffic
     EpsBearer lowLatBearer(EpsBearer::NGBR_VIDEO_TCP_DEFAULT);
-    NrEpsBearer nrLowLatBearer(NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT);
+    NrQosFlow nrLowLatFlow(NrQosFlow::NGBR_VIDEO_TCP_DEFAULT);
 
     // The filter for the low-latency traffic
     Ptr<EpcTft> lowLatTft = CreateLowLatTft<EpcTft>(dlPortLowLat, dlPortLowLat, direction);
-    Ptr<NrEpcTft> nrLowLatTft = CreateLowLatTft<NrEpcTft>(dlPortLowLat, dlPortLowLat, direction);
+    Ptr<NrQosRule> nrLowLatTft = CreateLowLatTft<NrQosRule>(dlPortLowLat, dlPortLowLat, direction);
 
     std::vector<uint32_t> lambdaPerCell(gridScenario.GetNumCells());
     if (uniformLambda)
@@ -1458,12 +1370,17 @@ main(int argc, char* argv[])
             // with destination address set to the address of the UE
             if (direction == "DL")
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(remoteHost));
             }
             else
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(remoteHostAddr));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(
+                        addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(ue));
             }
             // Activate a dedicated bearer for the traffic type
@@ -1473,7 +1390,7 @@ main(int argc, char* argv[])
             }
             else if (nrHelper != nullptr)
             {
-                nrHelper->ActivateDedicatedEpsBearer(ueDevice, nrLowLatBearer, nrLowLatTft);
+                nrHelper->ActivateDedicatedQosFlow(ueDevice, nrLowLatFlow, nrLowLatTft);
             }
             else
             {
@@ -1503,12 +1420,17 @@ main(int argc, char* argv[])
             // host, with destination address set to the address of the UE
             if (direction == "DL")
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(remoteHost));
             }
             else
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(remoteHostAddr));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(
+                        addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(ue));
             }
             // Activate a dedicated bearer for the traffic type
@@ -1518,7 +1440,7 @@ main(int argc, char* argv[])
             }
             else if (nrHelper != nullptr)
             {
-                nrHelper->ActivateDedicatedEpsBearer(ueDevice, nrLowLatBearer, nrLowLatTft);
+                nrHelper->ActivateDedicatedQosFlow(ueDevice, nrLowLatFlow, nrLowLatTft);
             }
             else
             {
@@ -1548,12 +1470,17 @@ main(int argc, char* argv[])
             // with destination address set to the address of the UE
             if (direction == "DL")
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(remoteHost));
             }
             else
             {
-                dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(remoteHostAddr));
+                dlClientLowLat.SetAttribute(
+                    "Remote",
+                    AddressValue(
+                        addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, dlPortLowLat)));
                 clientApps.Add(dlClientLowLat.Install(ue));
             }
             // Activate a dedicated bearer for the traffic type
@@ -1563,7 +1490,7 @@ main(int argc, char* argv[])
             }
             else if (nrHelper != nullptr)
             {
-                nrHelper->ActivateDedicatedEpsBearer(ueDevice, nrLowLatBearer, nrLowLatTft);
+                nrHelper->ActivateDedicatedQosFlow(ueDevice, nrLowLatFlow, nrLowLatTft);
             }
             else
             {
@@ -1619,6 +1546,7 @@ main(int argc, char* argv[])
 
     double averageFlowThroughput = 0.0;
     double averageFlowDelay = 0.0;
+    double averageUpt = 0.0; // average user perceived throughput per file transfer
 
     std::ofstream outFile;
     std::string filename = outputDir + "/" + simTag;
@@ -1634,9 +1562,7 @@ main(int argc, char* argv[])
 
     outFile.setf(std::ios_base::fixed);
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;
@@ -1649,37 +1575,61 @@ main(int argc, char* argv[])
         {
             protoStream.str("UDP");
         }
-        // outFile << "Flow " << i->first << " (" << t.sourceAddress << ":" << t.sourcePort << " ->
-        // " << t.destinationAddress << ":" << t.destinationPort << ") proto " << protoStream.str ()
-        // << "\n"; outFile << "  Tx Packets: " << i->second.txPackets << "\n"; outFile << "  Tx
-        // Bytes:   " << i->second.txBytes << "\n"; outFile << "  TxOffered:  " << i->second.txBytes
-        // * 8.0 / ((simTimeMs - udpAppStartTimeMs) / 1000.0) / 1000.0 / 1000.0  << " Mbps\n";
-        // outFile << "  Rx Bytes:   " << i->second.rxBytes << "\n";
+        outFile << "Flow " << i->first << " (" << t.sourceAddress << ":" << t.sourcePort << " ->"
+                << t.destinationAddress << ":" << t.destinationPort << ") proto "
+                << protoStream.str() << "\n";
+        outFile << "  Tx Packets: " << i->second.txPackets << "\n";
+        outFile << "  Tx Bytes : " << i->second.txBytes << "\n ";
+        outFile << "  TxOffered: "
+                << (i->second.txBytes * 8.0 /
+                    (i->second.timeLastTxPacket.GetSeconds() -
+                     i->second.timeFirstTxPacket.GetSeconds())) /
+                       1e6
+                << " Mbps\n";
+        outFile << "  Rx Bytes:   " << i->second.rxBytes << "\n";
         if (i->second.rxPackets > 0)
         {
             // Measure the duration of the flow from receiver's perspective
-            // double rxDuration = i->second.timeLastRxPacket.GetSeconds () -
-            // i->second.timeFirstTxPacket.GetSeconds ();
-            double rxDuration = (simTimeMs - udpAppStartTimeMs) / 1000.0;
+            double rxDuration =
+                i->second.timeLastRxPacket.GetSeconds() - i->second.timeFirstRxPacket.GetSeconds();
+            auto binsCount = i->second.flowInterruptionsHistogram.GetNBins();
+            double rxInterruptions = 0;
+            for (uint32_t bi = 0; bi < binsCount; bi++)
+            {
+                // interruptions threshold to count time between file transferes of the same flow
+                if ((i->second.flowInterruptionsHistogram.GetBinStart(bi)) >= 0.150)
+                {
+                    rxInterruptions += i->second.flowInterruptionsHistogram.GetBinEnd(bi) *
+                                       i->second.flowInterruptionsHistogram.GetBinCount(bi);
+                }
+            }
+            double upt =
+                ((i->second.rxBytes * 8.0) /
+                 (((i->second.timeLastRxPacket - i->second.timeFirstRxPacket).GetSeconds()) -
+                  rxInterruptions)) /
+                1e6;
+            averageUpt += upt;
 
             averageFlowThroughput += i->second.rxBytes * 8.0 / rxDuration / 1000 / 1000;
             averageFlowDelay += 1000 * i->second.delaySum.GetSeconds() / i->second.rxPackets;
             delayValues[cont] = 1000 * i->second.delaySum.GetSeconds() / i->second.rxPackets;
             cont++;
 
-            // outFile << "  Throughput: " << i->second.rxBytes * 8.0 / rxDuration / 1000 / 1000  <<
-            // " Mbps\n"; outFile << "  Mean delay:  " << 1000 * i->second.delaySum.GetSeconds () /
-            // i->second.rxPackets << " ms\n"; outFile << "  Mean upt:  " << i->second.uptSum /
-            // i->second.rxPackets / 1000/1000 << " Mbps \n"; outFile << "  Mean jitter:  " << 1000
-            // * i->second.jitterSum.GetSeconds () / i->second.rxPackets  << " ms\n";
+            outFile << "  Throughput: " << (i->second.rxBytes * 8.0 / rxDuration) / 1e6
+                    << " Mbps\n";
+            outFile << "  Mean delay: "
+                    << 1000 * i->second.delaySum.GetSeconds() / i->second.rxPackets << " ms\n";
+            outFile << "  Mean jitter: "
+                    << 1000 * i->second.jitterSum.GetSeconds() / i->second.rxPackets << " ms\n";
+            outFile << "  Upt: " << upt << " Mbps \n";
         }
         else
         {
-            // outFile << "  Throughput:  0 Mbps\n";
-            // outFile << "  Mean delay:  0 ms\n";
-            // outFile << "  Mean jitter: 0 ms\n";
+            outFile << "  Throughput:  0 Mbps\n";
+            outFile << "  Mean delay:  0 ms\n";
+            outFile << "  Mean jitter: 0 ms\n";
         }
-        // outFile << "  Rx Packets: " << i->second.rxPackets << "\n";
+        outFile << "  Rx Packets: " << i->second.rxPackets << "\n";
     }
     std::stable_sort(delayValues.begin(), delayValues.end());
     // for (uint32_t i = 0; i < stats.size(); i++)
@@ -1692,6 +1642,9 @@ main(int argc, char* argv[])
     outFile << "\n\n  Mean flow throughput: " << averageFlowThroughput / stats.size() << "\n";
     outFile << "  Mean flow delay: " << averageFlowDelay / stats.size() << "\n";
     outFile << "  Median flow delay: " << FiftyTileFlowDelay << "\n";
+    outFile << "  Mean UPT: " << averageUpt / stats.size() << " Mbps\n";
+    outFile << "  Mean delay: " << averageFlowDelay / stats.size() << "\n";
+    outFile << "  Median delay: " << FiftyTileFlowDelay << "\n";
 
     outFile.close();
 

@@ -4,7 +4,7 @@
 
 #include "nr-lte-mi-error-model.h"
 
-#include <ns3/log.h>
+#include "ns3/log.h"
 
 #include <algorithm>
 #include <cmath>
@@ -915,12 +915,6 @@ NrLteMiErrorModel::GetTypeId()
                             .SetParent<NrErrorModel>()
                             .AddConstructor<NrLteMiErrorModel>();
     return tid;
-}
-
-TypeId
-NrLteMiErrorModel::GetInstanceTypeId() const
-{
-    return NrLteMiErrorModel::GetTypeId();
 }
 
 double

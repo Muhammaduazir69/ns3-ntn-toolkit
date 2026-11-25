@@ -5,13 +5,13 @@
  *
  * Author:  Tom Henderson <thomas.r.henderson@boeing.com>
  */
-#include <ns3/log.h>
-#include <ns3/lr-wpan-mac-header.h>
-#include <ns3/lr-wpan-mac-trailer.h>
-#include <ns3/mac16-address.h>
-#include <ns3/mac64-address.h>
-#include <ns3/packet.h>
-#include <ns3/test.h>
+#include "ns3/log.h"
+#include "ns3/lr-wpan-mac-header.h"
+#include "ns3/lr-wpan-mac-trailer.h"
+#include "ns3/mac16-address.h"
+#include "ns3/mac64-address.h"
+#include "ns3/packet.h"
+#include "ns3/test.h"
 
 #include <vector>
 
@@ -21,10 +21,10 @@ using namespace ns3::lrwpan;
 NS_LOG_COMPONENT_DEFINE("lr-wpan-packet-test");
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan header and trailer Test
+ * @brief LrWpan header and trailer Test
  */
 class LrWpanPacketTestCase : public TestCase
 {
@@ -98,10 +98,10 @@ LrWpanPacketTestCase::DoRun()
 }
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan header and trailer TestSuite
+ * @brief LrWpan header and trailer TestSuite
  */
 class LrWpanPacketTestSuite : public TestSuite
 {

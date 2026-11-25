@@ -33,7 +33,7 @@ does not cover those aspects.
 Prerequisites
 *************
 |ns3| has various optional extensions, but the main features just require
-a C++ compiler (g++ or clang++), Python (version 3.8 or above), CMake and
+a C++ compiler (g++ or clang++), Python (version 3.10 or above), CMake and
 a build-system (e.g. make, ninja, Xcode).
 We focus in this chapter only on getting |ns3| up and running on a system
 supported by a recent C++ compiler and Python runtime support.
@@ -60,21 +60,28 @@ Downloading the Latest Release
 
 1) Download the latest release from https://www.nsnam.org/releases/latest
 
-2) Unpack it in a working directory of your choice.
+The latest release is available in two versions, as |ns3| by itself (as
+maintained by the open source project) or an ``allinone`` archive that
+contains |ns3| and additional third-party contributed modules.  Note that
+the main |ns3| release can always be later extended by adding contributing
+modules of your choice
+
+2) Unpack either archive version in a working directory of your choice.
 
    ::
 
-    $ tar xjf ns-allinone-3.43.tar.bz2
+    $ tar xjf ns-3.45.tar.bz2
+
+or
+   ::
+
+    $ tar xjf ns-allinone-3.45.tar.bz2
 
 3) Change into the |ns3| directory directly; e.g.
 
    ::
 
-    $ cd ns-allinone-3.43/ns-3.43
-
-The ns-allinone directory has some additional components but we are skipping
-over them here; one can work directly from the |ns3| source code directory.
-The rest of the tutorial describes the additional components.
+    $ cd ns-3.45
 
 Cloning ns-3 from GitLab.com
 ++++++++++++++++++++++++++++
@@ -92,12 +99,12 @@ only to `cd` into ns-3-dev; the `master` branch is checked out by default.
 
   $ cd ns-3-dev
 
-If instead you want to try the most recent release (version 3.43 as of this
+If instead you want to try the most recent release (version 3.45 as of this
 writing), you can checkout a branch corresponding to that git tag:
 
 ::
 
-  $ git checkout -b ns-3.43-branch ns-3.43
+  $ git checkout -b ns-3.45-branch ns-3.45
 
 Building and testing ns-3
 *************************

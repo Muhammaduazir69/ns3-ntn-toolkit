@@ -7,22 +7,22 @@
  *         Nicola Baldo <nbaldo@cttc.es>
  */
 
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/double.h>
-#include <ns3/enum.h>
-#include <ns3/itu-r-1411-los-propagation-loss-model.h>
-#include <ns3/log.h>
-#include <ns3/string.h>
-#include <ns3/test.h>
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/double.h"
+#include "ns3/enum.h"
+#include "ns3/itu-r-1411-los-propagation-loss-model.h"
+#include "ns3/log.h"
+#include "ns3/string.h"
+#include "ns3/test.h"
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ItuR1411LosPropagationLossModelTest");
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief ItuR1411LosPropagationLossModel Test Case
+ * @brief ItuR1411LosPropagationLossModel Test Case
  *
  */
 class ItuR1411LosPropagationLossModelTestCase : public TestCase
@@ -31,12 +31,12 @@ class ItuR1411LosPropagationLossModelTestCase : public TestCase
     /**
      * Constructor
      *
-     * \param freq carrier frequency in Hz
-     * \param dist 2D distance between UT and BS in meters
-     * \param hb height of BS in meters
-     * \param hm height of UT in meters
-     * \param refValue reference loss value
-     * \param name TestCase name
+     * @param freq carrier frequency in Hz
+     * @param dist 2D distance between UT and BS in meters
+     * @param hb height of BS in meters
+     * @param hm height of UT in meters
+     * @param refValue reference loss value
+     * @param name TestCase name
      */
     ItuR1411LosPropagationLossModelTestCase(double freq,
                                             double dist,
@@ -51,8 +51,8 @@ class ItuR1411LosPropagationLossModelTestCase : public TestCase
 
     /**
      * Create a MobilityModel
-     * \param index mobility model index
-     * \return a new MobilityModel
+     * @param index mobility model index
+     * @return a new MobilityModel
      */
     Ptr<MobilityModel> CreateMobilityModel(uint16_t index);
 
@@ -106,9 +106,9 @@ ItuR1411LosPropagationLossModelTestCase::DoRun()
 }
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief ItuR1411LosPropagationLossModel TestSuite
+ * @brief ItuR1411LosPropagationLossModel TestSuite
  *
  */
 class ItuR1411LosPropagationLossModelTestSuite : public TestSuite

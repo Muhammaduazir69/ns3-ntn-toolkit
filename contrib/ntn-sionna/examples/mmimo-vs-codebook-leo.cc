@@ -20,6 +20,7 @@
  * Output: per-sample table of (t, elevation, PL_siso, PL_mmimo, delta_db,
  * rain_db, gas_db) followed by aggregate min/max/mean of each column.
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -27,6 +28,7 @@
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
+#include "ns3/node-container.h"
 
 #include <iostream>
 #include "ns3/simulator.h"
@@ -40,7 +42,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <numeric>
+#include <string>
 #include <vector>
 
 using namespace ns3;
@@ -225,8 +229,73 @@ main(int argc, char* argv[])
                             Ptr<MobilityModel>(ue),
                             &samples);
     }
+    // Globe scene (ntn-dataset@1): the channel queries take bare mobility models, so
+    // device-less context nodes carry copies of them in the scenario's ENU frame (the LEO's
+    // sub-satellite point at t = 0): the UE at the origin and the SGP4 satellite. The copies
+    // leave the queried models, and so the path losses, untouched.
+    NodeContainer ctxNodes;
+    ctxNodes.Create(2);
+    Ptr<ConstantPositionMobilityModel> ueCtx = CreateObject<ConstantPositionMobilityModel>();
+    ueCtx->SetPosition(ue->GetPosition());
+    ctxNodes.Get(0)->AggregateObject(ueCtx);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satCtxSgp4 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satCtxSgp4->SetElementsSgp4(satElements[0]);
+    Ptr<NtnEnuProjectionMobilityModel> satCtx = CreateObject<NtnEnuProjectionMobilityModel>();
+    satCtx->SetSource(satCtxSgp4);
+    satCtx->SetReference(satSubLat, satSubLon, 0.0);
+    ctxNodes.Get(1)->AggregateObject(satCtx);
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Stop(totalSpan + Seconds(1));
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    // The per-sample table as a dataset and the pass means as metrics, so the
+    // run's results follow its parameters.
+    std::ofstream sampleCsv("mmimo-vs-codebook-leo.csv");
+    sampleCsv << "i,t_s,elevation_deg,pl_siso_db,pl_mimo_db,delta_db,rain_db,gas_db\n";
+    double sumElev = 0.0;
+    double sumSiso = 0.0;
+    double sumMimo = 0.0;
+    double sumRain = 0.0;
+    double sumGas = 0.0;
+    std::vector<double> deltaRecord;
+    for (size_t i = 0; i < samples.size(); ++i)
+    {
+        const auto& s = samples[i];
+        const double d = s.pl_siso - s.pl_mmimo;
+        sampleCsv << (i + 1) << "," << s.t_s << "," << s.elev_deg << "," << s.pl_siso << ","
+                  << s.pl_mmimo << "," << d << "," << s.rain_db << "," << s.gas_db << "\n";
+        sumElev += s.elev_deg;
+        sumSiso += s.pl_siso;
+        sumMimo += s.pl_mmimo;
+        sumRain += s.rain_db;
+        sumGas += s.gas_db;
+        deltaRecord.push_back(d);
+    }
+    sampleCsv.close();
+    const double n = samples.empty() ? 1.0 : static_cast<double>(samples.size());
+    const double deltaMin =
+        deltaRecord.empty() ? 0.0 : *std::min_element(deltaRecord.begin(), deltaRecord.end());
+    const double deltaMax =
+        deltaRecord.empty() ? 0.0 : *std::max_element(deltaRecord.begin(), deltaRecord.end());
+    const double deltaMean =
+        std::accumulate(deltaRecord.begin(), deltaRecord.end(), 0.0) / n;
+    ns3::ntnobs::WriteDatasetRecord(
+        ".",
+        "mmimo-vs-codebook-leo",
+        "analytic",
+        argc,
+        argv,
+        {{"samples", std::to_string(samples.size()), "analytic"},
+         {"mean_elevation_deg", std::to_string(sumElev / n), "analytic"},
+         {"mean_pl_siso_db", std::to_string(sumSiso / n), "analytic"},
+         {"mean_pl_mimo_db", std::to_string(sumMimo / n), "analytic"},
+         {"mean_delta_db", std::to_string(deltaMean), "analytic"},
+         {"min_delta_db", std::to_string(deltaMin), "analytic"},
+         {"max_delta_db", std::to_string(deltaMax), "analytic"},
+         {"mean_rain_db", std::to_string(sumRain / n), "analytic"},
+         {"mean_gas_db", std::to_string(sumGas / n), "analytic"},
+         {"raytrace_live", baseSiso->GetFallbacks() > 0 ? "0" : "1", "analytic"}});
     Simulator::Destroy();
 
     std::printf("# mmimo-vs-codebook-leo: freq=%.3f GHz alt=%.0f km rain=%.1f mm/h "

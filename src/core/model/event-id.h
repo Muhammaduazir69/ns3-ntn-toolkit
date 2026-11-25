@@ -8,15 +8,15 @@
 #ifndef EVENT_ID_H
 #define EVENT_ID_H
 
-#include "deprecated.h"
 #include "event-impl.h"
+#include "nstime.h"
 #include "ptr.h"
 
 #include <stdint.h>
 
 /**
- * \file
- * \ingroup events
+ * @file
+ * @ingroup events
  * ns3::EventId declarations.
  */
 
@@ -26,8 +26,8 @@ namespace ns3
 class EventImpl;
 
 /**
- * \ingroup events
- * \brief An identifier for simulation events.
+ * @ingroup events
+ * @brief An identifier for simulation events.
  *
  * Each EventId identifies a unique event scheduled with one
  * of the many Simulator::Schedule() methods. This EventId can
@@ -64,10 +64,10 @@ class EventId
     /**
      * Construct a real event.
      *
-     * \param [in] impl The implementation of this event.
-     * \param [in] ts The virtual time stamp this event should occur.
-     * \param [in] context The execution context for this event.
-     * \param [in] uid The unique id for this EventId.
+     * @param [in] impl The implementation of this event.
+     * @param [in] ts The virtual time stamp this event should occur.
+     * @param [in] context The execution context for this event.
+     * @param [in] uid The unique id for this EventId.
      */
     EventId(const Ptr<EventImpl>& impl, uint64_t ts, uint32_t context, uint32_t uid);
     /**
@@ -83,62 +83,74 @@ class EventId
     /**
      * This method is syntactic sugar for the ns3::Simulator::IsExpired
      * method.
-     * \returns \c true if the event has expired, \c false otherwise.
+     * @returns \c true if the event has expired, \c false otherwise.
      */
     bool IsExpired() const;
     /**
      * This method is syntactic sugar for !IsExpired().
      *
-     * \returns \c true if the event has not expired, \c false otherwise.
+     * @returns \c true if the event has not expired, \c false otherwise.
      */
     bool IsPending() const;
 
-    /**
-     * This method is syntactic sugar for !IsExpired().
-     *
-     * \returns \c true if the event has not expired, \c false otherwise.
-     */
-    NS_DEPRECATED_3_42("Use IsPending instead")
-    bool IsRunning() const;
-
   public:
     /**
-     * \name Scheduler Helpers.
-     * \brief These methods are normally invoked only by
+     * @name Scheduler Helpers.
+     * @brief These methods are normally invoked only by
      * subclasses of the Scheduler base class.
      */
     /**@{*/
-    /** \return The underlying EventImpl pointer. */
+    /** @return The underlying EventImpl pointer. */
     EventImpl* PeekEventImpl() const;
-    /** \return The virtual time stamp. */
+    /** @return The virtual time stamp. */
     uint64_t GetTs() const;
-    /** \return The event context. */
+    /** @return The event context. */
     uint32_t GetContext() const;
-    /** \return The unique id. */
+    /** @return The unique id. */
     uint32_t GetUid() const;
     /**@}*/
 
     /**
+     * @name Comparison operators
+     * @{
+     */
+
+    /**
      * Test if two EventId's are equal.
-     * \param [in] a The first EventId.
-     * \param [in] b The second EventId.
-     * \return \c true if the \pname{a} and \pname{b} represent the same event.
+     * @param [in] a The first EventId.
+     * @param [in] b The second EventId.
+     * @return \c true if the \pname{a} and \pname{b} represent the same event.
      */
     friend bool operator==(const EventId& a, const EventId& b);
-    /**
-     * Test if two EventId's are not equal.
-     * \param [in] a The first EventId.
-     * \param [in] b The second EventId.
-     * \return \c true if the \pname{a} and \pname{b} are not the same event.
-     */
-    friend bool operator!=(const EventId& a, const EventId& b);
+
     /**
      * Less than operator for two EventId's, based on time stamps.
-     * \param [in] a The first EventId.
-     * \param [in] b The second EventId.
-     * \return \c true if \pname{a} occurs before \pname{b}.
+     * @param [in] a The first EventId.
+     * @param [in] b The second EventId.
+     * @return \c true if \pname{a} occurs before \pname{b}.
      */
     friend bool operator<(const EventId& a, const EventId& b);
+
+    /**
+     * Compare a Time to an EventId.
+     *
+     * This is useful when you have cached a previously scheduled event:
+     *
+     *     m_event = Schedule (...);
+     *
+     * and later you want to know the relationship between that event
+     * and some other Time `when`:
+     *
+     *     if (when < m_event) ...
+     *
+     * @param [in] time The Time operand.
+     * @param [in] event The EventId
+     * @returns \c true if \p time is before (less than) the
+     *          time stamp of the EventId.
+     */
+    friend bool operator<(const Time& time, const EventId& event);
+
+    /**@}*/ // Comparison operators
 
   private:
     Ptr<EventImpl> m_eventImpl; /**< The underlying event implementation. */
@@ -159,17 +171,22 @@ operator==(const EventId& a, const EventId& b)
 }
 
 inline bool
-operator!=(const EventId& a, const EventId& b)
-{
-    return !(a == b);
-}
-
-inline bool
 operator<(const EventId& a, const EventId& b)
 {
     return (a.GetTs() < b.GetTs());
 }
 
+inline bool
+operator<(const Time& time, const EventId& event)
+{
+    // Negative Time is less than any possible EventId, which are all >= 0.
+    if (time.IsStrictlyNegative())
+    {
+        return true;
+    }
+    // Time must be >= 0 so casting to unsigned is safe.
+    return static_cast<uint64_t>(time.GetTimeStep()) < event.GetTs();
+}
 } // namespace ns3
 
 #endif /* EVENT_ID_H */

@@ -29,9 +29,9 @@
 using namespace ns3;
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Queue Disc Test Item
+ * @brief Queue Disc Test Item
  */
 class QueueDiscTestItem : public QueueDiscItem
 {
@@ -39,7 +39,7 @@ class QueueDiscTestItem : public QueueDiscItem
     /**
      * Constructor
      *
-     * \param p the packet stored in this item
+     * @param p the packet stored in this item
      */
     QueueDiscTestItem(Ptr<Packet> p);
     ~QueueDiscTestItem() override;
@@ -74,9 +74,9 @@ QueueDiscTestItem::Mark()
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Traffic Control Flow Control Test Case
+ * @brief Traffic Control Flow Control Test Case
  */
 class TcFlowControlTestCase : public TestCase
 {
@@ -84,9 +84,9 @@ class TcFlowControlTestCase : public TestCase
     /**
      * Constructor
      *
-     * \param tt the test type
-     * \param deviceQueueLength the queue length of the device
-     * \param totalTxPackets the total number of packets to transmit
+     * @param tt the test type
+     * @param deviceQueueLength the queue length of the device
+     * @param totalTxPackets the total number of packets to transmit
      */
     TcFlowControlTestCase(QueueSizeUnit tt, uint32_t deviceQueueLength, uint32_t totalTxPackets);
     ~TcFlowControlTestCase() override;
@@ -95,29 +95,29 @@ class TcFlowControlTestCase : public TestCase
     void DoRun() override;
     /**
      * Instruct a node to send a specified number of packets
-     * \param n the node
-     * \param nPackets the number of packets to send
+     * @param n the node
+     * @param nPackets the number of packets to send
      */
     void SendPackets(Ptr<Node> n, uint16_t nPackets);
     /**
      * Check if the device queue stores the expected number of packets
-     * \param dev the device
-     * \param nPackets the expected number of packets stored in the device queue
-     * \param msg the message to print if a different number of packets are stored
+     * @param dev the device
+     * @param nPackets the expected number of packets stored in the device queue
+     * @param msg the message to print if a different number of packets are stored
      */
     void CheckPacketsInDeviceQueue(Ptr<NetDevice> dev, uint16_t nPackets, const std::string msg);
     /**
      * Check if the device queue is in the expected status (stopped or not)
-     * \param dev the device
-     * \param value the expected status of the queue (true means stopped)
-     * \param msg the message to print if the status of the device queue is different
+     * @param dev the device
+     * @param value the expected status of the queue (true means stopped)
+     * @param msg the message to print if the status of the device queue is different
      */
     void CheckDeviceQueueStopped(Ptr<NetDevice> dev, bool value, const std::string msg);
     /**
      * Check if the queue disc stores the expected number of packets
-     * \param dev the device the queue disc is installed on
-     * \param nPackets the expected number of packets stored in the queue disc
-     * \param msg the message to print if a different number of packets are stored
+     * @param dev the device the queue disc is installed on
+     * @param nPackets the expected number of packets stored in the queue disc
+     * @param msg the message to print if a different number of packets are stored
      */
     void CheckPacketsInQueueDisc(Ptr<NetDevice> dev, uint16_t nPackets, const std::string msg);
     QueueSizeUnit m_type;         //!< the test type
@@ -209,7 +209,7 @@ TcFlowControlTestCase::DoRun()
     tch.Install(txDev);
 
     // transmit 10 packets at time 0
-    Simulator::Schedule(Time(Seconds(0)),
+    Simulator::Schedule(Seconds(0),
                         &TcFlowControlTestCase::SendPackets,
                         this,
                         n.Get(0),
@@ -246,7 +246,7 @@ TcFlowControlTestCase::DoRun()
             qdiscPackets = std::max(m_totalTxPackets - txPackets - deviceQueuePackets, (uint32_t)0);
             if (deviceQueuePackets == m_deviceQueueLength)
             {
-                Simulator::Schedule(Time(MilliSeconds(checkTimeMs)),
+                Simulator::Schedule(MilliSeconds(checkTimeMs),
                                     &TcFlowControlTestCase::CheckDeviceQueueStopped,
                                     this,
                                     txDev,
@@ -256,7 +256,7 @@ TcFlowControlTestCase::DoRun()
             }
             else
             {
-                Simulator::Schedule(Time(MilliSeconds(checkTimeMs)),
+                Simulator::Schedule(MilliSeconds(checkTimeMs),
                                     &TcFlowControlTestCase::CheckDeviceQueueStopped,
                                     this,
                                     txDev,
@@ -265,7 +265,7 @@ TcFlowControlTestCase::DoRun()
                                         std::to_string(checkTimeMs) + "ms");
             }
 
-            Simulator::Schedule(Time(MilliSeconds(checkTimeMs)),
+            Simulator::Schedule(MilliSeconds(checkTimeMs),
                                 &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                                 this,
                                 txDev,
@@ -274,7 +274,7 @@ TcFlowControlTestCase::DoRun()
                                     " packets in the device after " + std::to_string(checkTimeMs) +
                                     "ms");
 
-            Simulator::Schedule(Time(MilliSeconds(checkTimeMs)),
+            Simulator::Schedule(MilliSeconds(checkTimeMs),
                                 &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                                 this,
                                 txDev,
@@ -295,19 +295,19 @@ TcFlowControlTestCase::DoRun()
 
         // The transmission of each packet takes 1000B/1Mbps = 8ms
         // After 1ms, we have 3 packets in the device queue (stopped) and 6 in the queue disc
-        Simulator::Schedule(Time(MilliSeconds(1)),
+        Simulator::Schedule(MilliSeconds(1),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             3,
                             "There must be 3 packets in the device queue after 1ms");
-        Simulator::Schedule(Time(MilliSeconds(1)),
+        Simulator::Schedule(MilliSeconds(1),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             true,
                             "The device queue must be stopped after 1ms");
-        Simulator::Schedule(Time(MilliSeconds(1)),
+        Simulator::Schedule(MilliSeconds(1),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -315,19 +315,19 @@ TcFlowControlTestCase::DoRun()
                             "There must be 6 packets in the queue disc after 1ms");
 
         // After 9ms, we have 3 packets in the device queue (stopped) and 5 in the queue disc
-        Simulator::Schedule(Time(MilliSeconds(9)),
+        Simulator::Schedule(MilliSeconds(9),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             3,
                             "There must be 3 packets in the device queue after 9ms");
-        Simulator::Schedule(Time(MilliSeconds(9)),
+        Simulator::Schedule(MilliSeconds(9),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             true,
                             "The device queue must be stopped after 9ms");
-        Simulator::Schedule(Time(MilliSeconds(9)),
+        Simulator::Schedule(MilliSeconds(9),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -335,19 +335,19 @@ TcFlowControlTestCase::DoRun()
                             "There must be 5 packets in the queue disc after 9ms");
 
         // After 17ms, we have 3 packets in the device queue (stopped) and 4 in the queue disc
-        Simulator::Schedule(Time(MilliSeconds(17)),
+        Simulator::Schedule(MilliSeconds(17),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             3,
                             "There must be 3 packets in the device queue after 17ms");
-        Simulator::Schedule(Time(MilliSeconds(17)),
+        Simulator::Schedule(MilliSeconds(17),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             true,
                             "The device queue must be stopped after 17ms");
-        Simulator::Schedule(Time(MilliSeconds(17)),
+        Simulator::Schedule(MilliSeconds(17),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -355,19 +355,19 @@ TcFlowControlTestCase::DoRun()
                             "There must be 4 packets in the queue disc after 17ms");
 
         // After 25ms, we have 3 packets in the device queue (stopped) and 3 in the queue disc
-        Simulator::Schedule(Time(MilliSeconds(25)),
+        Simulator::Schedule(MilliSeconds(25),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             3,
                             "There must be 3 packets in the device queue after 25ms");
-        Simulator::Schedule(Time(MilliSeconds(25)),
+        Simulator::Schedule(MilliSeconds(25),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             true,
                             "The device queue must be stopped after 25ms");
-        Simulator::Schedule(Time(MilliSeconds(25)),
+        Simulator::Schedule(MilliSeconds(25),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -375,19 +375,19 @@ TcFlowControlTestCase::DoRun()
                             "There must be 3 packets in the queue disc after 25ms");
 
         // After 33ms, we have 3 packets in the device queue (stopped) and 2 in the queue disc
-        Simulator::Schedule(Time(MilliSeconds(33)),
+        Simulator::Schedule(MilliSeconds(33),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             3,
                             "There must be 3 packets in the device queue after 33ms");
-        Simulator::Schedule(Time(MilliSeconds(33)),
+        Simulator::Schedule(MilliSeconds(33),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             true,
                             "The device queue must be stopped after 33ms");
-        Simulator::Schedule(Time(MilliSeconds(33)),
+        Simulator::Schedule(MilliSeconds(33),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -395,19 +395,19 @@ TcFlowControlTestCase::DoRun()
                             "There must be 2 packets in the queue disc after 33ms");
 
         // After 41ms, we have 3 packets in the device queue (stopped) and 1 in the queue disc
-        Simulator::Schedule(Time(MilliSeconds(41)),
+        Simulator::Schedule(MilliSeconds(41),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             3,
                             "There must be 3 packets in the device queue after 41ms");
-        Simulator::Schedule(Time(MilliSeconds(41)),
+        Simulator::Schedule(MilliSeconds(41),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             true,
                             "The device queue must be stopped after 41ms");
-        Simulator::Schedule(Time(MilliSeconds(41)),
+        Simulator::Schedule(MilliSeconds(41),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -415,19 +415,19 @@ TcFlowControlTestCase::DoRun()
                             "There must be 1 packet in the queue disc after 41ms");
 
         // After 49ms, we have 3 packets in the device queue (stopped) and the queue disc is empty
-        Simulator::Schedule(Time(MilliSeconds(49)),
+        Simulator::Schedule(MilliSeconds(49),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             3,
                             "There must be 3 packets in the device queue after 49ms");
-        Simulator::Schedule(Time(MilliSeconds(49)),
+        Simulator::Schedule(MilliSeconds(49),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             true,
                             "The device queue must be stopped after 49ms");
-        Simulator::Schedule(Time(MilliSeconds(49)),
+        Simulator::Schedule(MilliSeconds(49),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -436,19 +436,19 @@ TcFlowControlTestCase::DoRun()
 
         // After 57ms, we have 2 packets in the device queue (not stopped) and the queue disc is
         // empty
-        Simulator::Schedule(Time(MilliSeconds(57)),
+        Simulator::Schedule(MilliSeconds(57),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             2,
                             "There must be 2 packets in the device queue after 57ms");
-        Simulator::Schedule(Time(MilliSeconds(57)),
+        Simulator::Schedule(MilliSeconds(57),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             false,
                             "The device queue must not be stopped after 57ms");
-        Simulator::Schedule(Time(MilliSeconds(57)),
+        Simulator::Schedule(MilliSeconds(57),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -457,19 +457,19 @@ TcFlowControlTestCase::DoRun()
 
         // After 81ms, all packets must have been transmitted (the device queue and the queue disc
         // are empty)
-        Simulator::Schedule(Time(MilliSeconds(81)),
+        Simulator::Schedule(MilliSeconds(81),
                             &TcFlowControlTestCase::CheckPacketsInDeviceQueue,
                             this,
                             txDev,
                             0,
                             "The device queue must be empty after 81ms");
-        Simulator::Schedule(Time(MilliSeconds(81)),
+        Simulator::Schedule(MilliSeconds(81),
                             &TcFlowControlTestCase::CheckDeviceQueueStopped,
                             this,
                             txDev,
                             false,
                             "The device queue must not be stopped after 81ms");
-        Simulator::Schedule(Time(MilliSeconds(81)),
+        Simulator::Schedule(MilliSeconds(81),
                             &TcFlowControlTestCase::CheckPacketsInQueueDisc,
                             this,
                             txDev,
@@ -482,9 +482,9 @@ TcFlowControlTestCase::DoRun()
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Traffic Control Flow Control Test Suite
+ * @brief Traffic Control Flow Control Test Suite
  */
 static class TcFlowControlTestSuite : public TestSuite
 {

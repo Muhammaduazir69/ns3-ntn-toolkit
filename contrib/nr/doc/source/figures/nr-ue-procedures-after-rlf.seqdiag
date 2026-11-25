@@ -1,0 +1,25 @@
+
+diagram {
+
+         NrEpcUeNas; NrUeRrc; "NrUeMac (all MACs)"; "NrUePhy (All Phys)"; NrUeComponentCarrierManager; NrGnbRrc;
+
+         NrUeRrc ->> NrUeRrc [label="SwitchToState (CONNECTED_PHY_PROBLEM)"];
+         NrEpcUeNas <<- NrUeRrc [label="NotifyConnectionReleased ()"];
+         NrUeRrc ->> NrGnbRrc [label="SendIdealUeContext\nRemoveRequest(rnti)"];
+         NrEpcUeNas ->> NrEpcUeNas [label="Disconnect ()"];
+         NrEpcUeNas ->> NrEpcUeNas [label="SwitchToState (OFF)"];
+         NrEpcUeNas ->> NrUeRrc [label="Disconnect ()"];
+         NrUeRrc ->> NrUeRrc [label="LeaveConnectedMode ()"];
+         NrUeRrc ->> NrUeRrc [label="VarMeasReportListClear (measId)"];
+         NrUeRrc ->> NrUeRrc [label="CancelEnteringTrigger (measId, cellId)"];
+         NrUeRrc ->> NrUeComponentCarrierManager [label="Reset ()"];
+         NrUeRrc ->> "NrUeMac (all MACs)" [label="Reset ()"];
+         NrUeRrc ->> "NrUePhy (All Phys)" [label="Reset ()"];
+         NrUeRrc ->> NrUeRrc [label="SwitchToState (IDLE_START)"];
+         NrUeRrc ->> NrUeRrc [label="DoStartCellSelection (dlEarfcn)"];
+         NrUeRrc ->> "NrUePhy (All Phys)" [label="Only primary carrier PHY\nStartCellSearch (dlEarfcn)"];
+         NrUeRrc ->> NrUeRrc [label="SwitchToState (IDLE_CELL_SEARCH)"];
+         NrUeRrc ->> NrUeRrc [label="StorePrevious\nCellId (cellId)"];
+         NrUeRrc ->> NrUeRrc [label="DoSetTemporaryCellRnti (0)"];
+}
+

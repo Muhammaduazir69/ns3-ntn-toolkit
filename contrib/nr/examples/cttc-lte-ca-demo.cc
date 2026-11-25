@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /**
- * \ingroup examples
- * \file cttc-lte-ca-demo.cc
- * \brief Example for setting LTE CA scenario
+ * @ingroup examples
+ * @file cttc-lte-ca-demo.cc
+ * @brief Example for setting LTE CA scenario
  *
  * This example describes how to setup a simulation using the 3GPP channel model
  * from TR 38.901. This example consists of 1 gNb and 1 UE. Have a look at the
@@ -79,7 +79,6 @@ main(int argc, char* argv[])
     std::string operationMode = "TDD"; // TDD or FDD (mixed TDD and FDD mode)
 
     bool cellScan = false;
-    double beamSearchAngleStep = 10.0;
 
     uint32_t udpPacketSizeUll = 915;
     uint32_t udpPacketSizeBe = 915;
@@ -134,9 +133,6 @@ main(int argc, char* argv[])
                  "Use beam search method to determine beamforming vector,"
                  "true to use cell scanning method",
                  cellScan);
-    cmd.AddValue("beamSearchAngleStep",
-                 "Beam search angle step for beam search method",
-                 beamSearchAngleStep);
     cmd.AddValue("packetSizeUll",
                  "packet size in bytes to be used by ultra low latency traffic",
                  udpPacketSizeUll);
@@ -251,18 +247,13 @@ main(int argc, char* argv[])
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
-
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
-
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     nrEpcHelper->SetAttribute("S1uLinkDelay", TimeValue(MilliSeconds(0)));
     if (cellScan)
     {
         idealBeamformingHelper->SetAttribute("BeamformingMethod",
                                              TypeIdValue(CellScanBeamforming::GetTypeId()));
-        idealBeamformingHelper->SetBeamformingAlgorithmAttribute("BeamSearchAngleStep",
-                                                                 DoubleValue(beamSearchAngleStep));
     }
     else
     {
@@ -289,13 +280,14 @@ main(int argc, char* argv[])
         "AmcModel",
         EnumValue(NrAmc::ErrorModel)); // NrAmc::ShannonModel or NrAmc::ErrorModel
 
+    nrHelper->SetAttribute("RbOverhead", DoubleValue(0.1));
     /*
      * Adjust the average number of Reference symbols per RB only for LTE case,
      * which is larger than in NR. We assume a value of 4 (could be 3 too).
      */
     nrHelper->SetGnbDlAmcAttribute("NumRefScPerRb", UintegerValue(2));
     nrHelper->SetGnbUlAmcAttribute("NumRefScPerRb", UintegerValue(2));
-    nrHelper->SetGnbMacAttribute("NumRbPerRbg", UintegerValue(4));
+    nrHelper->SetAttribute("NumRbPerRbg", UintegerValue(4));
     nrHelper->SetSchedulerAttribute("DlCtrlSymbols", UintegerValue(1));
     nrHelper->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerOfdmaPF"));
 
@@ -430,15 +422,15 @@ main(int argc, char* argv[])
         bwpul->m_centralFrequency = bwpul->m_lowerFrequency + bwpul->m_channelBandwidth / 2;
 
         cc2->AddBwp(std::move(bwpul));
-        Config::SetDefault("ns3::NrUeNetDevice::PrimaryUlIndex", UintegerValue(1));
     }
 
     band38.AddCc(std::move(cc1));
     band38.AddCc(std::move(cc2));
-
-    nrHelper->InitializeOperationBand(&band40);
-    nrHelper->InitializeOperationBand(&band38);
-
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // use the default spectrum channel {RMa, Default, ThreeGpp}
+    channelHelper->ConfigureFactories("RMa", "Default", "ThreeGpp");
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    channelHelper->AssignChannelsToBands({band40, band38});
     allBwps = CcBwpCreator::GetAllBwps({band38, band40});
 
     // Antennas for all the UEs
@@ -467,133 +459,79 @@ main(int argc, char* argv[])
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_VOICE_VIDEO_GAMING",
                                                  UintegerValue(bwpIdForVideoGaming));
 
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdForLowLat));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForVoice));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_VIDEO_TCP_PREMIUM",
-                                                UintegerValue(bwpIdForVideo));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_VOICE_VIDEO_GAMING",
-                                                UintegerValue(bwpIdForVideoGaming));
-
     // install nr net devices
     NetDeviceContainer gnbNetDev = nrHelper->InstallGnbDevice(gNbNodes, allBwps);
     NetDeviceContainer ueNetDev = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+    nrHelper->AssignStreams({.gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     // Share the total transmission power among CCs proportionally with the BW
     double x = pow(10, totalTxPower / 10);
     double totalBandwidth = numCcs * bandwidth;
 
     // Band40: CC0 - BWP0 & Band38: CC1 - BWP1
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("Numerology", UintegerValue(numerologyBwp0));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute(
             "TxPower",
             DoubleValue(10 *
                         log10((band40.GetBwpAt(0, 0)->m_channelBandwidth / totalBandwidth) * x)));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Pattern", StringValue(pattern));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("RbOverhead", DoubleValue(0.1));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Pattern", StringValue(pattern));
 
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
         ->SetAttribute("Numerology", UintegerValue(numerologyBwp1));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
         ->SetAttribute(
             "TxPower",
             DoubleValue(10 *
                         log10((band38.GetBwpAt(0, 0)->m_channelBandwidth / totalBandwidth) * x)));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("Pattern", StringValue(pattern));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("RbOverhead", DoubleValue(0.1));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("Pattern", StringValue(pattern));
 
     // Band38: CC2 - BWP2
     if (operationMode == "TDD")
     {
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
             ->SetAttribute("Numerology", UintegerValue(numerologyBwp2));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
             ->SetAttribute(
                 "TxPower",
                 DoubleValue(
                     10 * log10((band38.GetBwpAt(1, 0)->m_channelBandwidth / totalBandwidth) * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Pattern", StringValue(pattern));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("RbOverhead", DoubleValue(0.1));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Pattern", StringValue(pattern));
     }
     else // FDD case
     {
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
             ->SetAttribute("Numerology", UintegerValue(numerologyBwpDl));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
             ->SetAttribute(
                 "TxPower",
                 DoubleValue(
                     10 * log10((band38.GetBwpAt(1, 0)->m_channelBandwidth / totalBandwidth) * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Pattern", StringValue(patternDL));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("RbOverhead", DoubleValue(0.1));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Pattern", StringValue(patternDL));
 
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 3)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 3)
             ->SetAttribute("Numerology", UintegerValue(numerologyBwpUl));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 3)->SetAttribute("Pattern", StringValue(patternUL));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 3)->SetAttribute("RbOverhead", DoubleValue(0.1));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 3)->SetAttribute("Pattern", StringValue(patternUL));
 
         // Link the two FDD BWP:
-        nrHelper->GetBwpManagerGnb(gnbNetDev.Get(0))->SetOutputLink(3, 2);
-
-        // Set the UE routing:
-        for (uint32_t i = 0; i < ueNetDev.GetN(); i++)
-        {
-            nrHelper->GetBwpManagerUe(ueNetDev.Get(i))->SetOutputLink(2, 3);
-        }
+        NrHelper::GetBwpManagerGnb(gnbNetDev.Get(0))->SetOutputLink(3, 2);
 
         // enable 4rth flow
         enableGaming = true;
     }
 
-    // When all the configuration is done, explicitly call UpdateConfig ()
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
+
     internet.Install(ueNodes);
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ueNetDev, gnbNetDev);
@@ -626,72 +564,68 @@ main(int argc, char* argv[])
      * Low-Latency configuration and object creation:
      */
     UdpClientHelper dlClientLowLat;
-    dlClientLowLat.SetAttribute("RemotePort", UintegerValue(dlPortLowLat));
     dlClientLowLat.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientLowLat.SetAttribute("PacketSize", UintegerValue(udpPacketSizeBe));
     dlClientLowLat.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaBe)));
 
-    // The bearer that will carry low latency traffic
-    NrEpsBearer lowLatBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    // The flow that will carry low latency traffic
+    NrQosFlow lowLatBearer(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
     // The filter for the low-latency traffic
-    Ptr<NrEpcTft> lowLatTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfLowLat;
+    Ptr<NrQosRule> lowLatTft = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfLowLat;
     dlpfLowLat.localPortStart = dlPortLowLat;
     dlpfLowLat.localPortEnd = dlPortLowLat;
     lowLatTft->Add(dlpfLowLat);
 
     // Voice configuration and object creation:
     UdpClientHelper ulClientVoice;
-    ulClientVoice.SetAttribute("RemotePort", UintegerValue(ulPortVoice));
     ulClientVoice.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     ulClientVoice.SetAttribute("PacketSize", UintegerValue(udpPacketSizeBe));
     ulClientVoice.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaBe)));
 
-    // The bearer that will carry voice traffic
-    NrEpsBearer voiceBearer(NrEpsBearer::GBR_CONV_VOICE);
+    // The flow that will carry voice traffic
+    NrQosFlow voiceFlow(NrQosFlow::GBR_CONV_VOICE);
 
     // The filter for the voice traffic
-    Ptr<NrEpcTft> voiceTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter ulpfVoice;
+    Ptr<NrQosRule> voiceTft = Create<NrQosRule>();
+    NrQosRule::PacketFilter ulpfVoice;
     ulpfVoice.localPortStart = ulPortVoice;
     ulpfVoice.localPortEnd = ulPortVoice;
-    ulpfVoice.direction = NrEpcTft::UPLINK;
+    ulpfVoice.direction = NrQosRule::UPLINK;
     voiceTft->Add(ulpfVoice);
 
     // Video configuration and object creation:
     UdpClientHelper dlClientVideo;
-    dlClientVideo.SetAttribute("RemotePort", UintegerValue(dlPortVideo));
     dlClientVideo.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientVideo.SetAttribute("PacketSize", UintegerValue(udpPacketSizeUll));
     dlClientVideo.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaUll)));
 
-    // The bearer that will carry video traffic
-    NrEpsBearer videoBearer(NrEpsBearer::NGBR_VIDEO_TCP_PREMIUM);
+    // The flow that will carry video traffic
+    NrQosFlow videoFlow(NrQosFlow::NGBR_VIDEO_TCP_PREMIUM);
 
     // The filter for the video traffic
-    Ptr<NrEpcTft> videoTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfVideo;
+    Ptr<NrQosRule> videoTft = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfVideo;
     dlpfVideo.localPortStart = dlPortVideo;
     dlpfVideo.localPortEnd = dlPortVideo;
     videoTft->Add(dlpfVideo);
 
     // Gaming configuration and object creation:
     UdpClientHelper ulClientGaming;
-    ulClientGaming.SetAttribute("RemotePort", UintegerValue(ulPortGaming));
     ulClientGaming.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     ulClientGaming.SetAttribute("PacketSize", UintegerValue(udpPacketSizeUll));
     ulClientGaming.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaUll)));
 
-    // The bearer that will carry gaming traffic
-    NrEpsBearer gamingBearer(NrEpsBearer::NGBR_VOICE_VIDEO_GAMING);
+    // The flow that will carry gaming traffic
+    NrQosFlow gamingFlow(NrQosFlow::NGBR_VOICE_VIDEO_GAMING);
 
     // The filter for the gaming traffic
-    Ptr<NrEpcTft> gamingTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter ulpfGaming;
+    Ptr<NrQosRule> gamingTft = Create<NrQosRule>();
+    NrQosRule::PacketFilter ulpfGaming;
     ulpfGaming.remotePortStart = ulPortGaming;
     ulpfGaming.remotePortEnd = ulPortGaming;
-    ulpfGaming.direction = NrEpcTft::UPLINK;
+    ulpfGaming.direction = NrQosRule::UPLINK;
     gamingTft->Add(ulpfGaming);
 
     //  Install the applications
@@ -707,17 +641,21 @@ main(int argc, char* argv[])
         // with destination address set to the address of the UE
         if (enableLowLat)
         {
-            dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+            dlClientLowLat.SetAttribute(
+                "Remote",
+                AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
             clientApps.Add(dlClientLowLat.Install(remoteHost));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, lowLatBearer, lowLatTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, lowLatBearer, lowLatTft);
         }
         if (enableVideo)
         {
-            dlClientVideo.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+            dlClientVideo.SetAttribute(
+                "Remote",
+                AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortVideo)));
             clientApps.Add(dlClientVideo.Install(remoteHost));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, videoBearer, videoTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, videoFlow, videoTft);
         }
 
         // For the uplink, the installation happens in the UE, and the remote address
@@ -725,20 +663,24 @@ main(int argc, char* argv[])
 
         if (enableVoice)
         {
-            ulClientVoice.SetAttribute("RemoteAddress",
-                                       AddressValue(internetIpIfaces.GetAddress(1)));
+            ulClientVoice.SetAttribute(
+                "Remote",
+                AddressValue(
+                    addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, ulPortVoice)));
             clientApps.Add(ulClientVoice.Install(ue));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, voiceBearer, voiceTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, voiceFlow, voiceTft);
         }
 
         if (enableGaming)
         {
-            ulClientGaming.SetAttribute("RemoteAddress",
-                                        AddressValue(internetIpIfaces.GetAddress(1)));
+            ulClientGaming.SetAttribute(
+                "Remote",
+                AddressValue(
+                    addressUtils::ConvertToSocketAddress(remoteHostIpv4Address, ulPortGaming)));
             clientApps.Add(ulClientGaming.Install(ue));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, gamingBearer, gamingTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, gamingFlow, gamingTft);
         }
     }
 
@@ -791,9 +733,7 @@ main(int argc, char* argv[])
 
     outFile.setf(std::ios_base::fixed);
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;
@@ -840,11 +780,16 @@ main(int argc, char* argv[])
             outFile << "  Mean jitter: 0 ms\n";
         }
         outFile << "  Rx Packets: " << i->second.rxPackets << "\n";
+        NS_ABORT_MSG_IF(i->second.txPackets > 0 && i->second.rxPackets == 0,
+                        "flow " << i->first << " transmitted " << i->second.txPackets
+                                << " packets but received none");
     }
 
     outFile << "\n\n  Aggregated throughput: " << averageFlowThroughput << "\n";
     outFile << "  Mean flow throughput: " << averageFlowThroughput / stats.size() << "\n";
     outFile << "  Mean flow delay: " << averageFlowDelay / stats.size() << "\n";
+
+    NS_ABORT_MSG_IF(averageFlowThroughput == 0.0, "no flow received any packet");
 
     outFile.close();
 

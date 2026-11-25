@@ -14,6 +14,8 @@
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
+
+#include <ctime>
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-timing-advance.h"
@@ -268,6 +270,19 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
     rs.Collect();
+    // ntn-dataset@1: this example drives the SNS3 SGP4 model, which the helper cannot read,
+    // so it declares the element set it loaded (epoch and catalog number from line 1).
+    {
+        const int yy = std::stoi(tle.line1.substr(18, 2));
+        const double doy = std::stod(tle.line1.substr(20, 12));
+        std::tm tm0{};
+        tm0.tm_year = (yy < 57 ? 2000 + yy : 1900 + yy) - 1900;
+        tm0.tm_mday = 1;
+        const std::time_t t = timegm(&tm0) + static_cast<std::time_t>((doy - 1.0) * 86400.0);
+        char iso[32];
+        std::strftime(iso, sizeof iso, "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&t));
+        rs.SetTleProvenance(iso, {static_cast<uint32_t>(std::stoul(tle.line1.substr(2, 5)))});
+    }
     rs.WriteHealthReport();
     csv.close();
 

@@ -6,8 +6,8 @@
  */
 
 /**
- * \file
- * \ingroup mpi
+ * @file
+ * @ingroup mpi
  *  Implementation of classes  ns3::LbtsMessage and ns3::DistributedSimulatorImpl.
  */
 
@@ -262,7 +262,7 @@ DistributedSimulatorImpl::CalculateLookAhead()
 void
 DistributedSimulatorImpl::BoundLookAhead(const Time lookAhead)
 {
-    if (lookAhead > Time(0))
+    if (lookAhead.IsStrictlyPositive())
     {
         NS_LOG_FUNCTION(this << lookAhead);
         m_lookAhead = Min(m_lookAhead, lookAhead);
@@ -605,7 +605,7 @@ DistributedSimulatorImpl::IsExpired(const EventId& id) const
 Time
 DistributedSimulatorImpl::GetMaximumSimulationTime() const
 {
-    /// \todo I am fairly certain other compilers use other non-standard
+    /// @todo I am fairly certain other compilers use other non-standard
     /// post-fixes to indicate 64 bit constants.
     return TimeStep(0x7fffffffffffffffLL);
 }

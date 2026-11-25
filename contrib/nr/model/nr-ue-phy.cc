@@ -18,21 +18,17 @@
 #include "nr-ue-net-device.h"
 #include "nr-ue-power-control.h"
 
-#include <ns3/boolean.h>
-#include <ns3/double.h>
-#include <ns3/enum.h>
-#include <ns3/global-value.h>
-#include <ns3/log.h>
-#include <ns3/node.h>
-#include <ns3/pointer.h>
-#include <ns3/simulator.h>
-#include <ns3/uinteger.h>
+#include "ns3/boolean.h"
+#include "ns3/double.h"
+#include "ns3/enum.h"
+#include "ns3/log.h"
+#include "ns3/node.h"
+#include "ns3/pointer.h"
+#include "ns3/simulator.h"
+#include "ns3/uinteger.h"
 
 #include <algorithm>
 #include <cfloat>
-#include <cmath>
-#include <iterator>
-#include <limits>
 
 namespace ns3
 {
@@ -42,24 +38,6 @@ const Time NR_DEFAULT_PMI_INTERVAL_SB{MilliSeconds(2)};  // Subband PMI update i
 
 NS_LOG_COMPONENT_DEFINE("NrUePhy");
 NS_OBJECT_ENSURE_REGISTERED(NrUePhy);
-
-// ntn-patch 08: opt-in SS-RSRQ (TS 38.215 5.1.3), RSRQ = N x RSRP / RSSI with
-// RSSI = sum over all measured co-channel cells of their PSS power over the N
-// RBs (12 N REs each, synchronous cells transmitting on the measured symbols)
-// plus thermal noise k T0 F B. Off by default: the vendored stack reports 0.
-// ntn-patch 09: TS 38.215 5.1.1 defines SS-RSRP as the LINEAR average of the
-// power contributions; the vendored stack averages dB values, so one near-zero
-// sample (a beam null) drags the 200 ms L1 result down by hundreds of dB.
-static GlobalValue g_nrUeRsrpLinearAverage("NrUeRsrpLinearAverage",
-                                           "Average L1 RSRP samples in mW (TS 38.215 5.1.1) "
-                                           "instead of in dB",
-                                           BooleanValue(false),
-                                           MakeBooleanChecker());
-static GlobalValue g_nrUeRsrqFromRssi("NrUeRsrqFromRssi",
-                                      "Compute RSRQ from the measured RSRPs and noise "
-                                      "(TS 38.215 5.1.3) instead of reporting 0 dB",
-                                      BooleanValue(false),
-                                      MakeBooleanChecker());
 
 NrUePhy::NrUePhy()
 {
@@ -166,8 +144,28 @@ NrUePhy::GetTypeId()
                           TimeValue(NR_DEFAULT_PMI_INTERVAL_SB),
                           MakeTimeAccessor(&NrUePhy::m_sbPmiUpdateInterval),
                           MakeTimeChecker())
+            .AddAttribute("AlphaCovMat",
+                          "The alpha parameter for the calculation of the interference covariance "
+                          "matrix moving average",
+                          DoubleValue(1),
+                          MakeDoubleAccessor(&NrUePhy::SetAlphaCovMat, &NrUePhy::GetAlphaCovMat),
+                          MakeDoubleChecker<double>(0.0, 1))
+            .AddAttribute(
+                "CsiImDuration",
+                "CSI-IM duration in the number of OFDM symbols",
+                UintegerValue(1),
+                MakeUintegerAccessor(&NrUePhy::SetCsiImDuration, &NrUePhy::GetCsiImDuration),
+                MakeUintegerChecker<uint8_t>(1, 12))
+            // The reported value is NrUePhy::ComputeAvgSinr(): a linear SINR (apply 10*log10() for
+            // dB) averaged over the RBs of the received PDSCH. Fired only in SISO CQI feedback
+            // configurations (CsiFeedbackFlags = CQI_PDSCH_SISO, or a channel without a
+            // phased-array loss model): the value is the per-RB C/(I+N) computed by NrInterference
+            // (noise included), emitted at the end of each PDSCH data reception, and feeds the SISO
+            // wideband CQI. MIMO CSI feedback configurations do not fire this trace; see
+            // CqiFeedbackTrace.
             .AddTraceSource("DlDataSinr",
-                            "DL DATA SINR statistics.",
+                            "Effective DL data SINR used for CQI/CSI feedback, reported as a "
+                            "linear ratio (not dB) averaged over the allocated RBs.",
                             MakeTraceSourceAccessor(&NrUePhy::m_dlDataSinrTrace),
                             "ns3::NrUePhy::DlDataSinrTracedCallback")
             .AddTraceSource("DlCtrlSinr",
@@ -212,10 +210,42 @@ NrUePhy::GetTypeId()
                             "Power Spectral Density data.",
                             MakeTraceSourceAccessor(&NrUePhy::m_reportPowerSpectralDensity),
                             "ns3::NrUePhy::PowerSpectralDensityTracedCallback")
+            .AddTraceSource("CqiFeedbackTrace",
+                            "Mimo CQI feedback traces containing RNTI, WB CQI, MCS, and RI ",
+                            MakeTraceSourceAccessor(&NrUePhy::m_cqiFeedbackTrace),
+                            "ns3::NrUePhy::CqiFeedbackTracedCallback")
             .AddTraceSource("ReportUeMeasurements",
                             "Report UE measurements RSRP (dBm) and RSRQ (dB).",
                             MakeTraceSourceAccessor(&NrUePhy::m_reportUeMeasurements),
                             "ns3::NrUePhy::RsrpRsrqTracedCallback")
+            .AddAttribute("Qout",
+                          "corresponds to 10% block error rate of a hypothetical PDCCH transmission"
+                          "taking into account the PCFICH errors with transmission parameters."
+                          "see 3GPP TS 36.213 4.2.1 and TS 36.133 7.6",
+                          DoubleValue(-5),
+                          MakeDoubleAccessor(&NrUePhy::m_qOut),
+                          MakeDoubleChecker<double>())
+            .AddAttribute("Qin",
+                          "corresponds to 2% block error rate of a hypothetical PDCCH transmission"
+                          "taking into account the PCFICH errors with transmission parameters."
+                          "see 3GPP TS 36.213 4.2.1 and TS 36.133 7.6",
+                          DoubleValue(-3.9),
+                          MakeDoubleAccessor(&NrUePhy::m_qIn),
+                          MakeDoubleChecker<double>())
+            .AddAttribute(
+                "NumQoutEvalSf",
+                "This specifies the total number of consecutive subframes"
+                "which corresponds to the Qout evaluation period",
+                UintegerValue(200), // see 3GPP 3GPP TS 36.133 7.6.2.1
+                MakeUintegerAccessor(&NrUePhy::SetNumQoutEvalSf, &NrUePhy::GetNumQoutEvalSf),
+                MakeUintegerChecker<uint16_t>())
+            .AddAttribute(
+                "NumQinEvalSf",
+                "This specifies the total number of consecutive subframes"
+                "which corresponds to the Qin evaluation period",
+                UintegerValue(100), // see 3GPP 3GPP TS 36.133 7.6.2.1
+                MakeUintegerAccessor(&NrUePhy::SetNumQinEvalSf, &NrUePhy::GetNumQinEvalSf),
+                MakeUintegerChecker<uint16_t>())
             .AddAttribute("EnableRlfDetection",
                           "If true, RLF detection will be enabled.",
                           BooleanValue(true),
@@ -251,6 +281,14 @@ NrUePhy::GetTypeId()
                 TimeValue(Seconds(0)),
                 MakeTimeAccessor(&NrUePhy::m_ssbBeamResultLifetime),
                 MakeTimeChecker(Seconds(0)))
+            .AddAttribute(
+                "InitialBandwidthRbs",
+                "ntn-patch 19: RBs of the UE's initial (pre-SIB) receive bandwidth, centred on the "
+                "carrier. 0 (default) is nr's 6 RBs. Set to the BWP's RB count when cells send "
+                "their SSB in reuse sub-bands, so the UE finds its cell's SSB anywhere in the BWP.",
+                UintegerValue(0),
+                MakeUintegerAccessor(&NrUePhy::m_initialBandwidthRbs),
+                MakeUintegerChecker<uint32_t>())
             .AddAttribute("DlHarqFeedbackDisabled",
                           "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.213 9.1.2): "
                           "bitmap over DL HARQ process IDs, bit i set = the UE does not report "
@@ -260,17 +298,6 @@ NrUePhy::GetTypeId()
                           UintegerValue(0),
                           MakeUintegerAccessor(&NrUePhy::m_dlHarqFeedbackDisabled),
                           MakeUintegerChecker<uint32_t>())
-            .AddAttribute("HandoverRxFlush",
-                          "ntn-patch 20 (TS 38.331 5.3.5.5.2, TS 38.321 5.12): when the MAC "
-                          "entity is reset for a reconfigurationWithSync the UE abandons the "
-                          "PDSCH of the source cell still being received (not delivered to the "
-                          "MAC, no HARQ-ACK, no CSI derived from it) and drops the DL CQI and DL "
-                          "HARQ-ACK reports still pending for the source cell, so the target "
-                          "schedules the UE at its StartingMcsDl until the first CSI measured on "
-                          "its own PDSCH. false (default) keeps nr's behavior.",
-                          BooleanValue(false),
-                          MakeBooleanAccessor(&NrUePhy::m_handoverRxFlush),
-                          MakeBooleanChecker())
             .AddTraceSource("DlHarqFeedbackSuppressed",
                             "A DL HARQ-ACK that was not sent on PUCCH because its HARQ process "
                             "has feedback disabled (RNTI, HARQ process ID).",
@@ -315,6 +342,30 @@ NrUePhy::SetEnableUplinkPowerControl(bool enable)
 }
 
 void
+NrUePhy::SetAlphaCovMat(double alpha)
+{
+    m_alphaCovMat = alpha;
+}
+
+double
+NrUePhy::GetAlphaCovMat() const
+{
+    return m_alphaCovMat;
+}
+
+void
+NrUePhy::SetCsiImDuration(uint8_t csiImDuration)
+{
+    m_csiImDuration = csiImDuration;
+}
+
+uint8_t
+NrUePhy::GetCsiImDuration() const
+{
+    return m_csiImDuration;
+}
+
+void
 NrUePhy::SetTxPower(double pow)
 {
     m_txPower = pow;
@@ -333,6 +384,38 @@ NrUePhy::GetRsrp() const
     return m_rsrp;
 }
 
+void
+NrUePhy::SetNumQoutEvalSf(uint16_t numSubframes)
+{
+    NS_LOG_FUNCTION(this << numSubframes);
+    NS_ABORT_MSG_IF(numSubframes % 10 != 0,
+                    "Number of subframes used for Qout "
+                    "evaluation must be multiple of 10");
+    m_numOfQoutEvalSf = numSubframes;
+}
+
+void
+NrUePhy::SetNumQinEvalSf(uint16_t numSubframes)
+{
+    NS_LOG_FUNCTION(this << numSubframes);
+    NS_ABORT_MSG_IF(numSubframes % 10 != 0,
+                    "Number of subframes used for Qin "
+                    "evaluation must be multiple of 10");
+    m_numOfQinEvalSf = numSubframes;
+}
+
+uint16_t
+NrUePhy::GetNumQoutEvalSf() const
+{
+    return m_numOfQoutEvalSf;
+}
+
+uint16_t
+NrUePhy::GetNumQinEvalSf() const
+{
+    return m_numOfQinEvalSf;
+}
+
 Ptr<NrUePowerControl>
 NrUePhy::GetUplinkPowerControl() const
 {
@@ -341,7 +424,7 @@ NrUePhy::GetUplinkPowerControl() const
 }
 
 NrPhySapProvider::PuschPowerHeadroom
-NrUePhy::GetPuschPowerHeadroom(const std::vector<uint8_t>& rbgBitmask) const
+NrUePhy::GetPuschPowerHeadroom(const std::vector<bool>& rbgBitmask) const
 {
     NrPhySapProvider::PuschPowerHeadroom ph;
     if (!m_enableUplinkPowerControl || !m_powerControl ||
@@ -437,7 +520,7 @@ NrUePhy::SendRachPreamble(uint32_t PreambleId, uint32_t Rnti)
     NS_LOG_FUNCTION(this << PreambleId);
     m_raPreambleId = PreambleId;
     Ptr<NrRachPreambleMessage> msg = Create<NrRachPreambleMessage>();
-    msg->SetSourceBwp(GetBwpId());
+    msg->SetSourceBwpArfcn(DoGetArfcn());
     msg->SetRapId(PreambleId);
     EnqueueCtrlMsgNow(msg);
 }
@@ -458,12 +541,12 @@ NrUePhy::ProcessSrsDci(const SfnSf& ulSfnSf, const std::shared_ptr<DciInfoElemen
 }
 
 void
-NrUePhy::RegisterToGnb(uint16_t bwpId)
+NrUePhy::RegisterToGnb(uint16_t cellId)
 {
     NS_LOG_FUNCTION(this);
 
     InitializeMessageList();
-    DoSetCellId(bwpId);
+    DoSetCellId(cellId);
 }
 
 void
@@ -513,12 +596,43 @@ NrUePhy::SetPattern(const std::string& pattern)
     }
 
     m_tddPattern = vector;
+    // Check if pure UL BWP
+    const auto ulSlots = std::count(m_tddPattern.begin(), m_tddPattern.end(), LteNrTddSlotType::UL);
+    if (static_cast<size_t>(ulSlots) == m_tddPattern.size())
+    {
+        // In case Downlink CSI feedback is enabled, disable it
+        m_csiFeedbackType = 0;
+    }
 }
 
 uint32_t
 NrUePhy::GetNumRbPerRbg() const
 {
     return m_numRbPerRbg;
+}
+
+void
+NrUePhy::SetCurrentSfnSf(const SfnSf& currentSfnSf)
+{
+    m_currentSlot = currentSfnSf;
+}
+
+void
+NrUePhy::SetLastSlotStart(Time startTime)
+{
+    m_lastSlotStart = startTime;
+}
+
+Time
+NrUePhy::GetLastSlotStart() const
+{
+    return m_lastSlotStart;
+}
+
+NrUePhySapUser*
+NrUePhy::GetPhySapUser() const
+{
+    return m_phySapUser;
 }
 
 double
@@ -657,13 +771,16 @@ NrUePhy::PhyCtrlMessagesReceived(const Ptr<NrControlMessage>& msg)
         NS_LOG_DEBUG("received MIB");
         Ptr<NrMibMessage> msg2 = DynamicCast<NrMibMessage>(msg);
         m_phyRxedCtrlMsgsTrace(m_currentSlot, GetCellId(), m_rnti, GetBwpId(), msg);
-        m_ueCphySapUser->RecvMasterInformationBlock(GetCellId(), msg2->GetMib());
+        m_ueCphySapUser->RecvMasterInformationBlock(GetCellId(), DoGetArfcn(), msg2->GetMib());
     }
     else if (msg->GetMessageType() == NrControlMessage::SIB1)
     {
         Ptr<NrSib1Message> msg2 = DynamicCast<NrSib1Message>(msg);
         m_phyRxedCtrlMsgsTrace(m_currentSlot, GetCellId(), m_rnti, GetBwpId(), msg);
-        m_ueCphySapUser->RecvSystemInformationBlockType1(GetCellId(), msg2->GetSib1());
+        m_ueCphySapUser->RecvSystemInformationBlockType1(
+            msg2->GetSib1().cellAccessRelatedInfo.cellIdentity,
+            DoGetArfcn(),
+            msg2->GetSib1());
     }
     else if (msg->GetMessageType() == NrControlMessage::RAR)
     {
@@ -768,7 +885,7 @@ NrUePhy::TryToPerformLbt()
                             << " which is inside the LBT shared COT (the limit is " << limit
                             << "). No need for LBT");
                 m_lbtEvent.Cancel(); // Forget any LBT we previously set, because of the new
-                                     // DCI information
+                // DCI information
                 m_channelStatus = GRANTED;
             }
             else
@@ -796,7 +913,7 @@ NrUePhy::TryToPerformLbt()
     }
     else
     {
-        NS_LOG_INFO("Not scheduling LBT; the UE has no UL CTRL symbols available");
+        NS_LOG_DEBUG("Not scheduling LBT; the UE has no UL CTRL symbols available");
     }
 }
 
@@ -816,7 +933,7 @@ NrUePhy::PushCtrlAllocations(const SfnSf currentSfnSf)
 
     // The UE does not know anything from the GNB yet, so listen on the default
     // bandwidth.
-    std::vector<uint8_t> rbgBitmask(GetRbNum(), 1);
+    std::vector<bool> rbgBitmask(GetRbNum(), true);
 
     // The UE still doesn't know the TDD pattern, so just add a DL CTRL
     if (m_tddPattern.empty())
@@ -832,31 +949,59 @@ NrUePhy::PushCtrlAllocations(const SfnSf currentSfnSf)
     }
 
     uint64_t currentSlotN = currentSfnSf.Normalize() % m_tddPattern.size();
+    const auto overlapsRange = [this](uint8_t start, uint8_t numSym) {
+        const uint8_t end = start + numSym;
+        return std::any_of(m_currSlotAllocInfo.m_varTtiAllocInfo.begin(),
+                           m_currSlotAllocInfo.m_varTtiAllocInfo.end(),
+                           [start, end](const auto& alloc) {
+                               const uint8_t allocStart = alloc.m_dci->m_symStart;
+                               const uint8_t allocEnd = allocStart + alloc.m_dci->m_numSym;
+                               return allocStart < end && start < allocEnd;
+                           });
+    };
 
     if (m_tddPattern[currentSlotN] < LteNrTddSlotType::UL)
     {
-        NS_LOG_DEBUG("The current TDD pattern indicates that we are in a "
-                     << m_tddPattern[currentSlotN]
-                     << " slot, so insert DL CTRL at the beginning of the slot");
-        VarTtiAllocInfo dlCtrlSlot(std::make_shared<DciInfoElementTdma>(0,
-                                                                        m_dlCtrlSyms,
-                                                                        DciInfoElementTdma::DL,
-                                                                        DciInfoElementTdma::CTRL,
-                                                                        rbgBitmask));
-        m_currSlotAllocInfo.m_varTtiAllocInfo.push_front(dlCtrlSlot);
+        if (!overlapsRange(0, m_dlCtrlSyms))
+        {
+            NS_LOG_DEBUG("The current TDD pattern indicates that we are in a "
+                         << m_tddPattern[currentSlotN]
+                         << " slot, so insert DL CTRL at the beginning of the slot");
+            VarTtiAllocInfo dlCtrlSlot(
+                std::make_shared<DciInfoElementTdma>(0,
+                                                     m_dlCtrlSyms,
+                                                     DciInfoElementTdma::DL,
+                                                     DciInfoElementTdma::CTRL,
+                                                     rbgBitmask));
+            m_currSlotAllocInfo.m_varTtiAllocInfo.push_front(dlCtrlSlot);
+        }
+        else
+        {
+            NS_LOG_WARN("Skipping DL CTRL insertion because the reserved DL CTRL symbols are "
+                        "already occupied");
+        }
     }
     if (m_tddPattern[currentSlotN] > LteNrTddSlotType::DL)
     {
-        NS_LOG_DEBUG("The current TDD pattern indicates that we are in a "
-                     << m_tddPattern[currentSlotN]
-                     << " slot, so insert UL CTRL at the end of the slot");
-        VarTtiAllocInfo ulCtrlSlot(
-            std::make_shared<DciInfoElementTdma>(GetSymbolsPerSlot() - m_ulCtrlSyms,
-                                                 m_ulCtrlSyms,
-                                                 DciInfoElementTdma::UL,
-                                                 DciInfoElementTdma::CTRL,
-                                                 rbgBitmask));
-        m_currSlotAllocInfo.m_varTtiAllocInfo.push_back(ulCtrlSlot);
+        const uint8_t ulCtrlStart = GetSymbolsPerSlot() - m_ulCtrlSyms;
+        if (!overlapsRange(ulCtrlStart, m_ulCtrlSyms))
+        {
+            NS_LOG_DEBUG("The current TDD pattern indicates that we are in a "
+                         << m_tddPattern[currentSlotN]
+                         << " slot, so insert UL CTRL at the end of the slot");
+            VarTtiAllocInfo ulCtrlSlot(
+                std::make_shared<DciInfoElementTdma>(ulCtrlStart,
+                                                     m_ulCtrlSyms,
+                                                     DciInfoElementTdma::UL,
+                                                     DciInfoElementTdma::CTRL,
+                                                     rbgBitmask));
+            m_currSlotAllocInfo.m_varTtiAllocInfo.push_back(ulCtrlSlot);
+        }
+        else
+        {
+            NS_LOG_WARN("Skipping UL CTRL insertion because the reserved UL CTRL symbols are "
+                        "already occupied");
+        }
     }
 }
 
@@ -864,6 +1009,31 @@ void
 NrUePhy::StartSlot(const SfnSf& s)
 {
     NS_LOG_FUNCTION(this);
+
+    if (GetNumerology() != s.GetNumerology())
+    {
+        // The active PHY numerology changed (e.g. the UE re-tuned to a cell on a
+        // different numerology during cell (re)selection or an inter-frequency
+        // handover). The in-flight slot 's' belongs to the abandoned numerology
+        // timeline, so its frame/subframe/slot indices are meaningless here.
+        // Drop the stale allocations and re-stamp the slot machine onto the new
+        // numerology so that the event loop keeps running instead of stalling
+        // forever (which would silently kill the UE PHY, e.g. preventing RACH
+        // preambles from ever being transmitted on the target cell).
+        NS_LOG_INFO("Numerology changed from " << s.GetNumerology() << " to " << GetNumerology()
+                                               << ", restarting slot loop on the new numerology.");
+        PurgeStaleSlotAllocInfo();
+
+        // Rebuild a slot index consistent with the new numerology from the
+        // current absolute time, and align to the next slot boundary.
+        Time slotPeriod = GetSlotPeriod();
+        uint64_t slotsElapsed = Simulator::Now().GetTimeStep() / slotPeriod.GetTimeStep();
+        Time nextSlotStart = slotPeriod * (slotsElapsed + 1) - Simulator::Now();
+        SfnSf restartSlot(0, 0, 0, GetNumerology());
+        restartSlot.Add(static_cast<uint32_t>(slotsElapsed + 1));
+        Simulator::Schedule(nextSlotStart, &NrUePhy::StartSlot, this, restartSlot);
+        return;
+    }
     m_currentSlot = s;
     m_lastSlotStart = Simulator::Now();
 
@@ -872,7 +1042,15 @@ NrUePhy::StartSlot(const SfnSf& s)
 
     // update the current slot object, and insert DL/UL CTRL allocations depending on the TDD
     // pattern
-    if (SlotAllocInfoExists(m_currentSlot))
+    bool nrAllocationExists = SlotAllocInfoExists(m_currentSlot);
+    FinishSlotProcessing(s, nrAllocationExists);
+}
+
+void
+NrUePhy::FinishSlotProcessing(const SfnSf& s, bool nrAllocationExists)
+{
+    NS_LOG_FUNCTION(this << s);
+    if (nrAllocationExists)
     {
         m_currSlotAllocInfo = RetrieveSlotAllocInfo(m_currentSlot);
     }
@@ -882,7 +1060,6 @@ NrUePhy::StartSlot(const SfnSf& s)
     }
 
     PushCtrlAllocations(m_currentSlot);
-
     NS_ASSERT(m_currSlotAllocInfo.m_sfnSf == m_currentSlot);
 
     NS_LOG_DEBUG("UE " << m_rnti << " start slot " << m_currSlotAllocInfo.m_sfnSf
@@ -974,8 +1151,12 @@ NrUePhy::DlCtrl(const std::shared_ptr<DciInfoElementTdma>& dci)
                       << +dci->m_symStart << "-" << +(dci->m_symStart + dci->m_numSym - 1)
                       << "\t start " << Simulator::Now() << " end "
                       << (Simulator::Now() + varTtiDuration));
+    if (!m_lastSlotStart.IsZero())
+    {
+        m_tryToPerformLbt = true;
+    }
 
-    m_tryToPerformLbt = true;
+    m_spectrumPhy->AddExpectedDlCtrlEnd(Simulator::Now() + varTtiDuration);
 
     return varTtiDuration;
 }
@@ -985,16 +1166,18 @@ NrUePhy::UlSrs(const std::shared_ptr<DciInfoElementTdma>& dci)
 {
     NS_LOG_FUNCTION(this);
 
-    std::vector<int> channelRbs;
-    for (uint32_t i = 0; i < GetRbNum(); i++)
+    std::vector<int> channelRbs(GetRbNum());
+    std::iota(channelRbs.begin(), channelRbs.end(), 0);
+
+    if (m_enableUplinkPowerControl)
     {
-        channelRbs.push_back(static_cast<int>(i));
+        m_txPower = m_powerControl->GetSrsTxPower(channelRbs.size());
     }
     SetSubChannelsForTransmission(channelRbs, dci->m_numSym);
 
     std::list<Ptr<NrControlMessage>> srsMsg;
     Ptr<NrSrsMessage> srs = Create<NrSrsMessage>();
-    srs->SetSourceBwp(GetBwpId());
+    srs->SetSourceBwpArfcn(DoGetArfcn());
     srsMsg.emplace_back(srs);
     Time varTtiDuration = GetSymbolPeriod() * dci->m_numSym;
 
@@ -1024,6 +1207,9 @@ NrUePhy::UlCtrl(const std::shared_ptr<DciInfoElementTdma>& dci)
                           << (Simulator::Now() + varTtiDuration - NanoSeconds(1.0))
                           << " but no data to transmit");
         m_cam->Cancel();
+        // The grant covers this slot only; left GRANTED, the next slot
+        // requests no access and an SRS there leaves its UL CTRL unsent
+        ChannelAccessDenied();
         return varTtiDuration;
     }
     else if (m_channelStatus != GRANTED)
@@ -1055,11 +1241,8 @@ NrUePhy::UlCtrl(const std::shared_ptr<DciInfoElementTdma>& dci)
         }
     }
 
-    std::vector<int> channelRbs;
-    for (uint32_t i = 0; i < GetRbNum(); i++)
-    {
-        channelRbs.push_back(static_cast<int>(i));
-    }
+    std::vector<int> channelRbs(GetRbNum());
+    std::iota(channelRbs.begin(), channelRbs.end(), 0);
 
     if (m_enableUplinkPowerControl)
     {
@@ -1082,8 +1265,21 @@ NrUePhy::DlData(const std::shared_ptr<DciInfoElementTdma>& dci)
 {
     NS_LOG_FUNCTION(this);
 
-    m_receptionEnabled = true;
     Time varTtiDuration = GetSymbolPeriod() * dci->m_numSym;
+
+    if (GetRbNum() / GetNumRbPerRbg() != dci->m_rbgBitmask.size())
+    {
+        NS_LOG_DEBUG("Mismatching number of RBGs and RBG bitmask");
+        return varTtiDuration;
+    }
+
+    if (dci->m_rnti != m_rnti)
+    {
+        NS_LOG_DEBUG("Transmission scheduled before the UE disconnected");
+        return varTtiDuration;
+    }
+
+    m_receptionEnabled = true;
     NS_ASSERT(dci->m_rnti == m_rnti);
     m_spectrumPhy->AddExpectedTb({dci->m_ndi,
                                   dci->m_tbSize,
@@ -1110,13 +1306,18 @@ Time
 NrUePhy::UlData(const std::shared_ptr<DciInfoElementTdma>& dci)
 {
     NS_LOG_FUNCTION(this);
+    Time varTtiDuration = GetSymbolPeriod() * dci->m_numSym;
+
+    if (GetRbNum() / GetNumRbPerRbg() != dci->m_rbgBitmask.size())
+    {
+        return varTtiDuration;
+    }
     if (m_enableUplinkPowerControl)
     {
         m_txPower = m_powerControl->GetPuschTxPower(
             (FromRBGBitmaskToRBAssignment(dci->m_rbgBitmask)).size());
     }
     SetSubChannelsForTransmission(FromRBGBitmaskToRBAssignment(dci->m_rbgBitmask), dci->m_numSym);
-    Time varTtiDuration = GetSymbolPeriod() * dci->m_numSym;
     std::list<Ptr<NrControlMessage>> ctrlMsg;
     Ptr<PacketBurst> pktBurst = GetPacketBurst(m_currentSlot, dci->m_symStart, dci->m_rnti);
     if (pktBurst && pktBurst->GetNPackets() > 0)
@@ -1132,13 +1333,14 @@ NrUePhy::UlData(const std::shared_ptr<DciInfoElementTdma>& dci)
     {
         // put an error, as something is wrong. The UE should not be scheduled
         // if there is no data for him...
-        if (dci->m_type != DciInfoElementTdma::MSG3)
+        if (dci->m_type == DciInfoElementTdma::MSG3)
         {
-            NS_FATAL_ERROR("The UE " << dci->m_rnti << " has been scheduled without data");
+            NS_LOG_WARN("Not sending MSG3. Probably in RRC IDEAL mode.");
+            return varTtiDuration;
         }
         else
         {
-            NS_LOG_WARN("Not sending MSG3. Probably in RRC IDEAL mode.");
+            NS_LOG_WARN("UE " << dci->m_rnti << " was scheduled but has nothing to transmit");
             return varTtiDuration;
         }
     }
@@ -1212,10 +1414,22 @@ NrUePhy::EndVarTti(const std::shared_ptr<DciInfoElementTdma>& dci)
         // end of slot
         m_currentSlot.Add(1);
 
-        Simulator::Schedule(m_lastSlotStart + GetSlotPeriod() - Simulator::Now(),
-                            &NrUePhy::StartSlot,
-                            this,
-                            m_currentSlot);
+        // During an inter-frequency / inter-numerology handover the UE re-tunes
+        // to a different BWP PHY. The slot period (which is numerology-dependent)
+        // and the m_lastSlotStart reference belong to the abandoned timeline, so
+        // the next-slot start can resolve to a time in the past. Clamp such a
+        // stale boundary to the current instant so the slot machine keeps
+        // running on the target BWP instead of asserting; StartSlot() detects
+        // the numerology change and cleanly re-stamps the loop from there.
+        Time delay = m_lastSlotStart + GetSlotPeriod() - Simulator::Now();
+        if (delay.IsStrictlyNegative())
+        {
+            NS_LOG_WARN("Clamping next-slot start "
+                        << delay << " in the past to now, due to a BWP/numerology switch");
+            delay = Time(0);
+        }
+
+        Simulator::Schedule(delay, &NrUePhy::StartSlot, this, m_currentSlot);
     }
     else
     {
@@ -1223,11 +1437,24 @@ NrUePhy::EndVarTti(const std::shared_ptr<DciInfoElementTdma>& dci)
         m_currSlotAllocInfo.m_varTtiAllocInfo.pop_front();
 
         Time nextVarTtiStart = GetSymbolPeriod() * allocation.m_dci->m_symStart;
+        Time nextVarTtiTime = nextVarTtiStart + m_lastSlotStart;
+        Time delay = nextVarTtiTime - Simulator::Now();
 
-        Simulator::Schedule(nextVarTtiStart + m_lastSlotStart - Simulator::Now(),
-                            &NrUePhy::StartVarTti,
-                            this,
-                            allocation.m_dci);
+        // During an inter-frequency handover the UE re-tunes to a different BWP
+        // PHY, whose m_lastSlotStart timeline is re-stamped by StartSlot(). A
+        // VarTti that was in flight on the abandoned timeline can then resolve
+        // to a start time slightly in the past, yielding a small negative delay.
+        // Clamp such a stale allocation to the current instant so that it is
+        // still processed (keeping the data plane alive across the handover)
+        // without scheduling an event in the past.
+        if (delay.IsStrictlyNegative())
+        {
+            NS_LOG_WARN("Clamping VarTti scheduled "
+                        << delay << " in the past to now, due to a BWP/numerology switch");
+            delay = Time(0);
+        }
+
+        Simulator::Schedule(delay, &NrUePhy::StartVarTti, this, allocation.m_dci);
     }
 
     m_receptionEnabled = false;
@@ -1275,15 +1502,17 @@ NrUePhy::CreateDlCqiFeedbackMessage(const SpectrumValue& sinr)
     NS_LOG_FUNCTION(this);
     // Create DL CQI CTRL message
     Ptr<NrDlCqiMessage> msg = Create<NrDlCqiMessage>();
-    msg->SetSourceBwp(GetBwpId());
+    msg->SetSourceBwpArfcn(DoGetArfcn());
     DlCqiInfo dlcqi;
 
     dlcqi.m_rnti = m_rnti;
     dlcqi.m_cqiType = DlCqiInfo::WB;
 
     std::vector<int> cqi;
-    dlcqi.m_wbCqi = ComputeCqi(sinr);
+    dlcqi.m_wbCqi = m_amc->CreateCqiFeedbackSiso(sinr, dlcqi.m_mcs);
     msg->SetDlCqi(dlcqi);
+
+    m_cqiFeedbackTrace(m_rnti, dlcqi.m_wbCqi, dlcqi.m_mcs, 1);
     return msg;
 }
 
@@ -1291,11 +1520,6 @@ void
 NrUePhy::GenerateDlCqiReport(const SpectrumValue& sinr)
 {
     NS_LOG_FUNCTION(this);
-    // ntn-patch 20: no CSI from a source-cell PDSCH that ends after the MAC reset.
-    if (m_handoverRxFlush && m_spectrumPhy && m_spectrumPhy->IsDlDataRxAborted())
-    {
-        return;
-    }
     // Not totally sure what this is about. We have to check.
     if (m_ulConfigured && (m_rnti > 0) && m_receptionEnabled)
     {
@@ -1327,25 +1551,17 @@ NrUePhy::EnqueueDlHarqFeedback(const DlHarqInfo& m)
     }
     // get the feedback from NrSpectrumPhy and send it through ideal PUCCH to gNB
     Ptr<NrDlHarqFeedbackMessage> msg = Create<NrDlHarqFeedbackMessage>();
-    msg->SetSourceBwp(GetBwpId());
+    msg->SetSourceBwpArfcn(DoGetArfcn());
     msg->SetDlHarqFeedback(m);
 
     auto k1It = m_harqIdToK1Map.find(m.m_harqProcessId);
 
-    NS_LOG_DEBUG("ReceiveNrDlHarqFeedback"
-                 << " Harq Process " << static_cast<uint32_t>(k1It->first)
-                 << " K1: " << k1It->second << " Frame " << m_currentSlot);
+    NS_LOG_DEBUG("ReceiveNrDlHarqFeedback" << " Harq Process " << static_cast<uint32_t>(k1It->first)
+                                           << " K1: " << k1It->second << " Frame "
+                                           << m_currentSlot);
 
     Time event = m_lastSlotStart + (GetSlotPeriod() * k1It->second);
-    if (m_handoverRxFlush)
-    {
-        Simulator::Schedule(std::max(event - Simulator::Now(), Time(0)),
-                            &NrUePhy::SendDlHarqFeedbackOfEpoch,
-                            this,
-                            msg,
-                            m_resetEpoch);
-    }
-    else if (event <= Simulator::Now())
+    if (event <= Simulator::Now())
     {
         Simulator::ScheduleNow(&NrUePhy::DoSendControlMessageNow, this, msg);
     }
@@ -1384,46 +1600,30 @@ NrUePhy::DoReset()
     NS_LOG_FUNCTION(this);
     m_raPreambleId = 255; // value out of range
     m_isConnected = false;
-    // ntn-patch 20: a MAC reset (reconfigurationWithSync, TS 38.321 5.12)
-    // flushes the DL HARQ processes. A PDSCH of the source cell still on the air
-    // is not delivered, and the CQI and HARQ-ACK reports derived from the
-    // source's PDSCH and not yet sent would otherwise reach the target, whose
-    // scheduler takes the CQI as its own (it derives the first MCS from it) and
-    // the HARQ-ACK as feedback for its own processes.
-    if (m_handoverRxFlush)
-    {
-        ++m_resetEpoch;
-        if (m_spectrumPhy)
-        {
-            m_spectrumPhy->AbortDlDataRx();
-        }
-        m_hoFlushedReports +=
-            RemoveQueuedCtrlMsgs({NrControlMessage::DL_CQI, NrControlMessage::DL_HARQ});
-    }
+    ResetCsiMeasurements();
+    PurgeStaleSlotAllocInfo();
 }
 
 void
-NrUePhy::SendDlHarqFeedbackOfEpoch(Ptr<NrControlMessage> msg, uint32_t epoch)
+NrUePhy::ResetCsiMeasurements()
 {
-    if (epoch != m_resetEpoch)
-    {
-        ++m_hoFlushedReports;
-        return;
-    }
-    DoSendControlMessageNow(msg);
+    NS_LOG_FUNCTION(this);
+    m_csiRsMimoSignal = {};
+    m_avgIntCovMat = {};
 }
 
 void
-NrUePhy::DoStartCellSearch(uint16_t dlEarfcn)
+NrUePhy::DoStartCellSearch(uint16_t arfcn)
 {
-    NS_LOG_FUNCTION(this << dlEarfcn);
+    NS_LOG_FUNCTION(this << arfcn);
+    InitializeMessageList();
     DoSetInitialBandwidth();
 }
 
 void
-NrUePhy::DoSynchronizeWithGnb(uint16_t cellId, uint16_t dlEarfcn)
+NrUePhy::DoSynchronizeWithGnb(uint16_t cellId, uint16_t arfcn)
 {
-    NS_LOG_FUNCTION(this << cellId << dlEarfcn);
+    NS_LOG_FUNCTION(this << cellId << arfcn);
     DoSynchronizeWithGnb(cellId);
 }
 
@@ -1444,6 +1644,7 @@ NrUePhy::DoSynchronizeWithGnb(uint16_t cellId)
 {
     NS_LOG_FUNCTION(this << cellId);
     DoSetCellId(cellId);
+    ResetCsiMeasurements();
     DoSetInitialBandwidth();
 }
 
@@ -1524,31 +1725,29 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
         return; // ntn-patch 19: nothing of this SSB falls in the BWP
     }
 
-    // measure instantaneous RSRP now (in dBm)
-    double rsrp = 10 * log10(1000 * (sum / static_cast<double>(nRB)));
-
-    NS_LOG_DEBUG("RSRP value updated: " << rsrp << " dBm"
-                                        << " for Cell Id: " << cellId << " RNTI: " << m_rnti);
-
-    // ntn-patch 09: accumulate in mW when linear averaging is enabled.
-    BooleanValue linAvg;
-    g_nrUeRsrpLinearAverage.GetValue(linAvg);
-    if (linAvg.Get())
+    // Instantaneous RSRP in linear mW per RE. A zero-power sample (e.g. a fully
+    // nulled beamforming cross-link) carries no detectable PSS: skip it rather
+    // than store it, since its dB value (-inf) would poison every average and
+    // Layer-3 filter it enters downstream.
+    double rsrp = 1000.0 * (sum / static_cast<double>(nRB));
+    if (rsrp <= 0.0)
     {
-        rsrp = std::pow(10.0, rsrp / 10.0);
+        return;
     }
+
+    NS_LOG_DEBUG("RSRP value updated: " << 10 * log10(rsrp) << " dBm"
+                                        << " for Cell Id: " << cellId << " RNTI: " << m_rnti);
 
     // ntn-patch 19: a cell that sweeps SSB beams is measured per SSB index
     // (TS 38.215 5.1.1 SS-RSRP per SS/PBCH block); its cell quality is derived
     // from the best beam in ReportUeMeasurements (TS 38.331 5.5.3.3).
     const uint8_t ssbIndex = m_spectrumPhy->GetLastRxSsbIndex();
-    auto& measMap = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX)
-                        ? m_ueMeasurementsMap
-                        : m_ueSsbMeasurementsMap[cellId];
+    auto& measMap = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX) ? m_ueMeasurementsMap
+                                                              : m_ueSsbMeasurementsMap[cellId];
     const uint16_t measKey = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX) ? cellId : ssbIndex;
 
     // store RSRP measurements
-    std::map<uint16_t, UeMeasurementsElement>::iterator itMeasMap = measMap.find(measKey);
+    auto itMeasMap = measMap.find(measKey);
     if (itMeasMap == measMap.end())
     {
         // insert new entry
@@ -1559,22 +1758,10 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
         newEl.rsrqNum = 0;
 
         NS_LOG_DEBUG("New RSRP entry for Cell Id: " << cellId << " RNTI: " << m_rnti
-                                                    << " RSRP: " << newEl.rsrpSum << " dBm"
+                                                    << " RSRP: " << newEl.rsrpSum << " mW"
                                                     << " number of entries: " << +newEl.rsrpNum);
 
         measMap.insert(std::pair<uint16_t, UeMeasurementsElement>(measKey, newEl));
-    }
-    else if (linAvg.Get())
-    {
-        // ntn-patch 09: rsrpSum holds the running LINEAR mean. rsrpNum is a
-        // uint8_t and wraps past 255 samples (about 1.3 kHz of PSS at mu = 1),
-        // which in the legacy dB path divides a 300-sample sum by a wrapped
-        // count (the -1600 dBm L1 reports seen on ntn-nr-handover-pass); here
-        // the count saturates and the mean stays a mean.
-        auto& el = (*itMeasMap).second;
-        const uint8_t n = std::min<uint8_t>(el.rsrpNum, 254);
-        el.rsrpSum += (rsrp - el.rsrpSum) / static_cast<double>(n + 1);
-        el.rsrpNum = n + 1;
     }
     else
     {
@@ -1583,9 +1770,16 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
 
         NS_LOG_DEBUG("Update RSRP entry for Cell Id: "
                      << cellId << " RNTI: " << m_rnti
-                     << " RSRP Sum: " << (*itMeasMap).second.rsrpSum << " dBm"
+                     << " RSRP Sum: " << (*itMeasMap).second.rsrpSum << " mW"
                      << " number of entries: " << +((*itMeasMap).second.rsrpNum));
     }
+}
+
+void
+NrUePhy::SetGenieRsrpCallback(Callback<std::map<uint16_t, double>> cb)
+{
+    NS_LOG_FUNCTION(this);
+    m_genieRsrpCallback = cb;
 }
 
 uint8_t
@@ -1600,14 +1794,12 @@ NrUePhy::ReportUeMeasurements()
 {
     NS_LOG_FUNCTION(this);
 
-    NrUeCphySapUser::UeMeasurementsParameters ret;
-
-    BooleanValue linAvgReport;
-    g_nrUeRsrpLinearAverage.GetValue(linAvgReport);
-    // ntn-patch 19: TS 38.331 5.5.3.3 cell quality of a cell that sweeps SSB
-    // beams. Without nrofSS-BlocksToAverage the cell quality is the highest
-    // beam measurement quantity, so the layer-1 result of the best SSB beam
-    // (per-beam average over this period, TS 38.215 5.1.1) stands for the cell.
+    // ntn-patch 19 (v5.1 port): TS 38.331 5.5.3.3 cell quality of a cell that
+    // sweeps SSB beams. Without nrofSS-BlocksToAverage the cell quality is the
+    // highest beam measurement quantity, so the layer-1 result of the best SSB
+    // beam (per-beam linear average over this period, TS 38.215 5.1.1) stands
+    // for the cell. Only that beam enters the map, so the RSSI below counts the
+    // cell once rather than every SSB sample of its sweep.
     m_bestSsbIndex.clear();
     // ntn-patch 21: a sweep longer than the layer-1 period (an Earth-moving
     // grid of more SSB beams than one period visits) left some periods without
@@ -1652,7 +1844,7 @@ NrUePhy::ReportUeMeasurements()
         m_ssbBeamResultLifetime.IsStrictlyPositive() ? ssbView : m_ueSsbMeasurementsMap;
     for (const auto& [cell, beams] : ssbSource)
     {
-        double bestDbm = -std::numeric_limits<double>::infinity();
+        double bestMw = -1.0;
         const UeMeasurementsElement* best = nullptr;
         uint16_t bestIdx = NrSpectrumPhy::NO_SSB_INDEX;
         for (const auto& [idx, el] : beams)
@@ -1661,12 +1853,10 @@ NrUePhy::ReportUeMeasurements()
             {
                 continue;
             }
-            const double dbm = linAvgReport.Get()
-                                   ? 10.0 * std::log10(std::max(el.rsrpSum, 1e-300))
-                                   : el.rsrpSum / static_cast<double>(el.rsrpNum);
-            if (dbm > bestDbm)
+            const double mw = el.rsrpSum / static_cast<double>(el.rsrpNum); // linear mW
+            if (mw > bestMw)
             {
-                bestDbm = dbm;
+                bestMw = mw;
                 best = &el;
                 bestIdx = idx;
             }
@@ -1678,24 +1868,77 @@ NrUePhy::ReportUeMeasurements()
         }
     }
     m_ueSsbMeasurementsMap.clear();
-    // ntn-patch 08: RSSI over the measurement bandwidth, if RSRQ is enabled.
-    BooleanValue rsrqOn;
-    g_nrUeRsrqFromRssi.GetValue(rsrqOn);
-    double rssiMw = 0.0;
-    const double nRb = static_cast<double>(std::max<uint32_t>(1, GetRbNum()));
-    if (rsrqOn.Get())
+
+    if (!m_genieRsrpCallback.IsNull())
     {
-        for (const auto& [cell, el] : m_ueMeasurementsMap)
+        // Keep the PSS-measured serving cell entry intact (it reflects the
+        // locked-beam signal that drives SINR / RLF), and replace neighbor
+        // entries with genie best-beam estimates. The genie values are in
+        // a different absolute reference than PSS-derived dBm (see
+        // NrInitialAssociation::ComputeMaxRsrp), so anchor the scale
+        // by computing an offset between PSS-serving and genie-serving and
+        // shifting all reported neighbors by that offset. This preserves
+        // the genie-computed relative deltas between cells while keeping
+        // A3's serving anchor consistent with the real signal magnitude.
+        const uint16_t servingCellId = GetCellId();
+        auto genie = m_genieRsrpCallback();
+        auto servingIt = m_ueMeasurementsMap.find(servingCellId);
+        auto genieServingIt = genie.find(servingCellId);
+        if (servingIt != m_ueMeasurementsMap.end() && genieServingIt != genie.end() &&
+            servingIt->second.rsrpNum > 0)
         {
-            if (el.rsrpNum != 0)
+            const double pssServingRsrp =
+                10 *
+                log10(servingIt->second.rsrpSum / static_cast<double>(servingIt->second.rsrpNum));
+            const double offset = pssServingRsrp - genieServingIt->second;
+            for (auto it = m_ueMeasurementsMap.begin(); it != m_ueMeasurementsMap.end();)
             {
-                rssiMw += 12.0 * nRb *
-                          (linAvgReport.Get() ? el.rsrpSum
-                                              : std::pow(10.0, (el.rsrpSum / el.rsrpNum) / 10.0));
+                if (it->first != servingCellId)
+                {
+                    it = m_ueMeasurementsMap.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            for (const auto& kv : genie)
+            {
+                if (kv.first == servingCellId)
+                {
+                    continue;
+                }
+                UeMeasurementsElement el;
+                el.rsrpSum = std::pow(10.0, (kv.second + offset) / 10.0); // dBm -> linear mW
+                el.rsrpNum = 1;
+                el.rsrqSum = 0;
+                el.rsrqNum = 0;
+                m_ueMeasurementsMap[kv.first] = el;
             }
         }
-        const double bwHz = nRb * 12.0 * 15000.0 * std::pow(2.0, GetNumerology());
-        rssiMw += std::pow(10.0, (-174.0 + 10.0 * std::log10(bwHz) + m_noiseFigure) / 10.0);
+    }
+
+    NrUeCphySapUser::UeMeasurementsParameters ret{};
+
+    // Carrier RSSI (per resource element, linear W) used to derive a real RSRQ below:
+    // the total received power = sum of every measured cell's RS power plus thermal noise.
+    // RSRP measures one cell's signal; RSSI captures the inter-cell interference + noise, so
+    // RSRQ = RSRP/RSSI is the interference-aware quality the RSRP-only measurement lacked.
+    double rssiPerReLin = 0.0;
+    const auto scsHz = static_cast<double>(GetSubcarrierSpacing());
+    if (scsHz > 0.0)
+    {
+        // thermal noise per subcarrier: kB*T (=-174 dBm/Hz at 290 K) * SCS * noise figure
+        constexpr double kBT = 1.38064852e-23 * 290.0; // W/Hz
+        rssiPerReLin += kBT * scsHz * std::pow(10.0, GetNoiseFigure() / 10.0);
+    }
+    for (const auto& kv : m_ueMeasurementsMap)
+    {
+        if (kv.second.rsrpNum > 0)
+        {
+            // rsrpSum is linear mW; convert the average to W
+            rssiPerReLin += kv.second.rsrpSum / static_cast<double>(kv.second.rsrpNum) / 1000.0;
+        }
     }
 
     std::map<uint16_t, UeMeasurementsElement>::iterator it;
@@ -1705,11 +1948,19 @@ NrUePhy::ReportUeMeasurements()
         double avg_rsrq = 0;
         if ((*it).second.rsrpNum != 0)
         {
-            avg_rsrp = (*it).second.rsrpSum / static_cast<double>((*it).second.rsrpNum);
-            if (linAvgReport.Get())
+            // Samples are accumulated in linear power so that occasional
+            // deep-null sidelobe samples (PSS received while the gNB's analog
+            // beam points at another UE) do not dominate the average the way
+            // they would in a dB-domain mean.
+            avg_rsrp = 10 * log10((*it).second.rsrpSum / static_cast<double>((*it).second.rsrpNum));
+            // RSRQ = SUBCARRIERS_PER_RB * RSRP / RSSI (per RE): this cell's RS power relative
+            // to the total received power (all cells + noise). Interference-aware -- a strong
+            // cell in a crowded/interfered zone scores low. (Previously hardcoded to 0 dB.)
+            if (rssiPerReLin > 0.0)
             {
-                // running linear mean in mW -> dBm
-                avg_rsrp = 10.0 * std::log10(std::max((*it).second.rsrpSum, 1e-300));
+                const double rsrpLin = std::pow(10.0, (avg_rsrp - 30.0) / 10.0);
+                avg_rsrq = 10.0 * std::log10(rsrpLin / (NrSpectrumValueHelper::SUBCARRIERS_PER_RB *
+                                                        rssiPerReLin));
             }
         }
         else
@@ -1725,22 +1976,10 @@ NrUePhy::ReportUeMeasurements()
 
         m_reportRsrpTrace(GetCellId(), m_imsi, m_rnti, avg_rsrp, GetBwpId());
 
-        // trigger RLF detection only when UE has an active RRC connection
-        // and RLF detection attribute is set to true
-        if (m_isConnected && m_enableRlfDetection)
-        {
-            double avrgSinrForRlf = ComputeAvgSinr(m_ctrlSinrForRlf);
-            RlfDetection(10 * log10(avrgSinrForRlf));
-        }
-
         NrUeCphySapUser::UeMeasurementsElement newEl;
         newEl.m_cellId = (*it).first;
         newEl.m_rsrp = avg_rsrp;
-        if (rsrqOn.Get() && rssiMw > 0.0 && (*it).second.rsrpNum != 0)
-        {
-            avg_rsrq = 10.0 * std::log10(nRb * std::pow(10.0, avg_rsrp / 10.0) / rssiMw);
-        }
-        newEl.m_rsrq = avg_rsrq; // 0 unless NrUeRsrqFromRssi (ntn-patch 08)
+        newEl.m_rsrq = avg_rsrq; // interference-aware RSRQ (RSRP/RSSI), computed above
         ret.m_ueMeasurementsList.push_back(newEl);
         ret.m_componentCarrierId = GetBwpId();
 
@@ -1757,6 +1996,12 @@ NrUePhy::ReportUeMeasurements()
 
     m_ueMeasurementsMap.clear();
     Simulator::Schedule(m_ueMeasurementsFilterPeriod, &NrUePhy::ReportUeMeasurements, this);
+}
+
+void
+NrUePhy::SetCsiFeedbackType(uint8_t csiFeedbackType)
+{
+    m_csiFeedbackType = csiFeedbackType;
 }
 
 void
@@ -1777,7 +2022,15 @@ NrUePhy::ReportDlCtrlSinr(const SpectrumValue& sinr)
     }
 
     NS_ASSERT(rbUsed);
+    m_ctrlSinrForRlf = sinr;
     m_dlCtrlSinrTrace(GetCellId(), m_rnti, sinrSum / rbUsed, GetBwpId());
+
+    // trigger RLF detection only when UE has an active RRC connection
+    // and RLF detection attribute is set to true
+    if (m_isConnected && m_enableRlfDetection)
+    {
+        RlfDetection(10 * log10(ComputeAvgSinr(m_ctrlSinrForRlf)));
+    }
 }
 
 uint8_t
@@ -1785,7 +2038,7 @@ NrUePhy::ComputeCqi(const SpectrumValue& sinr)
 {
     NS_LOG_FUNCTION(this);
     uint8_t mcs; // it is initialized by AMC in the following call
-    uint8_t wbCqi = m_amc->CreateCqiFeedbackWbTdma(sinr, mcs);
+    uint8_t wbCqi = m_amc->CreateCqiFeedbackSiso(sinr, mcs);
     return wbCqi;
 }
 
@@ -1798,6 +2051,12 @@ NrUePhy::StartEventLoop(uint16_t frame, uint8_t subframe, uint16_t slot)
     {
         NS_LOG_INFO("Initial bandwidth not set, configuring the default one for Cell ID: "
                     << GetCellId() << ", RNTI: " << GetRnti() << ", BWP ID: " << GetBwpId());
+        if (GetSubcarrierSpacing() == 0)
+        {
+            NS_LOG_INFO("No numerology was set, assuming numerology 0 for Cell ID: "
+                        << GetCellId() << ", RNTI: " << GetRnti() << ", BWP ID: " << GetBwpId());
+            SetNumerology(0);
+        }
         DoSetInitialBandwidth();
     }
 
@@ -1822,9 +2081,13 @@ void
 NrUePhy::DoSetInitialBandwidth()
 {
     NS_LOG_FUNCTION(this);
-    // configure initial bandwidth to 6 RBs, numerology 0
+    // configure initial bandwidth to 6 RBs, numerology 0. ntn-patch 19: with frequency reuse the
+    // cell's SSB / CORESET#0 sit in its own sub-band (TR 38.821 6.1.1.1), which a 6-RB window at
+    // the carrier centre misses for every reuse colour but the middle one; InitialBandwidthRbs
+    // widens the initial search window (0 keeps the 6 RBs).
+    const uint32_t initialRbs = (m_initialBandwidthRbs > 0) ? m_initialBandwidthRbs : 6;
     double initialBandwidthHz =
-        6 * GetSubcarrierSpacing() * NrSpectrumValueHelper::SUBCARRIERS_PER_RB;
+        initialRbs * GetSubcarrierSpacing() * NrSpectrumValueHelper::SUBCARRIERS_PER_RB;
     // divided by 100*1000 because the parameter should be in 100KHz
     uint16_t initialBandwidthIn100KHz = ceil(initialBandwidthHz / (100 * 1000));
     // account for overhead that will be reduced when determining real BW
@@ -1842,20 +2105,9 @@ NrUePhy::DoSetInitialBandwidth()
 }
 
 uint16_t
-NrUePhy::DoGetCellId()
+NrUePhy::DoGetCellId() const
 {
     return GetCellId();
-}
-
-uint32_t
-NrUePhy::DoGetDlEarfcn()
-{
-    // TBD See how to get rid of this function in future
-    // Added for the compatibility with 810 MR to LTE.
-    NS_LOG_FUNCTION(this);
-    NS_LOG_WARN("DoGetDlEarfcn function is called. This function should be removed in future once "
-                "NR has its own RRC.");
-    return 0;
 }
 
 void
@@ -1863,7 +2115,12 @@ NrUePhy::DoSetDlBandwidth(uint16_t dlBandwidth)
 {
     NS_LOG_FUNCTION(this << +dlBandwidth);
 
+    const auto rbNum = GetRbNum();
     SetChannelBandwidth(dlBandwidth);
+    if (GetRbNum() != rbNum)
+    {
+        ResetCsiMeasurements();
+    }
 
     NS_LOG_DEBUG("PHY reconfiguring. Result: "
                  << std::endl
@@ -1881,9 +2138,9 @@ NrUePhy::DoSetDlBandwidth(uint16_t dlBandwidth)
 }
 
 void
-NrUePhy::DoConfigureUplink(uint16_t ulEarfcn, uint8_t ulBandwidth)
+NrUePhy::DoConfigureUplink(uint16_t arfcn, uint8_t ulBandwidth)
 {
-    NS_LOG_FUNCTION(this << ulEarfcn << +ulBandwidth);
+    NS_LOG_FUNCTION(this << arfcn << +ulBandwidth);
     // Ignore this; should be equal to dlBandwidth
     m_ulConfigured = true;
 }
@@ -1922,19 +2179,11 @@ NrUePhy::SetPhySapUser(NrUePhySapUser* ptr)
 }
 
 void
-NrUePhy::DoNotifyConnectionSuccessful()
+NrUePhy::NotifyConnectionSuccessful()
 {
-    /**
-     * Radio link failure detection should take place only on the
-     * primary carrier to avoid errors due to multiple calls to the
-     * same methods at the RRC layer
-     */
-    if (GetBwpId() == 0)
-    {
-        m_isConnected = true;
-        // Initialize the parameters for radio link failure detection
-        InitializeRlfParams();
-    }
+    m_isConnected = true;
+    // Initialize the parameters for radio link failure detection
+    InitializeRlfParams();
 }
 
 void
@@ -1942,6 +2191,8 @@ NrUePhy::DoResetPhyAfterRlf()
 {
     NS_LOG_FUNCTION(this);
     // m_spectrumPhy->m_harqPhyModule->ClearDlHarqBuffer(m_rnti); // flush HARQ buffers
+    ClearRntiSlotAllocInfo(m_rnti);
+    DoSetCellId(0);
     DoReset();
 }
 
@@ -2067,31 +2318,15 @@ NrUePhy::DoSetImsi(uint64_t imsi)
 }
 
 void
-NrUePhy::GenerateDlCqiReportMimo(const std::vector<MimoSignalChunk>& mimoChunks)
+NrUePhy::GenerateDlCqiReportMimo(const NrMimoSignal& rxSignal,
+                                 NrPmSearch::PmiUpdate pmiUpdateParams)
 {
     NS_LOG_FUNCTION(this);
-    // ntn-patch 20: no CSI from a source-cell PDSCH that ends after the MAC reset.
-    if (m_handoverRxFlush && m_spectrumPhy && m_spectrumPhy->IsDlDataRxAborted())
-    {
-        return;
-    }
     // Adopted from NrUePhy::GenerateDlCqiReport: CQI feedback requires properly configured UE
     if (!m_ulConfigured || (m_rnti == 0))
     {
         return;
     }
-    // Adopted from NrUePhy::GenerateDlCqiReport: Do not send feedback if this UE was not
-    // receiving downlink data (was not scheduled)
-    if (!m_receptionEnabled)
-    {
-        return;
-    }
-
-    // Combine multiple signal chunks into a single channel matrix and interference covariance
-    auto rxSignal = NrMimoSignal{mimoChunks};
-
-    // Determine if an update to wideband or subband PMI is needed and possible
-    auto pmiUpdateParams = CheckUpdatePmi();
 
     // Create DL CQI message for CQI, PMI, and RI. PMI values are updated only if specified by
     // pmiUpdateParams, otherwise assume same PMI values as during last CQI feedback
@@ -2108,11 +2343,161 @@ NrUePhy::GenerateDlCqiReportMimo(const std::vector<MimoSignalChunk>& mimoChunks)
         .m_optPrecMat = cqi.m_optPrecMat,
     };
 
+    m_cqiFeedbackTrace(m_rnti, cqi.m_wbCqi, cqi.m_mcs, cqi.m_rank);
+
     auto msg = Create<NrDlCqiMessage>();
-    msg->SetSourceBwp(GetBwpId());
+    msg->SetSourceBwpArfcn(DoGetArfcn());
     msg->SetDlCqi(dlcqi);
 
     DoSendControlMessage(msg);
+}
+
+uint8_t
+NrUePhy::GetCsiFeedbackType() const
+{
+    return m_csiFeedbackType;
+}
+
+void
+NrUePhy::CsiRsReceived(const std::vector<MimoSignalChunk>& csiRsMimoSignal)
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT(csiRsMimoSignal.size() == 1);
+    m_csiRsMimoSignal = NrMimoSignal(csiRsMimoSignal);
+    m_lastCsiRsMimoSignalTime = Simulator::Now();
+}
+
+void
+NrUePhy::GenerateCsiRsCqi()
+{
+    NS_LOG_FUNCTION(this);
+
+    if (!m_isConnected)
+    {
+        NS_LOG_DEBUG("UE is disconnected, so not transmitting any CSI feedback.");
+        return;
+    }
+    if (m_csiRsMimoSignal.m_chanMat.GetSize() == 0)
+    {
+        NS_LOG_DEBUG("The CSI-RS was discarded by a cell or bandwidth change.");
+        return;
+    }
+    NrMimoSignal csiFeedbackSignal = m_csiRsMimoSignal;
+    // if there is some old interference information use it,
+    // otherwise, just use the plain CSI-RS signal for the CQI feedback
+    // (i.e., no interference information). This may happen before any
+    // PDSCH for this UE is scheduled, and CSI-IM is disabled.
+    if (m_avgIntCovMat.GetSize() != 0)
+    {
+        csiFeedbackSignal.m_covMat = m_avgIntCovMat;
+    }
+    TriggerDlCqiGeneration(csiFeedbackSignal, NrPmSearch::PmiUpdate(true, true));
+}
+
+void
+NrUePhy::CsiImEnded(const std::vector<MimoSignalChunk>& csiImSignalChunks)
+{
+    NS_LOG_FUNCTION(this);
+
+    if (!m_isConnected)
+    {
+        NS_LOG_DEBUG("UE is disconnected, so not transmitting any CSI feedback.");
+        return;
+    }
+
+    // Combine multiple CSI-IM signal chunks into a single channel,
+    // and interference covariance
+    auto csiFeedbackSignal = NrMimoSignal(csiImSignalChunks);
+    CalcAvgIntCovMat(&m_avgIntCovMat, csiFeedbackSignal.m_covMat);
+    // CSI-IM does not have RX spectrum channel matrix, because it only contains the interference
+    // hence the channel spectrum matrix to be used is from CSI-RS signal
+    if (m_csiRsMimoSignal.m_chanMat.GetSize() == 0)
+    {
+        NS_LOG_DEBUG("The CSI-RS of this CSI-IM was discarded by a cell or bandwidth change.");
+        return;
+    }
+    if (m_alphaCovMat != 1)
+    {
+        csiFeedbackSignal.m_covMat = m_avgIntCovMat;
+    }
+    csiFeedbackSignal.m_chanMat = m_csiRsMimoSignal.m_chanMat;
+    TriggerDlCqiGeneration(csiFeedbackSignal, NrPmSearch::PmiUpdate(true, true));
+}
+
+void
+NrUePhy::PdschMimoReceived(const std::vector<MimoSignalChunk>& pdschMimoChunks)
+{
+    NS_LOG_FUNCTION(this);
+
+    if (!m_isConnected)
+    {
+        NS_LOG_DEBUG("UE is disconnected, so not transmitting any CSI feedback.");
+        return;
+    }
+
+    // Combine multiple signal chunks into a single channel matrix and interference covariance
+    auto csiFeedbackSignal = NrMimoSignal(pdschMimoChunks);
+    // if alpha != 1, calculate the interference covariance moving average
+    CalcAvgIntCovMat(&m_avgIntCovMat, csiFeedbackSignal.m_covMat);
+    if (m_alphaCovMat != 1)
+    {
+        csiFeedbackSignal.m_covMat = m_avgIntCovMat;
+    }
+    // if CSI-RS enabled, use the spectrum channel matrix from CSI-RS signal, once the UE
+    // received a CSI-RS since it connected to the cell
+    if ((m_csiFeedbackType & CQI_CSI_RS) && m_csiRsMimoSignal.m_chanMat.GetSize() != 0)
+    {
+        csiFeedbackSignal.m_chanMat = m_csiRsMimoSignal.m_chanMat;
+    }
+
+    // CSI-RS slot, or PDSCH only based CQI feedback
+    // Determine if an update to wideband or subband PMI is needed and possible
+    auto pmiUpdateParams = CheckUpdatePmi();
+    TriggerDlCqiGeneration(csiFeedbackSignal, pmiUpdateParams);
+}
+
+void
+NrUePhy::TriggerDlCqiGeneration(const NrMimoSignal& csiFeedbackSignal,
+                                NrPmSearch::PmiUpdate pmiUpdateParams)
+{
+    NS_LOG_FUNCTION(this);
+    if (m_pmSearch)
+    {
+        GenerateDlCqiReportMimo(csiFeedbackSignal, pmiUpdateParams);
+    }
+    else
+    {
+        // Interference whitening: normalize the signal such that interference + noise covariance
+        // matrix is the identity matrix
+        auto intfNormChanMat =
+            csiFeedbackSignal.m_covMat.CalcIntfNormChannel(csiFeedbackSignal.m_chanMat);
+        // Create a dummy precoding matrix
+        ComplexMatrixArray precMat = ComplexMatrixArray(
+            csiFeedbackSignal.m_chanMat.GetNumCols(),
+            csiFeedbackSignal.m_chanMat.GetNumRows(),
+            csiFeedbackSignal.m_chanMat.GetNumPages(),
+            std::valarray<std::complex<double>>(std::complex<double>(1.0, 0.0),
+                                                csiFeedbackSignal.m_chanMat.GetSize()));
+        ;
+
+        NrSinrMatrix sinrMatrix = intfNormChanMat.ComputeSinrForPrecoding(precMat);
+        GenerateDlCqiReport(sinrMatrix.GetVectorizedSpecVal());
+    }
+}
+
+void
+NrUePhy::CalcAvgIntCovMat(NrCovMat* avgIntCovMat, const NrCovMat& newCovMat) const
+{
+    NS_LOG_FUNCTION(this);
+    if (avgIntCovMat->GetSize() == 0)
+    {
+        *avgIntCovMat = ComplexMatrixArray(newCovMat.GetNumRows(),
+                                           newCovMat.GetNumCols(),
+                                           newCovMat.GetNumPages());
+    }
+
+    *avgIntCovMat = newCovMat * std::complex<double>{m_alphaCovMat, 0.0} +
+                    *avgIntCovMat * std::complex<double>{1 - m_alphaCovMat, 0.0};
 }
 
 NrPmSearch::PmiUpdate

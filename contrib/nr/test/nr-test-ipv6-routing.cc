@@ -6,8 +6,22 @@
  * Author: Manoj Kumar Rana <manoj24.rana@gmail.com>
  */
 
+/**
+ * @ingroup test
+ * @file nr-test-ipv6-routing.cc
+ *
+ * @brief Test suite `nr-ipv6-routing-test`: end-to-end IPv6 routing over the NR EPC. The scenario
+ * has 3 UEs, 2 gNBs and a remote host; UE0 runs UDP echo clients towards servers on the remote
+ * host, on UE1 (attached to the same gNB) and on UE2 (attached to the other gNB). Traces at UE0's
+ * IPv6 layer and at the PGW (S1-U and TUN directions) record the traffic; the checker matches
+ * every echo reply received by UE0 to its request by packet UID, addresses and ports, requires
+ * equal request/reply counts, and verifies each packet crossed the PGW exactly once, i.e. that
+ * the followed route is not redundant.
+ */
+
 #include "ns3/config-store.h"
 #include "ns3/core-module.h"
+#include "ns3/iana-internet-protocol-numbers.h"
 #include "ns3/internet-module.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/ipv6-static-routing.h"
@@ -22,7 +36,7 @@
 #include <algorithm>
 
 /* *
-   * Scenario:  3 UEs, 2 ENBs, 1 Remote Host, UE0<-->gNB0, UE1<-->gNB0, UE2<-->gNB1
+   * Scenario:  3 UEs, 2 gNBs, 1 Remote Host, UE0<-->gNB0, UE1<-->gNB0, UE2<-->gNB1
                 Servers: UE1, UE2, Remote Host
                 Client: UE0 (3 clients)
                 UDP Echo Packets transmitted between client and server
@@ -39,9 +53,9 @@ the followed route for a packet
 using namespace ns3;
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Nr Ipv6 routing test case.
+ * @brief Nr Ipv6 routing test case.
  */
 class NrIpv6RoutingTestCase : public TestCase
 {
@@ -50,35 +64,35 @@ class NrIpv6RoutingTestCase : public TestCase
     ~NrIpv6RoutingTestCase() override;
 
     /**
-     * \brief Initialize testing parameters.
+     * @brief Initialize testing parameters.
      */
     void Checker();
 
     /**
-     * \brief sent Packets from client's IPv6 interface.
-     * \param p packet
-     * \param ipv6 Ipv6 object
-     * \param interface Ipv6interface from which the packet is transmitted
+     * @brief sent Packets from client's IPv6 interface.
+     * @param p packet
+     * @param ipv6 Ipv6 object
+     * @param interface Ipv6interface from which the packet is transmitted
      */
     void SentAtClient(Ptr<const Packet> p, Ptr<Ipv6> ipv6, uint32_t interface);
 
     /**
-     * \brief Received Packets at client's IPv6 interface.
-     * \param p packet
-     * \param ipv6 Ipv6 object
-     * \param interface Ipv6interface at which the packet is received
+     * @brief Received Packets at client's IPv6 interface.
+     * @param p packet
+     * @param ipv6 Ipv6 object
+     * @param interface Ipv6interface at which the packet is received
      */
     void ReceivedAtClient(Ptr<const Packet> p, Ptr<Ipv6> ipv6, uint32_t interface);
 
     /**
-     * \brief Received Packet at pgw from gnb.
-     * \param p packet
+     * @brief Received Packet at pgw from gnb.
+     * @param p packet
      */
     void GnbToPgw(Ptr<Packet> p);
 
     /**
-     * \brief Received Packet at pgw from gnb.
-     * \param p packet
+     * @brief Received Packet at pgw from gnb.
+     * @param p packet
      */
     void TunToPgw(Ptr<Packet> p);
 
@@ -108,7 +122,7 @@ NrIpv6RoutingTestCase::SentAtClient(Ptr<const Packet> p, Ptr<Ipv6> ipv6, uint32_
 {
     Ipv6Header ipv6Header;
     p->PeekHeader(ipv6Header);
-    if (ipv6Header.GetNextHeader() == UdpL4Protocol::PROT_NUMBER)
+    if (ipv6Header.GetNextHeader() == iana::internetprotocolnumbers::UDP)
     {
         m_clientTxPkts.push_back(p->Copy());
     }
@@ -119,7 +133,7 @@ NrIpv6RoutingTestCase::ReceivedAtClient(Ptr<const Packet> p, Ptr<Ipv6> ipv6, uin
 {
     Ipv6Header ipv6Header;
     p->PeekHeader(ipv6Header);
-    if (ipv6Header.GetNextHeader() == UdpL4Protocol::PROT_NUMBER)
+    if (ipv6Header.GetNextHeader() == iana::internetprotocolnumbers::UDP)
     {
         m_clientRxPkts.push_back(p->Copy());
     }
@@ -130,7 +144,7 @@ NrIpv6RoutingTestCase::GnbToPgw(Ptr<Packet> p)
 {
     Ipv6Header ipv6Header;
     p->PeekHeader(ipv6Header);
-    if (ipv6Header.GetNextHeader() == UdpL4Protocol::PROT_NUMBER)
+    if (ipv6Header.GetNextHeader() == iana::internetprotocolnumbers::UDP)
     {
         m_pgwUidRxFrmGnb.push_back(p->GetUid());
     }
@@ -141,7 +155,7 @@ NrIpv6RoutingTestCase::TunToPgw(Ptr<Packet> p)
 {
     Ipv6Header ipv6Header;
     p->PeekHeader(ipv6Header);
-    if (ipv6Header.GetNextHeader() == UdpL4Protocol::PROT_NUMBER)
+    if (ipv6Header.GetNextHeader() == iana::internetprotocolnumbers::UDP)
     {
         m_pgwUidRxFrmTun.push_back(p->GetUid());
     }
@@ -221,21 +235,10 @@ NrIpv6RoutingTestCase::DoRun()
     ConfigStore inputConfig;
     inputConfig.ConfigureDefaults();
 
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-
-    // Create a single RemoteHost
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
-
     // Create the Internet
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(1500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
+    auto [remoteHost, remoteHostAddr] =
+        nrEpcHelper->SetupRemoteHost6("100Gb/s", 1500, Seconds(0.010));
+    m_remoteHostAddr = remoteHostAddr;
 
     NodeContainer ueNodes;
     NodeContainer gnbNodes;
@@ -262,51 +265,23 @@ NrIpv6RoutingTestCase::DoRun()
     mobility.Install(gnbNodes);
 
     // Install the IP stack on the UEs
+    InternetStackHelper internet;
     internet.Install(ueNodes);
 
     // Create bandwidth part
-    auto bandwidthAndBWPPair =
-        nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1, BandwidthPartInfo::UMa}});
+    auto bandwidthAndBWPPair = nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1}}, "UMa");
 
     // Install NR Devices to the nodes
     NetDeviceContainer nrGnbDevs = nrHelper->InstallGnbDevice(gnbNodes, bandwidthAndBWPPair.second);
     NetDeviceContainer ueNrDevs = nrHelper->InstallUeDevice(ueNodes, bandwidthAndBWPPair.second);
-    nrHelper->UpdateDeviceConfigs(nrGnbDevs);
-    nrHelper->UpdateDeviceConfigs(ueNrDevs);
 
     // Assign IP address to UEs, and install applications
     m_ueIpIface = nrEpcHelper->AssignUeIpv6Address(NetDeviceContainer(ueNrDevs));
 
-    Ipv6StaticRoutingHelper ipv6RoutingHelper;
-
-    for (uint32_t u = 0; u < ueNodes.GetN(); ++u)
-    {
-        Ptr<Node> ueNode = ueNodes.Get(u);
-        // Set the default gateway for the UE
-        Ptr<Ipv6StaticRouting> ueStaticRouting =
-            ipv6RoutingHelper.GetStaticRouting(ueNode->GetObject<Ipv6>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress6(), 1);
-    }
-
-    // Attach two UEs at first eNodeB and one UE at second eNodeB
+    // Attach two UEs at first gNB and one UE at second gNB
     nrHelper->AttachToGnb(ueNrDevs.Get(0), nrGnbDevs.Get(0));
     nrHelper->AttachToGnb(ueNrDevs.Get(1), nrGnbDevs.Get(0));
     nrHelper->AttachToGnb(ueNrDevs.Get(2), nrGnbDevs.Get(1));
-
-    Ipv6AddressHelper ipv6h;
-    ipv6h.SetBase(Ipv6Address("6001:db80::"), Ipv6Prefix(64));
-    Ipv6InterfaceContainer internetIpIfaces = ipv6h.Assign(internetDevices);
-
-    internetIpIfaces.SetForwarding(0, true);
-    internetIpIfaces.SetDefaultRouteInAllNodes(0);
-
-    Ptr<Ipv6StaticRouting> remoteHostStaticRouting =
-        ipv6RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv6>());
-    remoteHostStaticRouting
-        ->AddNetworkRouteTo("7777:f00d::", Ipv6Prefix(64), internetIpIfaces.GetAddress(0, 1), 1, 0);
-
-    // interface 0 is localhost, 1 is the p2p device
-    m_remoteHostAddr = internetIpIfaces.GetAddress(1, 1);
 
     // Install and start applications on UEs and remote host
     UdpEchoServerHelper echoServer1(10);
@@ -358,7 +333,7 @@ NrIpv6RoutingTestCase::DoRun()
 
     // Set Callback at SgwPgWApplication of epc to get the packets from gnb and from tunnel net
     // device
-    Ptr<Application> appPgw = pgw->GetApplication(0);
+    Ptr<Application> appPgw = nrEpcHelper->GetPgwNode()->GetApplication(0);
     appPgw->TraceConnectWithoutContext("RxFromS1u",
                                        MakeCallback(&NrIpv6RoutingTestCase::GnbToPgw, this));
     appPgw->TraceConnectWithoutContext("RxFromTun",
@@ -373,7 +348,7 @@ NrIpv6RoutingTestCase::DoRun()
 }
 
 /**
- * \brief test suite 1
+ * @brief test suite 1
  */
 class NrIpv6RoutingTestSuite : public TestSuite
 {
@@ -388,7 +363,7 @@ NrIpv6RoutingTestSuite::NrIpv6RoutingTestSuite()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrIpv6RoutingTestSuite g_nripv6testsuite;

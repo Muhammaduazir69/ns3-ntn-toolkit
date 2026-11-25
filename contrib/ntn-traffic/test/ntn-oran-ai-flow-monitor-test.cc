@@ -260,7 +260,7 @@ class OranMonitorExportTest : public TestCase
 {
   public:
     OranMonitorExportTest()
-        : TestCase("XML / CSV / Influx exporters round-trip with content")
+        : TestCase("XML - CSV - Influx exporters round-trip with content")
     {
     }
 

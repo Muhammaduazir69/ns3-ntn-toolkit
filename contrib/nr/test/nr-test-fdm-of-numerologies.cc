@@ -8,19 +8,18 @@
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
-#include "ns3/nr-eps-bearer-tag.h"
 #include "ns3/nr-module.h"
+#include "ns3/nr-qos-flow-tag.h"
 #include "ns3/point-to-point-helper.h"
-#include "ns3/three-gpp-channel-model.h"
 // #include "ns3/component-carrier-gnb.h"
 // #include "ns3/component-carrier-nr-ue.h"
 using namespace ns3;
 
 /**
- * \file nr-test-fdm-of-numerologies.cc
- * \ingroup test
+ * @file nr-test-fdm-of-numerologies.cc
+ * @ingroup test
  *
- * \brief This test case checks if the throughput achieved over certain bandwidth part
+ * @brief This test case checks if the throughput achieved over certain bandwidth part
  * is proportional to the bandwidth of that bandwidth part.
  * The test scenario consists of a scenario in which two UEs are attached to a
  * gNB, and perform UDP full buffer downlink traffic.
@@ -86,10 +85,9 @@ NrTestFdmOfNumerologiesCase1::DoRun()
     uint32_t packetSize = 1000;
 
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
-    Config::SetDefault("ns3::NrEpsBearer::Release", UintegerValue(15));
 
     RngSeedManager::SetSeed(1);
-    RngSeedManager::SetRun(1);
+    RngSeedManager::SetRun(2);
 
     // create base stations and mobile terminals
     NodeContainer gNbNodes;
@@ -119,7 +117,11 @@ NrTestFdmOfNumerologiesCase1::DoRun()
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
-
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Set the spectrum channel with the UMi scenario and always LOS condition
+    channelHelper->ConfigureFactories("UMi", "LOS");
+    // Set shadowing disabled
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     // Put the pointers inside nrHelper
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
 
@@ -142,20 +144,12 @@ NrTestFdmOfNumerologiesCase1::DoRun()
 
     const uint8_t numCcPerBand = 2;
 
-    CcBwpCreator::SimpleOperationBandConf bandConf1(28e9,
-                                                    totalBandwidth,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon_LoS);
+    CcBwpCreator::SimpleOperationBandConf bandConf1(28e9, totalBandwidth, numCcPerBand);
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
-
+    channelHelper->AssignChannelsToBands({band1});
     // Set BW of each BWP
     band1.m_cc[0]->m_bwp[0]->m_channelBandwidth = m_bw1;
     band1.m_cc[1]->m_bwp[0]->m_channelBandwidth = m_bw2;
-
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    nrHelper->InitializeOperationBand(&band1);
-
     allBwps = CcBwpCreator::GetAllBwps({band1});
 
     // gNb routing between Bearer and bandwidh part
@@ -171,87 +165,25 @@ NrTestFdmOfNumerologiesCase1::DoRun()
 
     double x = pow(10, totalTxPower / 10);
 
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("Numerology", UintegerValue(m_numerology));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
         ->SetAttribute("Numerology", UintegerValue(m_numerology));
 
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("TxPower", DoubleValue(10 * log10((m_bw1 / totalBandwidth) * x)));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
         ->SetAttribute("TxPower", DoubleValue(10 * log10((m_bw2 / totalBandwidth) * x)));
 
-    nrHelper->GetUePhy(ueNetDev.Get(0), 0)
+    NrHelper::GetUePhy(ueNetDev.Get(0), 0)
         ->SetAttribute("TxPower", DoubleValue(10 * log10((m_bw1 / totalBandwidth) * x)));
-    nrHelper->GetUePhy(ueNetDev.Get(0), 1)
+    NrHelper::GetUePhy(ueNetDev.Get(0), 1)
         ->SetAttribute("TxPower", DoubleValue(10 * log10((m_bw2 / totalBandwidth) * x)));
 
-    nrHelper->GetUePhy(ueNetDev.Get(1), 0)
+    NrHelper::GetUePhy(ueNetDev.Get(1), 0)
         ->SetAttribute("TxPower", DoubleValue(10 * log10((m_bw1 / totalBandwidth) * x)));
-    nrHelper->GetUePhy(ueNetDev.Get(1), 1)
+    NrHelper::GetUePhy(ueNetDev.Get(1), 1)
         ->SetAttribute("TxPower", DoubleValue(10 * log10((m_bw2 / totalBandwidth) * x)));
-
-    for (uint32_t j = 0; j < gNbNodes.GetN(); ++j)
-    {
-        // We test 2 BWP in this test
-        for (uint8_t bwpId = 0; bwpId < 2; bwpId++)
-        {
-            Ptr<const NrSpectrumPhy> txSpectrumPhy =
-                nrHelper->GetGnbPhy(gnbNetDev.Get(j), bwpId)->GetSpectrumPhy();
-            Ptr<SpectrumChannel> txSpectrumChannel = txSpectrumPhy->GetSpectrumChannel();
-            Ptr<ThreeGppPropagationLossModel> propagationLossModel =
-                DynamicCast<ThreeGppPropagationLossModel>(
-                    txSpectrumChannel->GetPropagationLossModel());
-            NS_ASSERT(propagationLossModel != nullptr);
-            propagationLossModel->AssignStreams(1);
-            Ptr<ChannelConditionModel> channelConditionModel =
-                propagationLossModel->GetChannelConditionModel();
-            channelConditionModel->AssignStreams(1);
-            Ptr<ThreeGppSpectrumPropagationLossModel> spectrumLossModel =
-                DynamicCast<ThreeGppSpectrumPropagationLossModel>(
-                    txSpectrumChannel->GetPhasedArraySpectrumPropagationLossModel());
-            NS_ASSERT(spectrumLossModel != nullptr);
-            Ptr<ThreeGppChannelModel> channel =
-                DynamicCast<ThreeGppChannelModel>(spectrumLossModel->GetChannelModel());
-            channel->AssignStreams(1);
-        }
-    }
-
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        // We test 2 BWP in this test
-        for (uint8_t bwpId = 0; bwpId < 2; bwpId++)
-        {
-            Ptr<const NrSpectrumPhy> txSpectrumPhy =
-                nrHelper->GetUePhy(ueNetDev.Get(j), bwpId)->GetSpectrumPhy();
-            Ptr<SpectrumChannel> txSpectrumChannel = txSpectrumPhy->GetSpectrumChannel();
-            Ptr<ThreeGppPropagationLossModel> propagationLossModel =
-                DynamicCast<ThreeGppPropagationLossModel>(
-                    txSpectrumChannel->GetPropagationLossModel());
-            NS_ASSERT(propagationLossModel != nullptr);
-            propagationLossModel->AssignStreams(1);
-            Ptr<ChannelConditionModel> channelConditionModel =
-                propagationLossModel->GetChannelConditionModel();
-            channelConditionModel->AssignStreams(1);
-            Ptr<ThreeGppSpectrumPropagationLossModel> spectrumLossModel =
-                DynamicCast<ThreeGppSpectrumPropagationLossModel>(
-                    txSpectrumChannel->GetPhasedArraySpectrumPropagationLossModel());
-            NS_ASSERT(spectrumLossModel != nullptr);
-            Ptr<ThreeGppChannelModel> channel =
-                DynamicCast<ThreeGppChannelModel>(spectrumLossModel->GetChannelModel());
-            channel->AssignStreams(1);
-        }
-    }
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
 
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
@@ -280,14 +212,6 @@ NrTestFdmOfNumerologiesCase1::DoRun()
     internet.Install(ueNodes);
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ueNetDev, gnbNetDev);
@@ -318,25 +242,25 @@ NrTestFdmOfNumerologiesCase1::DoRun()
                                               // a short time, how much traffic can handle each BWP
             clientAppsUl.Add(ulClient.Install(ueNodes.Get(j)));
 
-            Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-            NrEpcTft::PacketFilter ulpf;
+            Ptr<NrQosRule> rule = Create<NrQosRule>();
+            NrQosRule::PacketFilter ulpf;
             ulpf.remotePortStart = ulPort;
             ulpf.remotePortEnd = ulPort;
-            tft->Add(ulpf);
+            rule->Add(ulpf);
 
-            enum NrEpsBearer::Qci q;
+            enum NrQosFlow::FiveQi q;
 
             if (j == 0)
             {
-                q = NrEpsBearer::NGBR_LOW_LAT_EMBB;
+                q = NrQosFlow::NGBR_LOW_LAT_EMBB;
             }
             else
             {
-                q = NrEpsBearer::GBR_CONV_VOICE;
+                q = NrQosFlow::GBR_CONV_VOICE;
             }
 
-            NrEpsBearer bearer(q);
-            nrHelper->ActivateDedicatedEpsBearer(ueNetDev.Get(j), bearer, tft);
+            NrQosFlow flow(q);
+            nrHelper->ActivateDedicatedQosFlow(ueNetDev.Get(j), flow, rule);
 
             ulPort++;
         }
@@ -364,25 +288,25 @@ NrTestFdmOfNumerologiesCase1::DoRun()
                                               // a short time, how much traffic can handle each BWP
             clientAppsDl.Add(dlClient.Install(remoteHost));
 
-            Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-            NrEpcTft::PacketFilter dlpf;
+            Ptr<NrQosRule> rule = Create<NrQosRule>();
+            NrQosRule::PacketFilter dlpf;
             dlpf.localPortStart = dlPort;
             dlpf.localPortEnd = dlPort;
-            tft->Add(dlpf);
+            rule->Add(dlpf);
 
-            enum NrEpsBearer::Qci q;
+            enum NrQosFlow::FiveQi q;
 
             if (j == 0)
             {
-                q = NrEpsBearer::NGBR_LOW_LAT_EMBB;
+                q = NrQosFlow::NGBR_LOW_LAT_EMBB;
             }
             else
             {
-                q = NrEpsBearer::GBR_CONV_VOICE;
+                q = NrQosFlow::GBR_CONV_VOICE;
             }
 
-            NrEpsBearer bearer(q);
-            nrHelper->ActivateDedicatedEpsBearer(ueNetDev.Get(j), bearer, tft);
+            NrQosFlow flow(q);
+            nrHelper->ActivateDedicatedQosFlow(ueNetDev.Get(j), flow, rule);
         }
 
         // start UDP server and client apps
@@ -393,6 +317,13 @@ NrTestFdmOfNumerologiesCase1::DoRun()
     }
 
     // nrHelper->EnableTraces();
+
+    nrHelper->AssignStreams({.assignEpc = true,
+                             .remoteHostNodes = remoteHostContainer,
+                             .ueNodes = ueNodes,
+                             .gnbDevs = gnbNetDev,
+                             .ueDevs = ueNetDev});
+
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
 

@@ -40,6 +40,13 @@ const PhyEntity::PpduFormats HtPhy::m_htPpduFormats {
                              WIFI_PPDU_FIELD_DATA } }
 };
 
+/**
+ * \brief map a given secondary channel width to its channel list type
+ */
+const std::map<MHz_u, WifiChannelListType> htSecondaryChannels {
+    {20, WIFI_CHANLIST_SECONDARY},
+};
+
 // clang-format on
 
 HtPhy::HtPhy(uint8_t maxNss /* = 1 */, bool buildModeList /* = true */)
@@ -255,7 +262,6 @@ HtPhy::GetTrainingDuration(const WifiTxVector& txVector,
                         << +nDataLtf << ")  and extension (" << +nExtensionLtf
                         << ")  LTFs numbers for HT"); // see IEEE 802.11-2016, section 19.3.9.4.6
                                                       // "HT-LTF definition"
-    Time duration = MicroSeconds(4) * (nDataLtf + nExtensionLtf);
     return MicroSeconds(4) * (1 /* HT-STF */ + nDataLtf + nExtensionLtf);
 }
 
@@ -312,8 +318,8 @@ HtPhy::GetPayloadDuration(uint32_t size,
     case LAST_MPDU_IN_AGGREGATE: {
         // last packet in an A-MPDU
         uint32_t totalSize = totalAmpduSize + size;
-        numSymbols = lrint(
-            stbc * ceil((service + totalSize * 8.0 + 6 * nes) / (stbc * numDataBitsPerSymbol)));
+        numSymbols =
+            stbc * ceil((service + totalSize * 8.0 + 6 * nes) / (stbc * numDataBitsPerSymbol));
         NS_ASSERT(totalAmpduNumSymbols <= numSymbols);
         numSymbols -= totalAmpduNumSymbols;
         if (incFlag)
@@ -329,7 +335,7 @@ HtPhy::GetPayloadDuration(uint32_t size,
         // The number of OFDM symbols in the data field when BCC encoding
         // is used is given in equation 19-32 of the IEEE 802.11-2016 standard.
         numSymbols =
-            lrint(stbc * ceil((service + size * 8.0 + 6.0 * nes) / (stbc * numDataBitsPerSymbol)));
+            stbc * ceil((service + size * 8.0 + 6.0 * nes) / (stbc * numDataBitsPerSymbol));
         break;
     }
     default:
@@ -363,8 +369,8 @@ Time
 HtPhy::GetSymbolDuration(const WifiTxVector& txVector) const
 {
     const auto guardInterval = txVector.GetGuardInterval();
-    [[maybe_unused]] const auto gi = guardInterval.GetNanoSeconds();
-    NS_ASSERT(gi == 400 || gi == 800);
+    NS_ASSERT_MSG(IsValidGuardInterval(guardInterval, WIFI_STANDARD_80211n),
+                  "Invalid HT guard interval " << guardInterval.As(Time::NS));
     return GetSymbolDuration(guardInterval);
 }
 
@@ -453,7 +459,6 @@ Ptr<SpectrumValue>
 HtPhy::GetTxPowerSpectralDensity(Watt_u txPower, Ptr<const WifiPpdu> ppdu) const
 {
     const auto& centerFrequencies = ppdu->GetTxCenterFreqs();
-    NS_ASSERT(centerFrequencies.size() == 1);
     const auto& txVector = ppdu->GetTxVector();
     const auto channelWidth = txVector.GetChannelWidth();
     NS_LOG_FUNCTION(this << centerFrequencies.front() << channelWidth << txPower);
@@ -686,8 +691,8 @@ HtPhy::GetDataRateFromTxVector(const WifiTxVector& txVector, uint16_t /* staId *
 uint64_t
 HtPhy::GetDataRate(uint8_t mcsValue, MHz_u channelWidth, Time guardInterval, uint8_t nss)
 {
-    [[maybe_unused]] const auto gi = guardInterval.GetNanoSeconds();
-    NS_ASSERT((gi == 800) || (gi == 400));
+    NS_ASSERT_MSG(IsValidGuardInterval(guardInterval, WIFI_STANDARD_80211n),
+                  "Invalid HT guard interval " << guardInterval.As(Time::NS));
     NS_ASSERT(nss <= 4);
     return CalculateDataRate(GetSymbolDuration(guardInterval),
                              GetUsableSubcarriers(channelWidth),
@@ -712,7 +717,7 @@ HtPhy::CalculateDataRate(Time symbolDuration,
 uint16_t
 HtPhy::GetUsableSubcarriers(MHz_u channelWidth)
 {
-    return (channelWidth == 40) ? 108 : 52;
+    return (channelWidth == MHz_u{40}) ? 108 : 52;
 }
 
 Time
@@ -810,27 +815,94 @@ HtPhy::IsAllowed(const WifiTxVector& /*txVector*/)
 uint32_t
 HtPhy::GetMaxPsduSize() const
 {
-    return 65535;
+    return WIFI_PSDU_MAX_LENGTH_HT;
+}
+
+const std::map<MHz_u, WifiChannelListType>&
+HtPhy::GetCcaSecondaryChannels() const
+{
+    return htSecondaryChannels;
+}
+
+std::vector<MHz_u>
+HtPhy::GetCcaSecondaryWidths(const Ptr<const WifiPpdu> ppdu) const
+{
+    std::vector<MHz_u> secondaryWidthsToCheck{};
+    if (ppdu)
+    {
+        for (const auto& secondaryChannel : GetCcaSecondaryChannels())
+        {
+            const auto secondaryWidth = secondaryChannel.first;
+            if (secondaryWidth >= m_wifiPhy->GetChannelWidth())
+            {
+                break;
+            }
+            const MHz_u secondaryMinFreq =
+                m_wifiPhy->GetOperatingChannel().GetSecondaryChannelCenterFrequency(
+                    secondaryWidth) -
+                (secondaryWidth / 2);
+            const MHz_u secondaryMaxFreq =
+                m_wifiPhy->GetOperatingChannel().GetSecondaryChannelCenterFrequency(
+                    secondaryWidth) +
+                (secondaryWidth / 2);
+            if (ppdu->DoesOverlapChannel(secondaryMinFreq, secondaryMaxFreq))
+            {
+                secondaryWidthsToCheck.push_back(secondaryWidth);
+            }
+        }
+    }
+    else
+    {
+        for (MHz_u secondaryWidth = 20; secondaryWidth < m_wifiPhy->GetChannelWidth();
+             secondaryWidth *= 2)
+        {
+            secondaryWidthsToCheck.push_back(secondaryWidth);
+        }
+    }
+    return secondaryWidthsToCheck;
+}
+
+PhyEntity::CcaIndication
+HtPhy::GetCcaIndicationOnSecondary(const Ptr<const WifiPpdu> ppdu)
+{
+    const auto& secondaryChannels = GetCcaSecondaryChannels();
+    const auto secondaryWidthsToCheck = GetCcaSecondaryWidths(ppdu);
+    for (auto secondaryWidth : secondaryWidthsToCheck)
+    {
+        const auto channelType = secondaryChannels.at(secondaryWidth);
+
+        const auto ccaThreshold = GetCcaThreshold(ppdu, channelType);
+        const auto band = GetSecondaryBand(secondaryWidth);
+        if (const auto delayUntilCcaEnd = GetDelayUntilCcaEnd(ccaThreshold, band);
+            delayUntilCcaEnd.IsStrictlyPositive())
+        {
+            return std::make_pair(delayUntilCcaEnd, channelType);
+        }
+    }
+
+    return std::nullopt;
 }
 
 PhyEntity::CcaIndication
 HtPhy::GetCcaIndication(const Ptr<const WifiPpdu> ppdu)
 {
-    if (m_wifiPhy->GetChannelWidth() < 40)
+    if (m_wifiPhy->GetChannelWidth() < MHz_u{40})
     {
         return OfdmPhy::GetCcaIndication(ppdu);
     }
+
     auto ccaThreshold = GetCcaThreshold(ppdu, WIFI_CHANLIST_PRIMARY);
-    auto delayUntilCcaEnd = GetDelayUntilCcaEnd(ccaThreshold, GetPrimaryBand(20));
+    auto delayUntilCcaEnd = GetDelayUntilCcaEnd(ccaThreshold, GetPrimaryBand(MHz_u{20}));
     if (delayUntilCcaEnd.IsStrictlyPositive())
     {
         return std::make_pair(
             delayUntilCcaEnd,
             WIFI_CHANLIST_PRIMARY); // if Primary is busy, ignore CCA for Secondary
     }
+
     if (ppdu)
     {
-        const MHz_u primaryWidth = 20;
+        const MHz_u primaryWidth{20};
         const MHz_u p20MinFreq =
             m_wifiPhy->GetOperatingChannel().GetPrimaryChannelCenterFrequency(primaryWidth) -
             (primaryWidth / 2);
@@ -847,24 +919,7 @@ HtPhy::GetCcaIndication(const Ptr<const WifiPpdu> ppdu)
         }
     }
 
-    const MHz_u secondaryWidth = 20;
-    const MHz_u s20MinFreq =
-        m_wifiPhy->GetOperatingChannel().GetSecondaryChannelCenterFrequency(secondaryWidth) -
-        (secondaryWidth / 2);
-    const MHz_u s20MaxFreq =
-        m_wifiPhy->GetOperatingChannel().GetSecondaryChannelCenterFrequency(secondaryWidth) +
-        (secondaryWidth / 2);
-    if (!ppdu || ppdu->DoesOverlapChannel(s20MinFreq, s20MaxFreq))
-    {
-        ccaThreshold = GetCcaThreshold(ppdu, WIFI_CHANLIST_SECONDARY);
-        delayUntilCcaEnd = GetDelayUntilCcaEnd(ccaThreshold, GetSecondaryBand(20));
-        if (delayUntilCcaEnd.IsStrictlyPositive())
-        {
-            return std::make_pair(delayUntilCcaEnd, WIFI_CHANLIST_SECONDARY);
-        }
-    }
-
-    return std::nullopt;
+    return GetCcaIndicationOnSecondary(ppdu);
 }
 
 } // namespace ns3
@@ -882,7 +937,7 @@ class ConstructorHt
     {
         ns3::HtPhy::InitializeModes();
         ns3::WifiPhy::AddStaticPhyEntity(ns3::WIFI_MOD_CLASS_HT,
-                                         ns3::Create<ns3::HtPhy>()); // dummy Nss
+                                         std::make_shared<ns3::HtPhy>()); // dummy Nss
     }
 } g_constructor_ht; ///< the constructor for HT modes
 

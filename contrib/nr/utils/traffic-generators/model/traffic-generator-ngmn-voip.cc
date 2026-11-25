@@ -78,6 +78,11 @@ TrafficGeneratorNgmnVoip::GetTypeId()
                           TypeIdValue(TcpSocketFactory::GetTypeId()),
                           MakeTypeIdAccessor(&TrafficGenerator::SetProtocol),
                           MakeTypeIdChecker())
+            .AddAttribute("SidEnabled",
+                          "Enable or disable sending SIDs during inactive state",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&TrafficGeneratorNgmnVoip::m_sidEnabled),
+                          MakeBooleanChecker())
             .AddTraceSource("Tx",
                             "A new packet is created and is sent",
                             MakeTraceSourceAccessor(&TrafficGenerator::m_txTrace),
@@ -172,7 +177,15 @@ TrafficGeneratorNgmnVoip::GetNextPacketSize() const
     }
     else
     {
-        return m_SIDPayload;
+        if (m_sidEnabled)
+        {
+            return m_SIDPayload;
+        }
+        else
+        {
+            // Return a special value to indicate no packet should be sent
+            return 0;
+        }
     }
 }
 
@@ -182,11 +195,19 @@ TrafficGeneratorNgmnVoip::GetNextPacketTime() const
     NS_LOG_FUNCTION(this);
     if (m_state == INACTIVE_STATE)
     {
-        return MilliSeconds(m_SIDPeriodicity);
+        if (m_sidEnabled)
+        {
+            return MilliSeconds(m_SIDPeriodicity);
+        }
+        else
+        {
+            // Schedule the next state update without sending a packet
+            return MilliSeconds(m_encoderFrameLength);
+        }
     }
     else
     {
-        return Seconds((double)(m_activePayload * 8) / 12200);
+        return MilliSeconds(m_encoderFrameLength);
     }
 }
 

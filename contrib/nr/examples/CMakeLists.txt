@@ -6,7 +6,6 @@ set(base_examples
     cttc-3gpp-channel-example
     cttc-3gpp-channel-simple-ran
     cttc-3gpp-channel-simple-fdm
-    cttc-3gpp-indoor-calibration
     cttc-3gpp-channel-nums
     cttc-3gpp-channel-nums-fdm
     cttc-nr-cc-bwp-demo
@@ -24,6 +23,7 @@ set(base_examples
     traffic-generator-example
     cttc-nr-simple-qos-sched
     cttc-nr-multi-flow-qos-sched
+    gsoc-nr-channel-models
 )
 foreach(
   example
@@ -37,6 +37,37 @@ foreach(
   )
 endforeach()
 
+if(${ENABLE_EMU})
+  build_lib_example(
+    NAME nr-external-core-roaming
+    SOURCE_FILES nr-external-core-roaming.cc
+    LIBRARIES_TO_LINK ${libnr}
+                      ${libfd-net-device}
+                      ${libinternet-apps}
+  )
+endif()
+
+check_deps(
+  nr_sionna_deps
+  PYTHON_PACKAGES
+  cppyy
+  sionna.rt
+  pybind11
+)
+if("${nr_sionna_deps}"
+   STREQUAL
+   ""
+   AND (NOT
+        WIN32)
+)
+  build_lib_example(
+    NAME cttc-nr-demo-sionna-rt
+    SOURCE_FILES cttc-nr-demo-sionna-rt.cc
+    LIBRARIES_TO_LINK ${libnr}
+                      ${libflow-monitor}
+  )
+endif()
+
 build_lib_example(
   NAME cttc-fh-compression
   SOURCE_FILES cttc-fh-compression.cc
@@ -46,8 +77,8 @@ build_lib_example(
 
 if(${ENABLE_EIGEN})
   set(eigen_dependent_examples
-      cttc-nr-mimo-demo
       cttc-nr-fh-xr
+      gsoc-leo-demo-example
   )
   foreach(
     example
@@ -60,6 +91,18 @@ if(${ENABLE_EIGEN})
                         ${libflow-monitor}
     )
   endforeach()
+  set(source_files
+      cttc-nr-mimo-demo.cc
+      mimo-sim-helpers/cttc-mimo-simple-db-helper.cc
+  )
+  build_lib_example(
+    NAME cttc-nr-mimo-demo
+    SOURCE_FILES ${source_files}
+    LIBRARIES_TO_LINK
+      ${libnr}
+      ${libflow-monitor}
+      ${SQLite3_LIBRARIES}
+  )
 endif()
 
 if(NOT
@@ -100,6 +143,34 @@ else()
     )
   endforeach()
 
+  set(example
+      cttc-realistic-beamforming
+  )
+  set(source_files
+      ${example}.cc
+  )
+  set(libraries_to_link
+      ${libnr}
+      ${libflow-monitor}
+      ${SQLite3_LIBRARIES}
+  )
+  build_lib_example(
+    NAME ${example}
+    SOURCE_FILES ${source_files}
+    LIBRARIES_TO_LINK ${libraries_to_link}
+  )
+endif()
+
+if((NOT
+    ${ENABLE_SQLITE})
+   OR (NOT
+       ${ENABLE_EIGEN})
+)
+  message(
+    WARNING
+      "cttc-nr-3gpp-calibration and cttc-3gpp-indoor-calibration require sqlite and eigen"
+  )
+else()
   set(3gpp-outdoor-calibration_source_files
       3gpp-outdoor-calibration/cttc-nr-3gpp-calibration.cc
       3gpp-outdoor-calibration/sinr-output-stats.cc
@@ -121,21 +192,22 @@ else()
       ${libstats}
       ${liblte}
   )
-
-  set(example
-      cttc-realistic-beamforming
-  )
-  set(source_files
-      ${example}.cc
-  )
-  set(libraries_to_link
-      ${libnr}
-      ${libflow-monitor}
-      ${SQLite3_LIBRARIES}
-  )
   build_lib_example(
-    NAME ${example}
-    SOURCE_FILES ${source_files}
-    LIBRARIES_TO_LINK ${libraries_to_link}
+    NAME cttc-3gpp-indoor-calibration
+    SOURCE_FILES cttc-3gpp-indoor-calibration.cc
+    LIBRARIES_TO_LINK ${libnr}
+                      ${libflow-monitor}
+  )
+endif()
+
+if(opengym
+   IN_LIST
+   contrib_libs_to_build
+)
+  build_lib_example(
+    NAME gsoc-nr-rl-based-sched
+    SOURCE_FILES gsoc-nr-rl-based-sched/gsoc-nr-rl-based-sched.cc
+    LIBRARIES_TO_LINK ${libnr}
+                      ${libflow-monitor}
   )
 endif()

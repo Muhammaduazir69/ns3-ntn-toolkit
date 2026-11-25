@@ -30,6 +30,7 @@
  * MacRx bytes. Use that example when the question is whether the router steers
  * traffic; use this one when the question is what the sky looked like.
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -163,6 +164,9 @@ main(int argc, char* argv[])
     {
         rs.SetNumerology(1); // FR1 30 kHz SCS
     }
+    // Globe scene (ntn-dataset@1). Scheduled ahead of the helper's own scene so this one,
+    // which also draws the HAPS and LEO context nodes added below, is the recorder of the run.
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     rs.Build(satNodes, ueNodes);
     Ptr<SaginA2gPropagationLossModel> a2g = CreateObject<SaginA2gPropagationLossModel>();
     // Same carrier as the cell (was 2.0 GHz against a 2.185 GHz cell). The
@@ -177,6 +181,23 @@ main(int argc, char* argv[])
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
     rs.EnableAiFlowMonitor("sagin-haps-leo-relay");
+
+    // Device-less context nodes for the router's backhaul layers, so the scene shows the
+    // geometry the route columns describe: the HAPS above the scenario origin and the SGP4
+    // LEO in the same ENU frame (its sub-satellite point at t = 0), which also anchors the
+    // UE and the UAV on the globe. They carry copies of the models, so the router's own
+    // models and the access cell are untouched.
+    NodeContainer ctxNodes;
+    ctxNodes.Create(2);
+    Ptr<ConstantPositionMobilityModel> hapsCtx = CreateObject<ConstantPositionMobilityModel>();
+    hapsCtx->SetPosition(haps->GetPosition());
+    ctxNodes.Get(0)->AggregateObject(hapsCtx);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> leoCtxSgp4 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    leoCtxSgp4->SetElementsSgp4(satElements[0]);
+    Ptr<NtnEnuProjectionMobilityModel> leoCtx = CreateObject<NtnEnuProjectionMobilityModel>();
+    leoCtx->SetSource(leoCtxSgp4);
+    leoCtx->SetReference(satSubLat, satSubLon, 0.0);
+    ctxNodes.Get(1)->AggregateObject(leoCtx);
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();

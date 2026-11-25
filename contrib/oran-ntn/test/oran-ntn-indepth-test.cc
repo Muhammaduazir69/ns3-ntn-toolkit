@@ -163,7 +163,7 @@ class OranE2SubscriptionLifecycleTest : public TestCase
 {
   public:
     OranE2SubscriptionLifecycleTest()
-        : TestCase("RIC Subscription refusal, modification and delete (E2AP 8.2.1 / 8.2.2)")
+        : TestCase("RIC Subscription refusal, modification and delete (E2AP 8.2.1 - 8.2.2)")
     {
     }
 

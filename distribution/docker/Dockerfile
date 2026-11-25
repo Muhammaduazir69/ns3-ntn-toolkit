@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# ns3-ntn-toolkit: pre-built ns-3.43 + toolkit contrib modules + Python utilities
+# ns3-ntn-toolkit: pre-built ns-3.49 + 5G-LENA v5.2 + toolkit contrib modules + Python utilities
 #
 # Build:  docker build -t uzairdocker69/ns3-ntn-toolkit:latest -f distribution/docker/Dockerfile .
 # Run:    docker run --rm -it -p 8090:8090 -p 3000:3000 uzairdocker69/ns3-ntn-toolkit:latest
@@ -8,8 +8,9 @@
 # Maintainer: Muhammad Uzair, Independent Researcher
 # License:    GPL-2.0-only
 
-ARG UBUNTU_VERSION=22.04
-ARG NS3_VERSION=3.43
+# ns-3.49 needs CMake >= 3.25 (Ubuntu 22.04 ships 3.22) and Python >= 3.10.
+ARG UBUNTU_VERSION=24.04
+ARG NS3_VERSION=3.49
 
 # -----------------------------------------------------------------------------
 # Stage 1: builder: clone, configure, build ns-3 + contrib modules
@@ -44,7 +45,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Match the runtime UID/GID so the copied tree and the user agree without a
 # chown sweep at the end of the build.
-RUN groupadd --gid 1000 ntn \
+# Ubuntu 24.04 images ship a default "ubuntu" user holding UID/GID 1000.
+RUN (userdel --remove ubuntu 2>/dev/null || true) \
+    && (groupdel ubuntu 2>/dev/null || true) \
+    && groupadd --gid 1000 ntn \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash ntn
 
 USER ntn
@@ -66,7 +70,7 @@ COPY --chown=ntn:ntn ns-3-dev/ /home/ntn/ns-3-dev/
 # cloud VM with a different instruction set, or Apple Silicon running the amd64
 # image, those binaries die with "Illegal instruction". "release" targets the
 # generic x86-64 baseline, so the image runs on every amd64 host. Built files
-# have no profile suffix (libns3.43-ntn-cho.so, ns3.43-<example>).
+# have no profile suffix (libns3.49-ntn-cho.so, ns3.49-<example>).
 RUN ./ns3 configure \
         --enable-tests \
         --enable-examples \
@@ -97,13 +101,13 @@ FROM ubuntu:${UBUNTU_VERSION} AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
 
 LABEL org.opencontainers.image.title="ns3-ntn-toolkit"
-LABEL org.opencontainers.image.description="Open-source ns-3.43 distribution for 6G non-terrestrial network research: 15 integrated modules + vendored 5G-LENA nr (dual mmwave/FR1 radio backend), covering SGP4 LEO constellations, 3GPP NR-NTN (FR1 15/30 kHz + TR 38.811 channel/beam), O-RAN + FlexRIC, measured in-band QoS-flow KPIs, multi-tier RIC, sub-THz physics, NVIDIA Sionna, SAGIN, V2X, slicing, AI/ML, digital twin."
+LABEL org.opencontainers.image.description="Open-source ns-3.49 distribution for 6G non-terrestrial network research: 15 integrated modules + vendored 5G-LENA nr v5.2 (dual mmwave/FR1 radio backend), covering SGP4 LEO constellations, 3GPP NR-NTN (FR1 15/30 kHz + TR 38.811 channel/beam), O-RAN + FlexRIC, measured in-band QoS-flow KPIs, multi-tier RIC, sub-THz physics, NVIDIA Sionna, SAGIN, V2X, slicing, AI/ML, digital twin."
 LABEL org.opencontainers.image.url="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.source="https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
 LABEL org.opencontainers.image.documentation="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.authors="Muhammad Uzair <muhammaduzairr69@gmail.com>"
 LABEL org.opencontainers.image.licenses="GPL-2.0-only"
-LABEL org.opencontainers.image.version="2.7.0"
+LABEL org.opencontainers.image.version="ns3.49-lena5.2"
 
 # Runtime deps: note this is intentionally NOT a slim "runtime-only" set.
 # ns-3's `./ns3 run` wrapper unconditionally invokes the CMake build system
@@ -138,7 +142,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Non-root user for the runtime container: same UID/GID as builder so the
 # tree we COPY --from=builder keeps its ownership and the embedded absolute
 # paths in .lock-ns3 / CMakeCache.txt stay valid.
-RUN groupadd --gid 1000 ntn \
+# Ubuntu 24.04 images ship a default "ubuntu" user holding UID/GID 1000.
+RUN (userdel --remove ubuntu 2>/dev/null || true) \
+    && (groupdel ubuntu 2>/dev/null || true) \
+    && groupadd --gid 1000 ntn \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash ntn
 
 USER ntn
@@ -160,7 +167,10 @@ RUN python3 -m venv /home/ntn/.venv \
     && /home/ntn/.venv/bin/pip install --no-cache-dir --upgrade pip wheel setuptools \
     && /home/ntn/.venv/bin/pip install --no-cache-dir \
         /home/ntn/ns-3-dev/contrib/ntn-constellation \
-        /home/ntn/ns-3-dev/contrib/ntn-digital-twin
+        /home/ntn/ns-3-dev/contrib/ntn-digital-twin \
+    && /home/ntn/.venv/bin/pip install --no-cache-dir -e /home/ntn/ns-3-dev/contrib/ns3-ai-ntn/python_utils \
+    && /home/ntn/.venv/bin/pip install --no-cache-dir numpy gymnasium matplotlib \
+    && /home/ntn/.venv/bin/pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 ENV PATH="/home/ntn/.venv/bin:/home/ntn/ns-3-dev:${PATH}"
 # ns-3's `./ns3 run` wrapper sets LD_LIBRARY_PATH for its child processes,
@@ -190,13 +200,13 @@ RUN ./ns3 show version \
     && { ./ns3 show config | grep -q 'Eigen3 support.*ON' \
          || { echo 'FATAL: Eigen3 support is OFF - nr would ship the no-eigen MIMO stub'; exit 1; }; } \
     && ./ns3 show profile | grep -qi release \
-    && test -e build/lib/libns3.43-ntn-cho.so \
-    && test -e build/lib/libns3.43-oran-ntn.so \
-    && test -e build/lib/libns3.43-thz-ntn.so \
-    && test -e build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-walker-traffic \
-    && test -e build/contrib/ntn-fapi/examples/ns3.43-ntn-fapi-leo-pass-slotloop \
+    && test -e build/lib/libns3.49-ntn-cho.so \
+    && test -e build/lib/libns3.49-oran-ntn.so \
+    && test -e build/lib/libns3.49-thz-ntn.so \
+    && test -e build/contrib/ntn-constellation/examples/ns3.49-ntn-constellation-walker-traffic \
+    && test -e build/contrib/ntn-fapi/examples/ns3.49-ntn-fapi-leo-pass-slotloop \
     && test ! -e contrib/ntn-v2x/papers && test ! -e contrib/ntn-constellation/papers \
-    && python3 -c "import ntn_constellation, ntn_digital_twin; print('Python utilities OK')"
+    && python3 -c "import ntn_constellation, ntn_digital_twin, ns3ai_utils, torch, gymnasium; print('Python utilities OK')"
 
 # Ports:
 #   8090: ntn-twin-api (FastAPI)

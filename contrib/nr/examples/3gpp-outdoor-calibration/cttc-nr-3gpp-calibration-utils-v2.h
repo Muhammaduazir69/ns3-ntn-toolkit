@@ -2,15 +2,32 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file cttc-nr-3gpp-calibration-utils-v2.h
+ *
+ * @brief Declaration of the LenaV2Utils class, which encapsulates the whole 5G-LENA (NR module)
+ * configuration of the calibration example. Its SetLenaV2SimulatorParameters() creates the
+ * NrHelper/EPC and the spectrum/BWPs at the configured starting frequency, and sets the error
+ * model, scheduler (including optional sub-band CQI and MIMO PMI parameters), gNB/UE uniform
+ * planar arrays with 3GPP or isotropic elements, dual polarization and ports, the beamforming
+ * method (predefined beam toward a given sector/elevation, cell scan, or realistic BF), O2I and
+ * shadowing settings, uplink power control and wraparound support, then installs the per-sector
+ * gNB and UE devices. It also declares the callbacks feeding the SQLite writers: UE "DlDataSinr"
+ * to SinrOutputStats, UE "ReportPowerSpectralDensity" to PowerOutputStats (ueTxPower table), and
+ * gNB "SlotDataStats", "RBDataStats" and spectrum "RxDataTrace" to SlotOutputStats, RbOutputStats
+ * and PowerOutputStats (gnbRxPower table).
+ */
+
 #ifndef NR_3GPP_CALIBRATION_UTILS_V2_H
 #define NR_3GPP_CALIBRATION_UTILS_V2_H
 
 #include "sinr-output-stats.h"
 
+#include "ns3/distance-based-three-gpp-spectrum-propagation-loss-model.h"
+#include "ns3/hexagonal-grid-scenario-helper.h"
+#include "ns3/nr-module.h"
 #include "ns3/random-variable-stream.h"
-#include <ns3/distance-based-three-gpp-spectrum-propagation-loss-model.h>
-#include <ns3/hexagonal-grid-scenario-helper.h>
-#include <ns3/nr-module.h>
 
 namespace ns3
 {
@@ -23,72 +40,88 @@ class RbOutputStats;
 class LenaV2Utils
 {
   public:
-    static void SetLenaV2SimulatorParameters(const double sector0AngleRad,
-                                             const std::string& scenario,
-                                             const std::string& confType,
-                                             const std::string& radioNetwork,
-                                             std::string errorModel,
-                                             const std::string& operationMode,
-                                             const std::string& direction,
-                                             uint16_t numerology,
-                                             const std::string& pattern,
-                                             const NodeContainer& gnbSector1Container,
-                                             const NodeContainer& gnbSector2Container,
-                                             const NodeContainer& gnbSector3Container,
-                                             const NodeContainer& ueSector1Container,
-                                             const NodeContainer& ueSector2Container,
-                                             const NodeContainer& ueSector3Container,
-                                             const Ptr<NrPointToPointEpcHelper>& baseEpcHelper,
-                                             Ptr<NrHelper>& nrHelper,
-                                             NetDeviceContainer& gnbSector1NetDev,
-                                             NetDeviceContainer& gnbSector2NetDev,
-                                             NetDeviceContainer& gnbSector3NetDev,
-                                             NetDeviceContainer& ueSector1NetDev,
-                                             NetDeviceContainer& ueSector2NetDev,
-                                             NetDeviceContainer& ueSector3NetDev,
-                                             bool enableFading,
-                                             bool enableUlPc,
-                                             std::string powerAllocation,
-                                             SinrOutputStats* sinrStats,
-                                             PowerOutputStats* ueTxPowerStats,
-                                             PowerOutputStats* gnbRxPowerStats,
-                                             SlotOutputStats* slotStats,
-                                             RbOutputStats* rbStats,
-                                             const std::string& scheduler,
-                                             uint32_t bandwidthMHz,
-                                             double startingFreq,
-                                             uint32_t freqScenario,
-                                             double gnbTxPower,
-                                             double ueTxPower,
-                                             double downtiltAngle,
-                                             const uint32_t gnbNumRows,
-                                             const uint32_t gnbNumColumns,
-                                             const uint32_t ueNumRows,
-                                             const uint32_t ueNumColumns,
-                                             bool gnbEnable3gppElement,
-                                             bool ueEnable3gppElement,
-                                             const double gnbHSpacing,
-                                             const double gnbVSpacing,
-                                             const double ueHSpacing,
-                                             const double ueVSpacing,
-                                             const double gnbNoiseFigure,
-                                             const double ueNoiseFigure,
-                                             bool enableRealBF,
-                                             bool enableShadowing,
-                                             double o2iThreshold,
-                                             double o2iLowLossThreshold,
-                                             bool linkO2iConditionToAntennaHeight,
-                                             bool crossPolarizedGnb,
-                                             bool crossPolarizedUe,
-                                             double polSlantAngleGnb1,
-                                             double polSlantAngleGnb2,
-                                             double polSlantAngleUe1,
-                                             double polSlantAngleUe2,
-                                             std::string bfMethod,
-                                             uint16_t beamConfSector,
-                                             double beamConfElevation,
-                                             double isd,
-                                             bool ueBearingAngle);
+    static void SetLenaV2SimulatorParameters(
+        const double sector0AngleRad,
+        const std::string& scenario,
+        const std::string& confType,
+        const std::string& radioNetwork,
+        std::string errorModel,
+        const std::string& operationMode,
+        const std::string& direction,
+        uint16_t numerology,
+        const std::string& pattern,
+        const NodeContainer& gnbSector1Container,
+        const NodeContainer& gnbSector2Container,
+        const NodeContainer& gnbSector3Container,
+        const NodeContainer& ueSector1Container,
+        const NodeContainer& ueSector2Container,
+        const NodeContainer& ueSector3Container,
+        const Ptr<NrPointToPointEpcHelper>& baseEpcHelper,
+        Ptr<NrHelper>& nrHelper,
+        NetDeviceContainer& gnbSector1NetDev,
+        NetDeviceContainer& gnbSector2NetDev,
+        NetDeviceContainer& gnbSector3NetDev,
+        NetDeviceContainer& ueSector1NetDev,
+        NetDeviceContainer& ueSector2NetDev,
+        NetDeviceContainer& ueSector3NetDev,
+        bool enableFading,
+        bool enableUlPc,
+        std::string powerAllocation,
+        SinrOutputStats* sinrStats,
+        PowerOutputStats* ueTxPowerStats,
+        PowerOutputStats* gnbRxPowerStats,
+        SlotOutputStats* slotStats,
+        RbOutputStats* rbStats,
+        const std::string& scheduler,
+        uint32_t bandwidthMHz,
+        double startingFreq,
+        uint32_t freqScenario,
+        double gnbTxPower,
+        double ueTxPower,
+        double downtiltAngle,
+        const uint32_t gnbNumRows,
+        const uint32_t gnbNumColumns,
+        const uint32_t ueNumRows,
+        const uint32_t ueNumColumns,
+        bool gnbEnable3gppElement,
+        bool ueEnable3gppElement,
+        const double gnbHSpacing,
+        const double gnbVSpacing,
+        const double ueHSpacing,
+        const double ueVSpacing,
+        const double gnbNoiseFigure,
+        const double ueNoiseFigure,
+        bool enableRealBF,
+        bool enableShadowing,
+        double o2iThreshold,
+        double o2iLowLossThreshold,
+        bool linkO2iConditionToAntennaHeight,
+        bool crossPolarizedGnb,
+        bool crossPolarizedUe,
+        double polSlantAngleGnb1,
+        double polSlantAngleGnb2,
+        double polSlantAngleUe1,
+        double polSlantAngleUe2,
+        std::string bfMethod,
+        uint16_t beamConfSector,
+        double beamConfElevation,
+        double isd,
+        bool ueBearingAngle,
+        double PolSlantAngleGnb,
+        double PolSlantAngleUe,
+        bool dualPolarizedGnb,
+        bool dualPolarizedUe,
+        uint8_t numVPortsGnb,
+        uint8_t numHPortsGnb,
+        uint8_t numVPortsUe,
+        uint8_t numHPortsUe,
+        bool enableMimo,
+        NrHelper::MimoPmiParams mimoPmiParams,
+        bool enableSubbandScheluder,
+        bool m_subbandCqiClamping,
+        EnumValue<NrMacSchedulerUeInfo::McsCsiSource> m_mcsCsiSource,
+        Ptr<WraparoundModel> wraparoundModel,
+        NodeContainer& picoGnbNodes);
 
     static void ReportSinrNr(SinrOutputStats* stats,
                              uint16_t cellId,

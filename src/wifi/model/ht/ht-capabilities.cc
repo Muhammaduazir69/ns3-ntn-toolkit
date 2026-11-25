@@ -89,12 +89,18 @@ HtCapabilities::ElementId() const
 void
 HtCapabilities::Print(std::ostream& os) const
 {
-    os << "HT Capabilities=" << bool(GetLdpc()) << "|" << bool(GetSupportedChannelWidth()) << "|"
-       << bool(GetShortGuardInterval20()) << "|";
+    os << "HT Capabilities=[LDPC: " << +m_ldpc
+       << ", Supported Channel Width: " << +m_supportedChannelWidth
+       << ", SGI 20MHz: " << +m_shortGuardInterval20 << ", SGI 40MHz: " << +m_shortGuardInterval40
+       << ", Supported MCS Set: {";
     for (uint8_t i = 0; i < MAX_SUPPORTED_MCS; i++)
     {
-        os << IsSupportedMcs(i) << " ";
+        if (IsSupportedMcs(i))
+        {
+            os << +i << " ";
+        }
     }
+    os << "}]";
 }
 
 void
@@ -473,10 +479,10 @@ void
 HtCapabilities::SerializeInformationField(Buffer::Iterator start) const
 {
     // write the corresponding value for each bit
-    start.WriteHtolsbU16(GetHtCapabilitiesInfo());
+    start.WriteU16(GetHtCapabilitiesInfo());
     start.WriteU8(GetAmpduParameters());
-    start.WriteHtolsbU64(GetSupportedMcsSet1());
-    start.WriteHtolsbU64(GetSupportedMcsSet2());
+    start.WriteU64(GetSupportedMcsSet1());
+    start.WriteU64(GetSupportedMcsSet2());
     start.WriteU16(GetExtendedHtCapabilities());
     start.WriteU32(GetTxBfCapabilities());
     start.WriteU8(GetAntennaSelectionCapabilities());
@@ -486,10 +492,10 @@ uint16_t
 HtCapabilities::DeserializeInformationField(Buffer::Iterator start, uint16_t length)
 {
     Buffer::Iterator i = start;
-    uint16_t htinfo = i.ReadLsbtohU16();
+    uint16_t htinfo = i.ReadU16();
     uint8_t ampduparam = i.ReadU8();
-    uint64_t mcsset1 = i.ReadLsbtohU64();
-    uint64_t mcsset2 = i.ReadLsbtohU64();
+    uint64_t mcsset1 = i.ReadU64();
+    uint64_t mcsset2 = i.ReadU64();
     uint16_t extendedcapabilities = i.ReadU16();
     uint32_t txbfcapabilities = i.ReadU32();
     uint8_t aselcapabilities = i.ReadU8();

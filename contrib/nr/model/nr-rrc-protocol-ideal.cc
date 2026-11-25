@@ -9,14 +9,14 @@
 #include "nr-ue-net-device.h"
 #include "nr-ue-rrc.h"
 
-#include <ns3/fatal-error.h>
-#include <ns3/log.h>
-#include <ns3/node-list.h>
-#include <ns3/node.h>
-#include <ns3/nstime.h>
-#include <ns3/simulator.h>
+#include "ns3/fatal-error.h"
+#include "ns3/log.h"
+#include "ns3/node-list.h"
+#include "ns3/node.h"
+#include "ns3/nstime.h"
+#include "ns3/simulator.h"
 
-NS_LOG_COMPONENT_DEFINE("nrRrcProtocolIdeal");
+NS_LOG_COMPONENT_DEFINE("NrRrcProtocolIdeal");
 
 namespace ns3
 {
@@ -154,39 +154,69 @@ NrUeRrcProtocolIdeal::DoSendMeasurementReport(NrRrcSap::MeasurementReport msg)
 void
 NrUeRrcProtocolIdeal::DoSendIdealUeContextRemoveRequest(uint16_t rnti)
 {
-    NS_FATAL_ERROR("NrUeRrcProtocolIdeal does not have RLF functionality yet");
+    NS_LOG_FUNCTION(this);
+
+    uint16_t cellId = m_rrc->GetCellId();
+    // re-initialize the RNTI and get the GnbNrRrcSapProvider for the
+    // gNB we are currently attached to or attempting random access to
+    // a target gNB
+    m_rnti = m_rrc->GetRnti();
+
+    NS_LOG_DEBUG("RNTI " << rnti << " sending UE context remove request to cell id " << cellId);
+    NS_ABORT_MSG_IF(m_rnti != rnti, "RNTI mismatch");
+
+    SetGnbRrcSapProvider(); // the provider has to be reset since the cell might have changed due to
+    // handover
+    // ideally informing gNB
+    Simulator::Schedule(RRC_IDEAL_MSG_DELAY,
+                        &NrGnbRrcSapProvider::RecvIdealUeContextRemoveRequest,
+                        m_gnbRrcSapProvider,
+                        m_rnti);
+}
+
+void
+NrUeRrcProtocolIdeal::DoSendIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId)
+{
+    NS_LOG_FUNCTION(this << rnti << +bwpId);
+
+    m_rnti = m_rrc->GetRnti();
+    NS_ABORT_MSG_IF(m_rnti != rnti, "RNTI mismatch");
+
+    // Resolve the gNB RRC SAP provider for the cell we are currently attached
+    // to (same-cell switch: the cell does not change, but keep the pattern
+    // consistent with the other ideal indications).
+    SetGnbRrcSapProvider();
+    Simulator::Schedule(RRC_IDEAL_MSG_DELAY,
+                        &NrGnbRrcSapProvider::RecvIdealBwpSwitchIndication,
+                        m_gnbRrcSapProvider,
+                        m_rnti,
+                        bwpId);
 }
 
 void
 NrUeRrcProtocolIdeal::SetGnbRrcSapProvider()
 {
-    uint16_t bwpId = m_rrc->GetCellId();
+    uint16_t cellId = m_rrc->GetCellId();
 
     // walk list of all nodes to get the peer gNB
     Ptr<NrGnbNetDevice> gnbDev;
-    NodeList::Iterator listEnd = NodeList::End();
+    auto listEnd = NodeList::End();
     bool found = false;
-    for (NodeList::Iterator i = NodeList::Begin(); (i != listEnd) && (!found); ++i)
+    for (auto i = NodeList::Begin(); (i != listEnd) && (!found); ++i)
     {
         Ptr<Node> node = *i;
         int nDevs = node->GetNDevices();
         for (int j = 0; (j < nDevs) && (!found); j++)
         {
             gnbDev = node->GetDevice(j)->GetObject<NrGnbNetDevice>();
-            if (gnbDev != nullptr)
+            if (gnbDev != nullptr && gnbDev->GetCellId() == cellId)
             {
-                for (uint32_t h = 0; h < gnbDev->GetCcMapSize(); ++h)
-                {
-                    if (gnbDev->GetBwpId(h) == bwpId)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
+                found = true;
+                break;
             }
         }
     }
-    NS_ASSERT_MSG(found, " Unable to find gNB with BwpID =" << bwpId);
+    NS_ASSERT_MSG(found, " Unable to find gNB with CellID =" << cellId);
     m_gnbRrcSapProvider = gnbDev->GetRrc()->GetNrGnbRrcSapProvider();
     Ptr<NrGnbRrcProtocolIdeal> gnbRrcProtocolIdeal =
         gnbDev->GetRrc()->GetObject<NrGnbRrcProtocolIdeal>();
@@ -249,7 +279,14 @@ NrGnbRrcProtocolIdeal::SetUeRrcSapProvider(uint16_t rnti, NrUeRrcSapProvider* p)
 {
     std::map<uint16_t, NrUeRrcSapProvider*>::iterator it;
     it = m_gnbRrcSapProviderMap.find(rnti);
-    NS_ASSERT_MSG(it != m_gnbRrcSapProviderMap.end(), "could not find RNTI = " << rnti);
+    if (it == m_gnbRrcSapProviderMap.end())
+    {
+        NS_LOG_WARN("NrGnbRrcProtocolIdeal::SetUeRrcSapProvider: RNTI "
+                    << rnti
+                    << " not found (UE context already removed, "
+                       "likely due to HandoverJoiningTimeout race). Dropping.");
+        return;
+    }
     it->second = p;
 }
 
@@ -272,8 +309,7 @@ NrGnbRrcProtocolIdeal::DoSendSystemInformation(uint16_t cellId, NrRrcSap::System
 {
     NS_LOG_FUNCTION(this << cellId);
     // walk list of all nodes to get UEs with this cellId
-    Ptr<NrUeRrc> ueRrc;
-    for (NodeList::Iterator i = NodeList::Begin(); i != NodeList::End(); ++i)
+    for (auto i = NodeList::Begin(); i != NodeList::End(); ++i)
     {
         Ptr<Node> node = *i;
         int nDevs = node->GetNDevices();
@@ -471,8 +507,7 @@ NrGnbRrcProtocolIdeal::DoDecodeHandoverPreparationInformation(Ptr<Packet> p)
     p->RemoveHeader(h);
     uint32_t msgId = h.GetMsgId();
     NS_LOG_INFO(" decoding msgId = " << msgId);
-    std::map<uint32_t, NrRrcSap::HandoverPreparationInfo>::iterator it =
-        g_handoverPreparationInfoMsgMap.find(msgId);
+    auto it = g_handoverPreparationInfoMsgMap.find(msgId);
     NS_ASSERT_MSG(it != g_handoverPreparationInfoMsgMap.end(), "msgId " << msgId << " not found");
     NrRrcSap::HandoverPreparationInfo msg = it->second;
     g_handoverPreparationInfoMsgMap.erase(it);
@@ -578,8 +613,7 @@ NrGnbRrcProtocolIdeal::DoDecodeHandoverCommand(Ptr<Packet> p)
     p->RemoveHeader(h);
     uint32_t msgId = h.GetMsgId();
     NS_LOG_INFO(" decoding msgId = " << msgId);
-    std::map<uint32_t, NrRrcSap::RrcConnectionReconfiguration>::iterator it =
-        g_handoverCommandMsgMap.find(msgId);
+    auto it = g_handoverCommandMsgMap.find(msgId);
     NS_ASSERT_MSG(it != g_handoverCommandMsgMap.end(), "msgId " << msgId << " not found");
     NrRrcSap::RrcConnectionReconfiguration msg = it->second;
     g_handoverCommandMsgMap.erase(it);

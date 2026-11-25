@@ -31,6 +31,11 @@ class MaritimeMobilityModel : public MobilityModel
 {
   public:
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<MaritimeMobilityModel>(*this);
+    }
     MaritimeMobilityModel();
     ~MaritimeMobilityModel() override;
 

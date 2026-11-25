@@ -681,7 +681,7 @@ class ThzNtnPhaseScintillationScalingTest : public TestCase
 {
   public:
     ThzNtnPhaseScintillationScalingTest()
-        : TestCase("THZ-09 - phase scintillation scales as f, L_0^(5/6) and sqrt(Cn2)")
+        : TestCase("THZ-09 - phase scintillation scales as f, L_0^(5-6) and sqrt(Cn2)")
     {
     }
 
@@ -741,7 +741,7 @@ class ThzNtnScintillationLawTest : public TestCase
 {
   public:
     ThzNtnScintillationLawTest()
-        : TestCase("THZ-05/06 - scintillation follows P.618 elevation scaling and simulated time")
+        : TestCase("THZ-05-06 - scintillation follows P.618 elevation scaling and simulated time")
     {
     }
 

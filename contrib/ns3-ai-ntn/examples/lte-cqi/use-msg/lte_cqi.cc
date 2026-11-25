@@ -21,6 +21,11 @@
  *          Muyuan Shen <muyuan_shen@hust.edu.cn>
  */
 
+#include "ns3/ntn-dataset-writer.h"
+#include "../../ntn-wifi-site-context.h"
+#include <filesystem>
+#include <algorithm>
+#include <fstream>
 #include "ns3/applications-module.h"
 #include "ns3/config-store-module.h"
 #include "ns3/core-module.h"
@@ -196,6 +201,18 @@ main(int argc, char* argv[])
     rlcStats->SetAttribute("EpochDuration", TimeValue(Seconds(simTime)));
 
     Simulator::Stop(Seconds(simTime));
+    // NTN context: the LTE cell is a satellite-backhauled rural eNB at a real ground site (the
+    // EPC backhaul stands for the satellite link). The eNB and UEs keep their local positions,
+    // drawn as east-north-up offsets about the site; one device-less node carries the
+    // backhaul satellite of an SGP4 Walker shell, so the LTE results do not change.
+    const ntnwifisite::SiteContext ctx = ntnwifisite::AddBackhaulSatelliteContext({});
+    if (ctx.satNode)
+    {
+        std::cout << "Backhaul satellite context: elevation " << ctx.elevationDeg
+                  << " deg, slant range " << ctx.slantRangeKm << " km (" << ctx.propagator
+                  << ")" << std::endl;
+    }
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 
     /*GtkConfigStore config;
@@ -209,6 +226,14 @@ main(int argc, char* argv[])
     map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats();
 
     double Throughput = 0.0;
+    // ntn-dataset@1: the per-flow results as a dataset, so they follow the parameters
+    // (UE speed, data rate, packet size).
+    std::ofstream flowCsv("lte-cqi-flows.csv");
+    flowCsv << "flow_id,src,dst,tx_packets,rx_packets,lost_packets,throughput_kbps,mean_delay_ms\n";
+    uint64_t txSum = 0;
+    uint64_t rxSum = 0;
+    double thpSum = 0.0;
+    double delaySumS = 0.0;
 
     for (map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin(); i != stats.end();
          ++i)
@@ -224,12 +249,48 @@ main(int argc, char* argv[])
             (i->second.timeLastRxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds()) /
             1024;
         cout << "Throughput: " << Throughput << " Kbps" << endl;
+        const double meanDelayMs =
+            i->second.rxPackets > 0 ? 1e3 * i->second.delaySum.GetSeconds() / i->second.rxPackets
+                                    : 0.0;
+        flowCsv << i->first << "," << t.sourceAddress << "," << t.destinationAddress << ","
+                << i->second.txPackets << "," << i->second.rxPackets << ","
+                << (i->second.txPackets - std::min(i->second.txPackets, i->second.rxPackets))
+                << "," << (i->second.rxPackets > 0 ? std::to_string(Throughput) : std::string("0"))
+                << "," << (i->second.rxPackets > 0 ? std::to_string(meanDelayMs) : std::string(""))
+                << "\n";
+        txSum += i->second.txPackets;
+        rxSum += i->second.rxPackets;
+        thpSum += i->second.rxPackets > 0 ? Throughput : 0.0;
+        delaySumS += i->second.delaySum.GetSeconds();
     }
+    flowCsv.close();
+
+    // Application-level cross-check of the FlowMonitor counts: bytes the UE PacketSinks got.
+    uint64_t sinkRxBytes = 0;
+    for (uint32_t u = 0; u < serverApps.GetN(); ++u)
+    {
+        sinkRxBytes += DynamicCast<PacketSink>(serverApps.Get(u))->GetTotalRx();
+    }
+    cout << "PacketSink total Rx: " << sinkRxBytes << " bytes" << endl;
 
     NS_LOG_UNCOND("Done");
 
     cout << "End Simulation Results" << endl;
 
+    // ntn-dataset@1: standard manifest + sim_health (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md)
+    ns3::ntnobs::WriteDatasetRecord(
+        ".",
+        std::filesystem::path(argv[0]).filename().string(),
+        "measured",
+        argc,
+        argv,
+        {{"flows", std::to_string(stats.size()), "measured"},
+         {"tx_packets", std::to_string(txSum), "measured"},
+         {"rx_packets", std::to_string(rxSum), "measured"},
+         {"delivery_ratio", std::to_string(txSum > 0 ? double(rxSum) / txSum : 0.0), "measured"},
+         {"throughput_kbps_sum", std::to_string(thpSum), "measured"},
+         {"mean_delay_ms", std::to_string(rxSum > 0 ? 1e3 * delaySumS / rxSum : 0.0), "measured"},
+         {"sink_rx_bytes", std::to_string(sinkRxBytes), "measured"}});
     Simulator::Destroy();
     return 0;
 }

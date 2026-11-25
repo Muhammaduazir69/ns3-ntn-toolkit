@@ -88,7 +88,7 @@ class SaginBpv7CrcWireTest : public TestCase
 {
   public:
     SaginBpv7CrcWireTest()
-        : TestCase("7B: RFC 9171 CRC-16 X.25 / CRC-32C check values, wire format, VerifyBundle")
+        : TestCase("7B: RFC 9171 CRC-16 X.25 - CRC-32C check values, wire format, VerifyBundle")
     {
     }
 

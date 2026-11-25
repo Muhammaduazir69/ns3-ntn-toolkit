@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /**
- * \ingroup examples
- * \file cttc-channel-randomness.cc
+ * @ingroup examples
+ * @file cttc-channel-randomness.cc
  *
  * This example is intended to test the randmness of the channel in order to see
  * if we can reproduce the same channel realization within the same simulation run.
@@ -28,10 +28,10 @@ $ ./ns3 run "cttc-channel-randomness --PrintHelp"
 #include "ns3/nr-module.h"
 #include "ns3/nr-spectrum-value-helper.h"
 #include "ns3/simple-net-device.h"
+#include "ns3/spectrum-model.h"
 #include "ns3/three-gpp-channel-model.h"
 #include "ns3/three-gpp-propagation-loss-model.h"
 #include "ns3/three-gpp-spectrum-propagation-loss-model.h"
-#include <ns3/spectrum-model.h>
 
 using namespace ns3;
 
@@ -39,9 +39,9 @@ NS_LOG_COMPONENT_DEFINE("CttcChannelRandomness");
 
 /**
  * Perform the beamforming using the DFT beamforming method
- * \param thisDevice the device performing the beamforming
- * \param thisAntenna the antenna object associated to thisDevice
- * \param otherDevice the device towards which point the beam
+ * @param thisDevice the device performing the beamforming
+ * @param thisAntenna the antenna object associated to thisDevice
+ * @param otherDevice the device towards which point the beam
  */
 static void
 DoBeamforming(Ptr<NetDevice> thisDevice,
@@ -107,7 +107,7 @@ main(int argc, char* argv[])
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("frequency",
-                 "The operating frequency in Hz (2125.0e6 corresponds to EARFCN 2100)",
+                 "The operating frequency in Hz (2125.0e6 corresponds to ARFCN 2100)",
                  frequency);
     cmd.AddValue("rbNum", "The system BW in number of resource blocks", rbNum);
     cmd.AddValue("subcarrierSpacing", "The subcarrier spacing", subcarrierSpacing);
@@ -195,12 +195,7 @@ main(int argc, char* argv[])
         channelConditionModelFactory.Create<ChannelConditionModel>();
     m_spectrumLossModel->SetChannelModelAttribute("ChannelConditionModel", PointerValue(condModel));
     m_propagationLossModel->SetChannelConditionModel(condModel);
-
-    // create the channel model
-    Ptr<ThreeGppChannelModel> channelModel = CreateObject<ThreeGppChannelModel>();
-    channelModel->SetAttribute("Frequency", DoubleValue(frequency));
-    channelModel->SetAttribute("Scenario", StringValue(scenario));
-    channelModel->SetAttribute("ChannelConditionModel", PointerValue(condModel));
+    m_spectrumLossModel->AssignStreams(stream);
 
     // create the antenna objects and set their dimensions
     Ptr<UniformPlanarArray> txAntenna =
@@ -214,14 +209,25 @@ main(int argc, char* argv[])
                                                        "NumRows",
                                                        UintegerValue(2));
 
+    Ptr<UniformPlanarArray> txAntenna2 =
+        CreateObjectWithAttributes<UniformPlanarArray>("NumColumns",
+                                                       UintegerValue(2),
+                                                       "NumRows",
+                                                       UintegerValue(2));
+    Ptr<UniformPlanarArray> rxAntenna2 =
+        CreateObjectWithAttributes<UniformPlanarArray>("NumColumns",
+                                                       UintegerValue(2),
+                                                       "NumRows",
+                                                       UintegerValue(2));
+
     // set the beamforming vectors
     DoBeamforming(txDev, txAntenna, rxDev);
     DoBeamforming(rxDev, rxAntenna, txDev);
-
-    channelModel->AssignStreams(stream);
+    DoBeamforming(txDev, txAntenna2, rxDev);
+    DoBeamforming(rxDev, rxAntenna2, txDev);
 
     Ptr<const ThreeGppChannelModel::ChannelMatrix> channelMatrix1 =
-        channelModel->GetChannel(txMob, rxMob, txAntenna, rxAntenna);
+        m_spectrumLossModel->GetChannelModel()->GetChannel(txMob, rxMob, txAntenna, rxAntenna);
 
     /*  for (uint32_t i = 0; i < channelMatrix1->m_channel.size (); i++)
       {
@@ -233,11 +239,8 @@ main(int argc, char* argv[])
 
     Ptr<const SpectrumModel> sm1 =
         NrSpectrumValueHelper::GetSpectrumModel(rbNum, frequency, subcarrierSpacing);
-    std::vector<int> activeRbs;
-    for (size_t rbId = 0; rbId < sm1->GetNumBands(); rbId++)
-    {
-        activeRbs.push_back(rbId);
-    }
+    std::vector<int> activeRbs(sm1->GetNumBands());
+    std::iota(activeRbs.begin(), activeRbs.end(), 0);
     Ptr<const SpectrumValue> txPsd1 = NrSpectrumValueHelper::CreateTxPowerSpectralDensity(
         txPower,
         activeRbs,
@@ -253,22 +256,29 @@ main(int argc, char* argv[])
         m_spectrumLossModel->DoCalcRxPowerSpectralDensity(txParams1,
                                                           txMob,
                                                           rxMob,
-                                                          txAntenna,
-                                                          rxAntenna);
+                                                          Copy(txAntenna),
+                                                          Copy(rxAntenna),
+                                                          txAntenna->GetBeamformingVector(),
+                                                          rxAntenna->GetBeamformingVector());
     std::cout << "Average rx power 1: "
               << 10 * log10(Sum(*(rxParams1->psd)) /
                             rxParams1->psd->GetSpectrumModel()->GetNumBands())
               << " dBm" << std::endl;
 
-    channelModel = CreateObject<ThreeGppChannelModel>();
-    channelModel->SetAttribute("Frequency", DoubleValue(frequency));
-    channelModel->SetAttribute("Scenario", StringValue(scenario));
-    channelModel->SetAttribute("ChannelConditionModel", PointerValue(condModel));
+    // Recreate spectrum loss model and channel matrices
+    m_spectrumLossModel = CreateObject<ThreeGppSpectrumPropagationLossModel>();
+    m_spectrumLossModel->SetChannelModelAttribute("Frequency", DoubleValue(frequency));
+    m_spectrumLossModel->SetChannelModelAttribute("Scenario", StringValue(scenario));
 
-    channelModel->AssignStreams(stream);
+    // create the channel condition model and associate it with the spectrum and
+    // propagation loss model
+    condModel = channelConditionModelFactory.Create<ChannelConditionModel>();
+    m_spectrumLossModel->SetChannelModelAttribute("ChannelConditionModel", PointerValue(condModel));
+    m_propagationLossModel->SetChannelConditionModel(condModel);
+    m_spectrumLossModel->AssignStreams(stream);
 
     Ptr<const ThreeGppChannelModel::ChannelMatrix> channelMatrix2 =
-        channelModel->GetChannel(txMob, rxMob, txAntenna, rxAntenna);
+        m_spectrumLossModel->GetChannelModel()->GetChannel(txMob, rxMob, txAntenna2, rxAntenna2);
 
     /*  for (uint32_t i = 0; i < channelMatrix2->m_channel.size (); i++)
       {
@@ -289,11 +299,8 @@ main(int argc, char* argv[])
 
     Ptr<const SpectrumModel> sm2 =
         NrSpectrumValueHelper::GetSpectrumModel(rbNum, frequency, subcarrierSpacing);
-    std::vector<int> activeRbs2;
-    for (size_t rbId = 0; rbId < sm2->GetNumBands(); rbId++)
-    {
-        activeRbs2.push_back(rbId);
-    }
+    std::vector<int> activeRbs2(sm2->GetNumBands());
+    std::iota(activeRbs2.begin(), activeRbs2.end(), 0);
     Ptr<const SpectrumValue> txPsd2 = NrSpectrumValueHelper::CreateTxPowerSpectralDensity(
         txPower,
         activeRbs2,
@@ -310,8 +317,10 @@ main(int argc, char* argv[])
         m_spectrumLossModel->DoCalcRxPowerSpectralDensity(txParams2,
                                                           txMob,
                                                           rxMob,
-                                                          txAntenna,
-                                                          rxAntenna);
+                                                          txAntenna2,
+                                                          rxAntenna2,
+                                                          txAntenna2->GetBeamformingVector(),
+                                                          rxAntenna2->GetBeamformingVector());
     std::cout << "Average rx power 1: "
               << 10 * log10(Sum(*(rxParams2->psd)) /
                             rxParams2->psd->GetSpectrumModel()->GetNumBands())

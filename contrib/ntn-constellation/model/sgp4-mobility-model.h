@@ -76,6 +76,11 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
 {
   public:
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<Sgp4MobilityModel>(*this);
+    }
     Sgp4MobilityModel();
     ~Sgp4MobilityModel() override = default;
 
@@ -125,6 +130,12 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
 
     /// Read-only access to the installed elements.
     const KeplerianElements& GetElements() const { return m_elements; }
+    /// Element-set provenance for datasets (also exposed as read-only attributes
+    /// ElementEpochUnix, NoradId and FromRealTle, so helpers that cannot link this
+    /// module read it through the attribute system).
+    double GetElementEpochUnix() const { return m_elements.epoch_unix_s; }
+    uint32_t GetNoradId() const { return m_elements.norad_id; }
+    bool GetFromRealTle() const { return m_fromRealTle; }
 
     /// Cache granularity for the position lookup. Default 100 ms.
     void SetCacheGranularity(Time grain) { m_cacheGrain = grain; }
@@ -207,6 +218,7 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     void EnsureCache() const;
 
     KeplerianElements m_elements;
+    bool m_fromRealTle{false}; //!< true when the elements came from a real TLE (SetTle), not a generated shell
     Time m_cacheGrain{MilliSeconds(100)};
 
     // Full Vallado SGP4 backend (opaque; reuses the satellite module's proven

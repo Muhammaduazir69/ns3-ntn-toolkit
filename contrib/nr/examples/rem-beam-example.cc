@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /**
- * \file rem-beam-example.cc
- * \ingroup examples
- * \brief Rem beam configuration example
+ * @file rem-beam-example.cc
+ * @ingroup examples
+ * @brief Rem beam configuration example
  *
  * This is a simple example which can be used to test different configurations of
  * gNB antenna array parameters and visualize its radiation through REM map.
@@ -32,7 +32,7 @@
  *
  *\code{.unparsed}
  * gnuplot -p nr-rem--gnbs.txt nr-rem--ues.txt nr-rem--buildings.txt nr-rem--plot-rem.gnuplot
- * \endcode
+ * @endcode
  *
  * The following files will be generated (in the root project folder if not specified
  * differently): nr-rem--sinr.png, nr-rem--snr.png and nr-rem--ipsd.png
@@ -55,8 +55,8 @@ int
 main(int argc, char* argv[])
 {
     // gnb antenna parameters
-    uint32_t numRowsGnb = 1;
-    uint32_t numColumnsGnb = 1;
+    uint32_t numRowsGnb = 2;
+    uint32_t numColumnsGnb = 2;
     uint16_t sector = 0;
     double theta = 60;
     double simTime = 1;
@@ -105,6 +105,7 @@ main(int argc, char* argv[])
     idealBeamformingHelper->SetAttribute("BeamformingMethod",
                                          TypeIdValue(DirectPathQuasiOmniBeamforming::GetTypeId()));
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
 
@@ -121,12 +122,13 @@ main(int argc, char* argv[])
 
     CcBwpCreator::SimpleOperationBandConf bandConf(2e9, 20e6, numCcPerBand);
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-
-    // Initialize channel and pathloss, plus other things inside band.
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-    nrHelper->InitializeOperationBand(&band);
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Use the default spectrum channel: RMa - Default - ThreeGpp
+    channelHelper->ConfigureFactories();
+    // Set attributes to the spectrum channel and set it to the band.
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    channelHelper->AssignChannelsToBands({band});
     singleBwp = CcBwpCreator::GetAllBwps({band});
 
     // Antennas for the UEs
@@ -147,13 +149,7 @@ main(int argc, char* argv[])
     NetDeviceContainer gnbNetDev = nrHelper->InstallGnbDevice(gnbNodes, singleBwp);
     NetDeviceContainer ueNetDev = nrHelper->InstallUeDevice(ueNodes, singleBwp);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
-
-    // this is probably not necessary, since we did not update configuration after installation
-    DynamicCast<NrGnbNetDevice>(gnbNetDev.Get(0))->UpdateConfig();
-    DynamicCast<NrUeNetDevice>(ueNetDev.Get(0))->UpdateConfig();
+    nrHelper->AssignStreams({.gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     // install the IP stack on the UEs, this is needed to allow attachment
     InternetStackHelper internet;

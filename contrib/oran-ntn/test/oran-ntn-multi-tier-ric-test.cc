@@ -35,7 +35,7 @@ class RtRicTimescaleTest : public TestCase
 {
   public:
     RtRicTimescaleTest()
-        : TestCase("RT / Near-RT / Non-RT timescale separation + RT actuation")
+        : TestCase("RT - Near-RT - Non-RT timescale separation + RT actuation")
     {
     }
 
@@ -158,7 +158,7 @@ class CrossDomainLoopTest : public TestCase
 {
   public:
     CrossDomainLoopTest()
-        : TestCase("NWDAF risk -> SMO radio/compute grant -> TPN path switch")
+        : TestCase("NWDAF risk -> SMO radio-compute grant -> TPN path switch")
     {
     }
 

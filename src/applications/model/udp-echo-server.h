@@ -7,8 +7,8 @@
 #ifndef UDP_ECHO_SERVER_H
 #define UDP_ECHO_SERVER_H
 
-#include "ns3/address.h"
-#include "ns3/application.h"
+#include "sink-application.h"
+
 #include "ns3/event-id.h"
 #include "ns3/ptr.h"
 #include "ns3/traced-callback.h"
@@ -16,52 +16,47 @@
 namespace ns3
 {
 
-class Socket;
 class Packet;
 
 /**
- * \ingroup applications
- * \defgroup udpecho UdpEcho
+ * @ingroup applications
+ * @defgroup udpecho UdpEcho
  */
 
 /**
- * \ingroup udpecho
- * \brief A Udp Echo server
+ * @ingroup udpecho
+ * @brief A Udp Echo server
  *
  * Every packet received is sent back.
  */
-class UdpEchoServer : public Application
+class UdpEchoServer : public SinkApplication
 {
   public:
+    static constexpr uint16_t DEFAULT_PORT{9}; //!< default port
+
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
+
     UdpEchoServer();
     ~UdpEchoServer() override;
 
   private:
-    void StartApplication() override;
-    void StopApplication() override;
+    void DoStartApplication() override;
 
     /**
-     * \brief Handle a packet reception.
+     * @brief Handle a packet reception.
      *
      * This function is called by lower layers.
      *
-     * \param socket the socket the packet was received to.
+     * @param socket the socket the packet was received to.
      */
     void HandleRead(Ptr<Socket> socket);
 
-    uint16_t m_port;       //!< Port on which we listen for incoming packets.
-    uint8_t m_tos;         //!< The packets Type of Service
-    Ptr<Socket> m_socket;  //!< IPv4 Socket
-    Ptr<Socket> m_socket6; //!< IPv6 Socket
-    Address m_local;       //!< local multicast address
-
-    /// Callbacks for tracing the packet Rx events
-    TracedCallback<Ptr<const Packet>> m_rxTrace;
+    uint8_t m_tos;                       //!< The packets Type of Service
+    bool m_enableSeqTsEchoHeader{false}; //!< Enable or disable use of SeqTsEchoHeader
 
     /// Callbacks for tracing the packet Rx events, includes source and destination addresses
     TracedCallback<Ptr<const Packet>, const Address&, const Address&> m_rxTraceWithAddresses;

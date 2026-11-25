@@ -7,16 +7,16 @@
  */
 
 /**
- * \file
- * \ingroup core-examples
- * \ingroup logging
+ * @file
+ * @ingroup core-examples
+ * @ingroup logging
  * Example program illustrating the various logging functions.
  */
 
 /** File-local context string */
 #define NS_LOG_APPEND_CONTEXT                                                                      \
     {                                                                                              \
-        std::clog << "(local context) ";                                                           \
+        ns3LogStream << "(local context) ";                                                        \
     }
 
 #include "ns3/core-module.h"
@@ -53,8 +53,8 @@ class MyEventObject : public Object
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId()
     {
@@ -96,7 +96,7 @@ NS_OBJECT_ENSURE_REGISTERED(MyEventObject);
 int
 main(int argc, char** argv)
 {
-    CommandLine cmd;
+    CommandLine cmd(__FILE__);
     cmd.Parse(argc, argv);
 
     NS_LOG_DEBUG("Creating a Node");

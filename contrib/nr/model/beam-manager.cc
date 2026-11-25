@@ -4,11 +4,11 @@
 
 #include "beam-manager.h"
 
-#include <ns3/boolean.h>
-#include <ns3/log.h>
-#include <ns3/node.h>
-#include <ns3/simulator.h>
-#include <ns3/uinteger.h>
+#include "ns3/boolean.h"
+#include "ns3/log.h"
+#include "ns3/node.h"
+#include "ns3/simulator.h"
+#include "ns3/uinteger.h"
 
 namespace ns3
 {
@@ -92,7 +92,7 @@ BeamManager::SaveBeamformingVector(const BeamformingVector& bfv, const Ptr<const
 
     if (device != nullptr)
     {
-        BeamformingStorage::iterator iter = m_beamformingVectorMap.find(device);
+        auto iter = m_beamformingVectorMap.find(device);
         if (iter != m_beamformingVectorMap.end())
         {
             (*iter).second = bfv;
@@ -109,7 +109,7 @@ BeamManager::ChangeBeamformingVector(const Ptr<const NetDevice>& device)
 {
     NS_LOG_FUNCTION(this);
 
-    BeamformingStorage::iterator it = m_beamformingVectorMap.find(device);
+    auto it = m_beamformingVectorMap.find(device);
     if (it == m_beamformingVectorMap.end())
     {
         NS_LOG_INFO("Could not find the beamforming vector for the provided device");
@@ -173,7 +173,7 @@ BeamManager::GetBeamformingVector(const Ptr<NetDevice>& device) const
 {
     NS_LOG_FUNCTION(this);
     PhasedArrayModel::ComplexVector beamformingVector;
-    BeamformingStorage::const_iterator it = m_beamformingVectorMap.find(device);
+    auto it = m_beamformingVectorMap.find(device);
     if (it != m_beamformingVectorMap.end())
     {
         beamformingVector = it->second.first;
@@ -198,7 +198,7 @@ BeamId
 BeamManager::GetBeamId(const Ptr<NetDevice>& device) const
 {
     BeamId beamId;
-    BeamformingStorage::const_iterator it = m_beamformingVectorMap.find(device);
+    auto it = m_beamformingVectorMap.find(device);
     if (it != m_beamformingVectorMap.end())
     {
         beamId = it->second.second;
@@ -220,17 +220,10 @@ BeamManager::GetBeamId(const Ptr<NetDevice>& device) const
 }
 
 void
-BeamManager::SetSector(uint16_t sector, double elevation) const
+BeamManager::SetSector(double sector, double elevation) const
 {
     NS_LOG_INFO("Set sector to : " << (unsigned)sector << ", and elevation to: " << elevation);
     m_antennaArray->SetBeamformingVector(CreateDirectionalBfv(m_antennaArray, sector, elevation));
-}
-
-void
-BeamManager::SetSectorAz(double azimuth, double zenith) const
-{
-    NS_LOG_INFO("Set azimuth to : " << (unsigned)azimuth << ", and zenith to:" << zenith);
-    m_antennaArray->SetBeamformingVector(CreateDirectionalBfvAz(m_antennaArray, azimuth, zenith));
 }
 
 } /* namespace ns3 */

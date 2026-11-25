@@ -8,10 +8,12 @@
 
 #include "nr-as-sap.h"
 
-#include <ns3/fatal-error.h>
-#include <ns3/log.h>
-#include <ns3/nr-epc-helper.h>
-#include <ns3/simulator.h>
+#include "ns3/abort.h"
+#include "ns3/fatal-error.h"
+#include "ns3/iana-ieee802-numbers.h"
+#include "ns3/log.h"
+#include "ns3/nr-epc-helper.h"
+#include "ns3/simulator.h"
 
 namespace ns3
 {
@@ -28,8 +30,8 @@ static const std::string g_ueNasStateName[NrEpcUeNas::NUM_STATES] = {
 };
 
 /**
- * \param s The UE NAS state.
- * \return The string representation of the given state.
+ * @param s The UE NAS state.
+ * @return The string representation of the given state.
  */
 static inline const std::string&
 ToString(NrEpcUeNas::State s)
@@ -42,8 +44,7 @@ NS_OBJECT_ENSURE_REGISTERED(NrEpcUeNas);
 NrEpcUeNas::NrEpcUeNas()
     : m_state(OFF),
       m_csgId(0),
-      m_asSapProvider(nullptr),
-      m_bidCounter(0)
+      m_asSapProvider(nullptr)
 {
     NS_LOG_FUNCTION(this);
     m_asSapUser = new MemberNrAsSapUser<NrEpcUeNas>(this);
@@ -59,6 +60,10 @@ NrEpcUeNas::DoDispose()
 {
     NS_LOG_FUNCTION(this);
     delete m_asSapUser;
+    // Both refer back to the NrUeNetDevice owning this NAS. Release them to break the reference
+    // cycle.
+    m_device = nullptr;
+    m_forwardUpCallback = MakeNullCallback<void, Ptr<Packet>, uint16_t>();
 }
 
 TypeId
@@ -120,17 +125,17 @@ NrEpcUeNas::GetAsSapUser()
 }
 
 void
-NrEpcUeNas::SetForwardUpCallback(Callback<void, Ptr<Packet>> cb)
+NrEpcUeNas::SetForwardUpCallback(Callback<void, Ptr<Packet>, uint16_t> cb)
 {
     NS_LOG_FUNCTION(this);
     m_forwardUpCallback = cb;
 }
 
 void
-NrEpcUeNas::StartCellSelection(uint32_t dlEarfcn)
+NrEpcUeNas::StartCellSelection(uint32_t arfcn)
 {
-    NS_LOG_FUNCTION(this << dlEarfcn);
-    m_asSapProvider->StartCellSelection(dlEarfcn);
+    NS_LOG_FUNCTION(this << arfcn);
+    m_asSapProvider->StartCellSelection(arfcn);
 }
 
 void
@@ -138,17 +143,17 @@ NrEpcUeNas::Connect()
 {
     NS_LOG_FUNCTION(this);
 
-    // tell RRC to go into connected mode
-    m_asSapProvider->Connect();
+    // start scanning for cells in all configured BWPs
+    m_asSapProvider->StartCellSelection();
 }
 
 void
-NrEpcUeNas::Connect(uint16_t cellId, uint32_t dlEarfcn)
+NrEpcUeNas::Connect(uint16_t cellId, uint32_t arfcn)
 {
-    NS_LOG_FUNCTION(this << cellId << dlEarfcn);
+    NS_LOG_FUNCTION(this << cellId << arfcn);
 
-    // force the UE RRC to be camped on a specific eNB
-    m_asSapProvider->ForceCampedOnGnb(cellId, dlEarfcn);
+    // force the UE RRC to be camped on a specific gNB
+    m_asSapProvider->ForceCampedOnGnb(cellId, arfcn);
 
     // tell RRC to go into connected mode
     m_asSapProvider->Connect();
@@ -163,22 +168,24 @@ NrEpcUeNas::Disconnect()
 }
 
 void
-NrEpcUeNas::ActivateEpsBearer(NrEpsBearer bearer, Ptr<NrEpcTft> tft)
+NrEpcUeNas::ActivateQosFlow(NrQosFlow flow, Ptr<NrQosRule> rule)
 {
     NS_LOG_FUNCTION(this);
+    NS_ABORT_MSG_IF(!rule->GetQfi(), "A QFI must be set on the rule before activating it");
     switch (m_state)
     {
     case ACTIVE:
-        NS_FATAL_ERROR("the necessary NAS signaling to activate a bearer after the initial context "
-                       "has already been setup is not implemented");
+        NS_FATAL_ERROR(
+            "the necessary NAS signaling to activate a QoS flow after the initial context "
+            "has already been setup is not implemented");
         break;
 
     default:
-        BearerToBeActivated btba;
-        btba.bearer = bearer;
-        btba.tft = tft;
-        m_bearersToBeActivatedList.push_back(btba);
-        m_bearersToBeActivatedListForReconnection.push_back(btba);
+        QosFlowToBeActivated qftba;
+        qftba.flow = flow;
+        qftba.rule = rule;
+        m_qosFlowsToBeActivatedList.push_back(qftba);
+        m_qosFlowsToBeActivatedListForReconnection.push_back(qftba);
         break;
     }
 }
@@ -191,18 +198,29 @@ NrEpcUeNas::Send(Ptr<Packet> packet, uint16_t protocolNumber)
     switch (m_state)
     {
     case ACTIVE: {
-        uint32_t id = m_tftClassifier.Classify(packet, NrEpcTft::UPLINK, protocolNumber);
-        NS_ASSERT((id & 0xFFFFFF00) == 0);
-        auto bid = (uint8_t)(id & 0x000000FF);
-        if (bid == 0)
+        std::optional<uint8_t> qfi;
+        if (protocolNumber == iana::ieee802numbers::IPV4 ||
+            protocolNumber == iana::ieee802numbers::IPV6)
         {
-            return false;
+            qfi = m_qosRuleClassifier.Classify(packet, NrQosRule::UPLINK, protocolNumber);
+        }
+        else if (auto it = m_unstructuredQfiByProtocol.find(protocolNumber);
+                 it != m_unstructuredQfiByProtocol.end())
+        {
+            qfi = it->second;
         }
         else
         {
-            m_asSapProvider->SendData(packet, bid);
-            return true;
+            NS_LOG_WARN(this << " no unstructured session for protocol " << protocolNumber
+                             << ", discarding packet");
         }
+
+        if (!qfi.has_value())
+        {
+            return false;
+        }
+        m_asSapProvider->SendData(packet, qfi.value());
+        return true;
     }
     break;
 
@@ -217,7 +235,7 @@ NrEpcUeNas::DoNotifyConnectionSuccessful()
 {
     NS_LOG_FUNCTION(this);
 
-    SwitchToState(ACTIVE); // will eventually activate dedicated bearers
+    SwitchToState(ACTIVE); // will eventually activate dedicated QoS flows
 }
 
 void
@@ -230,35 +248,68 @@ NrEpcUeNas::DoNotifyConnectionFailed()
 }
 
 void
-NrEpcUeNas::DoRecvData(Ptr<Packet> packet)
+NrEpcUeNas::DoRecvData(Ptr<Packet> packet, uint8_t qfi)
 {
-    NS_LOG_FUNCTION(this << packet);
-    m_forwardUpCallback(packet);
+    NS_LOG_FUNCTION(this << packet << qfi);
+    // An unstructured session names its protocol, unreadable from the packet itself.
+    // An IP session reports zero, leaving the protocol to be read from the packet.
+    auto it = m_unstructuredProtocolByQfi.find(qfi);
+    uint16_t protocolNumber = (it != m_unstructuredProtocolByQfi.end()) ? it->second : 0;
+    m_forwardUpCallback(packet, protocolNumber);
 }
 
 void
 NrEpcUeNas::DoNotifyConnectionReleased()
 {
     NS_LOG_FUNCTION(this);
-    // remove tfts
-    while (m_bidCounter > 0)
-    {
-        m_tftClassifier.Delete(m_bidCounter);
-        m_bidCounter--;
-    }
-    // restore the bearer list to be activated for the next RRC connection
-    m_bearersToBeActivatedList = m_bearersToBeActivatedListForReconnection;
+
+    // remove all rules
+    NS_LOG_INFO("Clearing all QosRules from classifier");
+    m_qosRuleClassifier.Clear();
+    m_unstructuredQfiByProtocol.clear();
+    m_unstructuredProtocolByQfi.clear();
+    // restore the QoS flow list to be activated for the next RRC connection
+    m_qosFlowsToBeActivatedList = m_qosFlowsToBeActivatedListForReconnection;
 
     Disconnect();
 }
 
 void
-NrEpcUeNas::DoActivateEpsBearer(NrEpsBearer bearer, Ptr<NrEpcTft> tft)
+NrEpcUeNas::DoActivateQosFlow(NrQosFlow flow, Ptr<NrQosRule> rule)
 {
     NS_LOG_FUNCTION(this);
-    NS_ASSERT_MSG(m_bidCounter < 11, "cannot have more than 11 EPS bearers");
-    uint8_t bid = ++m_bidCounter;
-    m_tftClassifier.Add(tft, bid);
+
+    auto qfi = rule->GetQfi();
+    NS_LOG_INFO("NAS " << m_imsi << " activated QoS flow with QFI " << +qfi);
+
+    if (rule->GetPduSessionType() == NrPduSessionType::UNSTRUCTURED)
+    {
+        // The payload is unstructured, so the flow is keyed by the protocol the session
+        // carries rather than by packet filters.
+        auto protocolNumber = rule->GetProtocolNumber();
+        NS_ABORT_MSG_IF(m_unstructuredQfiByProtocol.contains(protocolNumber),
+                        "an unstructured session for protocol "
+                            << protocolNumber << " is already active on IMSI " << m_imsi);
+        m_unstructuredQfiByProtocol[protocolNumber] = qfi;
+        m_unstructuredProtocolByQfi[qfi] = protocolNumber;
+        return;
+    }
+
+    m_qosRuleClassifier.Add(rule, qfi);
+}
+
+void
+NrEpcUeNas::DoDeactivateQosFlow(uint8_t qfi)
+{
+    NS_LOG_FUNCTION(this << qfi);
+    NS_LOG_INFO("NAS " << m_imsi << " deactivated QoS flow with QFI " << +qfi);
+    m_qosRuleClassifier.Delete(qfi);
+
+    if (auto it = m_unstructuredProtocolByQfi.find(qfi); it != m_unstructuredProtocolByQfi.end())
+    {
+        m_unstructuredQfiByProtocol.erase(it->second);
+        m_unstructuredProtocolByQfi.erase(it);
+    }
 }
 
 NrEpcUeNas::State
@@ -282,10 +333,10 @@ NrEpcUeNas::SwitchToState(State newState)
     switch (m_state)
     {
     case ACTIVE:
-        for (auto it = m_bearersToBeActivatedList.begin(); it != m_bearersToBeActivatedList.end();
-             m_bearersToBeActivatedList.erase(it++))
+        for (auto it = m_qosFlowsToBeActivatedList.begin(); it != m_qosFlowsToBeActivatedList.end();
+             m_qosFlowsToBeActivatedList.erase(it++))
         {
-            DoActivateEpsBearer(it->bearer, it->tft);
+            DoActivateQosFlow(it->flow, it->rule);
         }
         break;
 

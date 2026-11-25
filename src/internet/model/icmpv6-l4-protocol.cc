@@ -11,6 +11,7 @@
 
 #include "icmpv6-l4-protocol.h"
 
+#include "ipv4-interface.h"
 #include "ipv6-interface.h"
 #include "ipv6-l3-protocol.h"
 #include "ipv6-route.h"
@@ -19,6 +20,7 @@
 #include "ns3/assert.h"
 #include "ns3/boolean.h"
 #include "ns3/double.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/integer.h"
 #include "ns3/log.h"
 #include "ns3/node.h"
@@ -33,8 +35,6 @@ namespace ns3
 NS_LOG_COMPONENT_DEFINE("Icmpv6L4Protocol");
 
 NS_OBJECT_ENSURE_REGISTERED(Icmpv6L4Protocol);
-
-const uint8_t Icmpv6L4Protocol::PROT_NUMBER = 58;
 
 // const uint8_t Icmpv6L4Protocol::MAX_INITIAL_RTR_ADVERT_INTERVAL = 16; // max initial RA initial
 // interval. const uint8_t Icmpv6L4Protocol::MAX_INITIAL_RTR_ADVERTISEMENTS = 3;   // max initial RA
@@ -144,13 +144,6 @@ Icmpv6L4Protocol::GetTypeId()
     return tid;
 }
 
-TypeId
-Icmpv6L4Protocol::GetInstanceTypeId() const
-{
-    NS_LOG_FUNCTION(this);
-    return Icmpv6L4Protocol::GetTypeId();
-}
-
 Icmpv6L4Protocol::Icmpv6L4Protocol()
     : m_node(nullptr)
 {
@@ -174,6 +167,7 @@ Icmpv6L4Protocol::DoDispose()
     }
     m_cacheList.clear();
     m_downTarget.Nullify();
+    m_startDhcpv6.Nullify();
 
     m_node = nullptr;
     IpL4Protocol::DoDispose();
@@ -227,14 +221,14 @@ uint16_t
 Icmpv6L4Protocol::GetStaticProtocolNumber()
 {
     NS_LOG_FUNCTION_NOARGS();
-    return PROT_NUMBER;
+    return iana::internetprotocolnumbers::ICMPV6;
 }
 
 int
 Icmpv6L4Protocol::GetProtocolNumber() const
 {
     NS_LOG_FUNCTION(this);
-    return PROT_NUMBER;
+    return iana::internetprotocolnumbers::ICMPV6;
 }
 
 int
@@ -255,7 +249,6 @@ void
 Icmpv6L4Protocol::DoDAD(Ipv6Address target, Ptr<Ipv6Interface> interface)
 {
     NS_LOG_FUNCTION(this << target << interface);
-    Ipv6Address addr;
     Ptr<Ipv6L3Protocol> ipv6 = m_node->GetObject<Ipv6L3Protocol>();
 
     NS_ASSERT(ipv6);
@@ -265,7 +258,7 @@ Icmpv6L4Protocol::DoDAD(Ipv6Address target, Ptr<Ipv6Interface> interface)
         return;
     }
 
-    /** \todo disable multicast loopback to prevent NS probing to be received by the sender */
+    /** @todo disable multicast loopback to prevent NS probing to be received by the sender */
 
     NdiscCache::Ipv6PayloadHeaderPair p = ForgeNS("::",
                                                   Ipv6Address::MakeSolicitedAddress(target),
@@ -274,7 +267,7 @@ Icmpv6L4Protocol::DoDAD(Ipv6Address target, Ptr<Ipv6Interface> interface)
 
     /* update last packet UID */
     interface->SetNsDadUid(target, p.first->GetUid());
-    Simulator::Schedule(Time(MilliSeconds(m_solicitationJitter->GetValue())),
+    Simulator::Schedule(MilliSeconds(m_solicitationJitter->GetValue()),
                         &Ipv6Interface::Send,
                         interface,
                         p.first,
@@ -299,6 +292,21 @@ Icmpv6L4Protocol::Receive(Ptr<Packet> packet,
     NS_LOG_FUNCTION(this << packet << header.GetSource() << header.GetDestination() << interface);
     Ptr<Packet> p = packet->Copy();
     Ptr<Ipv6> ipv6 = m_node->GetObject<Ipv6>();
+
+    // RFC 4443 Section 2.3: a node that receives an ICMPv6 packet with an
+    // invalid checksum must silently discard it. Only verify when checksum
+    // computation is enabled for the simulation (consistent with UDP and TCP).
+    if (Node::ChecksumEnabled())
+    {
+        Icmpv6Header icmp;
+        icmp.InitializeChecksum(header.GetSource(), header.GetDestination());
+        p->PeekHeader(icmp);
+        if (!icmp.IsChecksumOk())
+        {
+            NS_LOG_LOGIC("Bad checksum, dropping ICMPv6 packet");
+            return IpL4Protocol::RX_CSUM_FAILED;
+        }
+    }
 
     /* very ugly! try to find something better in the future */
     uint8_t type;
@@ -333,7 +341,7 @@ Icmpv6L4Protocol::Receive(Ptr<Packet> packet,
     case Icmpv6Header::ICMPV6_ECHO_REPLY:
         // EchoReply does not contain any info about L4
         // so we can not forward it up.
-        /// \todo implement request / reply consistency check.
+        /// @todo implement request / reply consistency check.
         break;
     case Icmpv6Header::ICMPV6_ERROR_DESTINATION_UNREACHABLE:
         HandleDestinationUnreachable(p, header.GetSource(), header.GetDestination(), interface);
@@ -366,11 +374,11 @@ Icmpv6L4Protocol::Forward(Ipv6Address source,
 
     Ptr<Ipv6L3Protocol> ipv6 = m_node->GetObject<Ipv6L3Protocol>();
 
-    /// \todo assuming the ICMP is carrying a extensionless IP packet
+    /// @todo assuming the ICMP is carrying a extensionless IP packet
 
     uint8_t nextHeader = ipHeader.GetNextHeader();
 
-    if (nextHeader != Icmpv6L4Protocol::PROT_NUMBER)
+    if (nextHeader != iana::internetprotocolnumbers::ICMPV6)
     {
         Ptr<IpL4Protocol> l4 = ipv6->GetProtocol(nextHeader);
         if (l4)
@@ -476,7 +484,7 @@ Icmpv6L4Protocol::HandleRA(Ptr<Packet> packet,
             {
                 p->RemoveHeader(mtuHdr);
                 hasMtu = true;
-                /** \todo case of multiple prefix on single interface */
+                /** @todo case of multiple prefix on single interface */
                 /* interface->GetDevice ()->SetMtu (m.GetMtu ()); */
             }
             break;
@@ -503,7 +511,6 @@ Icmpv6L4Protocol::ReceiveLLA(Icmpv6OptionLinkLayerAddress lla,
                              Ptr<Ipv6Interface> interface)
 {
     NS_LOG_FUNCTION(this << lla << src << dst << interface);
-    Address hardwareAddress;
     NdiscCache::Entry* entry = nullptr;
     Ptr<NdiscCache> cache = FindCache(interface->GetDevice());
 
@@ -606,7 +613,6 @@ Icmpv6L4Protocol::HandleRS(Ptr<Packet> packet,
     Ptr<Ipv6L3Protocol> ipv6 = m_node->GetObject<Ipv6L3Protocol>();
     Icmpv6RS rsHeader;
     packet->RemoveHeader(rsHeader);
-    Address hardwareAddress;
     Icmpv6OptionLinkLayerAddress lla(true);
     NdiscCache::Entry* entry = nullptr;
     Ptr<NdiscCache> cache = FindCache(interface->GetDevice());
@@ -759,7 +765,10 @@ Icmpv6L4Protocol::HandleNS(Ptr<Packet> packet,
         flags += 4; /* R flag */
     }
 
-    Address hardwareAddress = interface->GetDevice()->GetAddress();
+    // DAD replies are sent to a multicast address. Otherwise, use the interface address that is
+    // valid for the unicast receiver, as the device may have multiple link-layer addresses.
+    Address hardwareAddress = src.IsAny() ? interface->GetDevice()->GetAddress()
+                                          : interface->GetDevice()->GetAddressFor(replyMacAddress);
     NdiscCache::Ipv6PayloadHeaderPair p = ForgeNA(
         target.IsLinkLocal() ? interface->GetLinkLocalAddress().GetAddress() : ifaddr.GetAddress(),
         src.IsAny() ? dst : src, // DAD replies must go to the multicast group it was sent to.
@@ -770,7 +779,7 @@ Icmpv6L4Protocol::HandleNS(Ptr<Packet> packet,
     // change it beyond what we did already).
     Ptr<Packet> pkt = p.first;
     pkt->AddHeader(p.second);
-    interface->GetDevice()->Send(pkt, replyMacAddress, Ipv6L3Protocol::PROT_NUMBER);
+    interface->GetDevice()->Send(pkt, replyMacAddress, iana::ieee802numbers::IPV6);
 }
 
 NdiscCache::Ipv6PayloadHeaderPair
@@ -793,12 +802,12 @@ Icmpv6L4Protocol::ForgeRS(Ipv6Address src, Ipv6Address dst, Address hardwareAddr
         p->AddHeader(llOption);
     }
 
-    rs.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + rs.GetSerializedSize(), PROT_NUMBER);
+    rs.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + rs.GetSerializedSize());
     p->AddHeader(rs);
 
     ipHeader.SetSource(src);
     ipHeader.SetDestination(dst);
-    ipHeader.SetNextHeader(PROT_NUMBER);
+    ipHeader.SetNextHeader(iana::internetprotocolnumbers::ICMPV6);
     ipHeader.SetPayloadLength(p->GetSize());
     ipHeader.SetHopLimit(255);
 
@@ -820,15 +829,12 @@ Icmpv6L4Protocol::ForgeEchoRequest(Ipv6Address src,
     req.SetId(id);
     req.SetSeq(seq);
 
-    req.CalculatePseudoHeaderChecksum(src,
-                                      dst,
-                                      p->GetSize() + req.GetSerializedSize(),
-                                      PROT_NUMBER);
+    req.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + req.GetSerializedSize());
     p->AddHeader(req);
 
     ipHeader.SetSource(src);
     ipHeader.SetDestination(dst);
-    ipHeader.SetNextHeader(PROT_NUMBER);
+    ipHeader.SetNextHeader(iana::internetprotocolnumbers::ICMPV6);
     ipHeader.SetPayloadLength(p->GetSize());
     ipHeader.SetHopLimit(255);
 
@@ -848,7 +854,6 @@ Icmpv6L4Protocol::HandleNA(Ptr<Packet> packet,
     packet->RemoveHeader(naHeader);
     Ipv6Address target = naHeader.GetIpv6Target();
 
-    Address hardwareAddress;
     NdiscCache::Entry* entry = nullptr;
     Ptr<NdiscCache> cache = FindCache(interface->GetDevice());
     std::list<NdiscCache::Ipv6PayloadHeaderPair> waiting;
@@ -1196,7 +1201,7 @@ Icmpv6L4Protocol::SendMessage(Ptr<Packet> packet, Ipv6Address src, Ipv6Address d
 
     tag.SetHopLimit(ttl);
     packet->AddPacketTag(tag);
-    m_downTarget(packet, src, dst, PROT_NUMBER, nullptr);
+    m_downTarget(packet, src, dst, iana::internetprotocolnumbers::ICMPV6, nullptr);
 }
 
 void
@@ -1236,10 +1241,9 @@ Icmpv6L4Protocol::SendMessage(Ptr<Packet> packet,
 
         icmpv6Hdr.CalculatePseudoHeaderChecksum(src,
                                                 dst,
-                                                packet->GetSize() + icmpv6Hdr.GetSerializedSize(),
-                                                PROT_NUMBER);
+                                                packet->GetSize() + icmpv6Hdr.GetSerializedSize());
         packet->AddHeader(icmpv6Hdr);
-        m_downTarget(packet, src, dst, PROT_NUMBER, route);
+        m_downTarget(packet, src, dst, iana::internetprotocolnumbers::ICMPV6, route);
     }
     else
     {
@@ -1272,7 +1276,7 @@ Icmpv6L4Protocol::SendNA(Ipv6Address src, Ipv6Address dst, Address* hardwareAddr
     }
 
     p->AddHeader(llOption);
-    na.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + na.GetSerializedSize(), PROT_NUMBER);
+    na.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + na.GetSerializedSize());
     p->AddHeader(na);
 
     SendMessage(p, src, dst, 255);
@@ -1292,10 +1296,7 @@ Icmpv6L4Protocol::SendEchoReply(Ipv6Address src,
     reply.SetId(id);
     reply.SetSeq(seq);
 
-    reply.CalculatePseudoHeaderChecksum(src,
-                                        dst,
-                                        p->GetSize() + reply.GetSerializedSize(),
-                                        PROT_NUMBER);
+    reply.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + reply.GetSerializedSize());
     p->AddHeader(reply);
     SendMessage(p, src, dst, 64);
 }
@@ -1323,7 +1324,7 @@ Icmpv6L4Protocol::SendNS(Ipv6Address src,
     NS_LOG_LOGIC("Send NS ( from " << src << " to " << dst << " target " << target << ")");
 
     p->AddHeader(llOption);
-    ns.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + ns.GetSerializedSize(), PROT_NUMBER);
+    ns.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + ns.GetSerializedSize());
     p->AddHeader(ns);
     if (!dst.IsMulticast())
     {
@@ -1332,7 +1333,7 @@ Icmpv6L4Protocol::SendNS(Ipv6Address src,
     else
     {
         NS_LOG_LOGIC("Destination is Multicast, using DelayedSendMessage");
-        Simulator::Schedule(Time(MilliSeconds(m_solicitationJitter->GetValue())),
+        Simulator::Schedule(MilliSeconds(m_solicitationJitter->GetValue()),
                             &Icmpv6L4Protocol::DelayedSendMessage,
                             this,
                             p,
@@ -1371,7 +1372,7 @@ Icmpv6L4Protocol::SendRS(Ipv6Address src, Ipv6Address dst, Address hardwareAddre
 
     NS_LOG_LOGIC("Send RS (from " << src << " to " << dst << ")");
 
-    rs.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + rs.GetSerializedSize(), PROT_NUMBER);
+    rs.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + rs.GetSerializedSize());
     p->AddHeader(rs);
     if (!dst.IsMulticast())
     {
@@ -1388,7 +1389,7 @@ Icmpv6L4Protocol::SendRS(Ipv6Address src, Ipv6Address dst, Address hardwareAddre
             // First RS transmission - also add some jitter to desynchronize nodes.
             m_rsInitialRetransmissionTime = Simulator::Now();
             rsTimeout = m_rsInitialRetransmissionTime * (1 + m_rsRetransmissionJitter->GetValue());
-            rsDelay = Time(MilliSeconds(m_solicitationJitter->GetValue()));
+            rsDelay = MilliSeconds(m_solicitationJitter->GetValue());
         }
         else
         {
@@ -1431,7 +1432,7 @@ Icmpv6L4Protocol::HandleRsTimeout(Ipv6Address src, Ipv6Address dst, Address hard
         }
     }
 
-    if (m_rsMaxRetransmissionDuration != Time(0) &&
+    if (!m_rsMaxRetransmissionDuration.IsZero() &&
         Simulator::Now() - m_rsInitialRetransmissionTime > m_rsMaxRetransmissionDuration)
     {
         NS_LOG_LOGIC("Maximum RS retransmission time reached, giving up.");
@@ -1600,8 +1601,7 @@ Icmpv6L4Protocol::SendRedirection(Ptr<Packet> redirectedPacket,
     redirectionHeader.CalculatePseudoHeaderChecksum(src,
                                                     dst,
                                                     p->GetSize() +
-                                                        redirectionHeader.GetSerializedSize(),
-                                                    PROT_NUMBER);
+                                                        redirectionHeader.GetSerializedSize());
     p->AddHeader(redirectionHeader);
 
     SendMessage(p, src, dst, 64);
@@ -1639,12 +1639,12 @@ Icmpv6L4Protocol::ForgeNA(Ipv6Address src, Ipv6Address dst, Address* hardwareAdd
         na.SetFlagR(true);
     }
 
-    na.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + na.GetSerializedSize(), PROT_NUMBER);
+    na.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + na.GetSerializedSize());
     p->AddHeader(na);
 
     ipHeader.SetSource(src);
     ipHeader.SetDestination(dst);
-    ipHeader.SetNextHeader(PROT_NUMBER);
+    ipHeader.SetNextHeader(iana::internetprotocolnumbers::ICMPV6);
     ipHeader.SetPayloadLength(p->GetSize());
     ipHeader.SetHopLimit(255);
 
@@ -1668,12 +1668,12 @@ Icmpv6L4Protocol::ForgeNS(Ipv6Address src,
     NS_LOG_LOGIC("Send NS ( from " << src << " to " << dst << " target " << target << ")");
 
     p->AddHeader(llOption);
-    ns.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + ns.GetSerializedSize(), PROT_NUMBER);
+    ns.CalculatePseudoHeaderChecksum(src, dst, p->GetSize() + ns.GetSerializedSize());
     p->AddHeader(ns);
 
     ipHeader.SetSource(src);
     ipHeader.SetDestination(dst);
-    ipHeader.SetNextHeader(PROT_NUMBER);
+    ipHeader.SetNextHeader(iana::internetprotocolnumbers::ICMPV6);
     ipHeader.SetPayloadLength(p->GetSize());
     ipHeader.SetHopLimit(255);
 
@@ -1879,7 +1879,7 @@ Icmpv6L4Protocol::FunctionDadTimeout(Ipv6Interface* interface, Ipv6Address addr)
              */
             NS_LOG_LOGIC("Scheduled a first Router Solicitation");
             m_rsRetransmissionCount = 0;
-            Simulator::Schedule(Seconds(0.0),
+            Simulator::Schedule(Seconds(0),
                                 &Icmpv6L4Protocol::SendRS,
                                 this,
                                 ifaddr.GetAddress(),

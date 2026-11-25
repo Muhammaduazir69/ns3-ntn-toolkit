@@ -21,9 +21,9 @@
 #include <vector>
 
 /**
- * \file cttc-nr-traffic-3gpp-xr.cc
- * \ingroup examples
- * \brief Simple topology consisting of 1 GNB and various UEs.
+ * @file cttc-nr-traffic-3gpp-xr.cc
+ * @ingroup examples
+ * @brief Simple topology consisting of 1 GNB and various UEs.
  *  Can be configured with different 3GPP XR traffic generators (by using
  *  XR traffic mixer helper).
  *
@@ -50,10 +50,10 @@ ConfigureXrApp(NodeContainer& ueContainer,
                NodeContainer& remoteHostContainer,
                NetDeviceContainer& ueNetDev,
                Ptr<NrHelper> nrHelper,
-               NrEpsBearer& bearer,
-               Ptr<NrEpcTft> tft,
+               NrQosFlow& flow,
+               Ptr<NrQosRule> rule,
                bool isMx1,
-               std::vector<Ptr<NrEpcTft>>& tfts,
+               std::vector<Ptr<NrQosRule>>& rules,
                ApplicationContainer& serverApps,
                ApplicationContainer& clientApps,
                ApplicationContainer& pingApps)
@@ -82,19 +82,19 @@ ConfigureXrApp(NodeContainer& ueContainer,
     pingApps.Add(ping.Install(remoteHostContainer));
 
     Ptr<NetDevice> ueDevice = ueNetDev.Get(i);
-    // Activate a dedicated bearer for the traffic type per node
-    nrHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, tft);
-    // Activate a dedicated bearer for the traffic type per node
+    // Activate a dedicated QoS flow for the traffic type per node
+    nrHelper->ActivateDedicatedQosFlow(ueDevice, flow, rule);
+    // Activate a dedicated QoS flow for the traffic type per node
     if (isMx1)
     {
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, tft);
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, flow, rule);
     }
     else
     {
-        NS_ASSERT(tfts.size() >= currentUeClientApps.GetN());
+        NS_ASSERT(rules.size() >= currentUeClientApps.GetN());
         for (uint32_t j = 0; j < currentUeClientApps.GetN(); j++)
         {
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, tfts[j]);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, flow, rules[j]);
         }
     }
 
@@ -175,15 +175,16 @@ main(int argc, char* argv[])
 
     // setup the nr simulation
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Set channel using UMa scenario and LOS channel condition
+    channelHelper->ConfigureFactories("UMa", "LOS", "ThreeGpp");
     // simple band configuration and initialize
     CcBwpCreator ccBwpCreator;
-    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency,
-                                                   bandwidth,
-                                                   1,
-                                                   BandwidthPartInfo::UMa_LoS);
+    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency, bandwidth, 1);
 
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-    nrHelper->InitializeOperationBand(&band);
+    // Set and create channel to this band
+    channelHelper->AssignChannelsToBands({band});
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
 
     nrHelper->SetGnbPhyAttribute("TxPower", DoubleValue(txPower));
@@ -193,7 +194,7 @@ main(int argc, char* argv[])
     nrHelper->SetUePhyAttribute("NoiseFigure", DoubleValue(7));
 
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
-    Config::SetDefault("ns3::NrGnbRrc::EpsBearerToRlcMapping",
+    Config::SetDefault("ns3::NrGnbRrc::QosFlowToRlcMapping",
                        EnumValue(useUdp ? NrGnbRrc::RLC_UM_ALWAYS : NrGnbRrc::RLC_AM_ALWAYS));
 
     nrHelper->SetGnbAntennaAttribute("NumRows", UintegerValue(4));
@@ -217,9 +218,6 @@ main(int argc, char* argv[])
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     nrHelper->SetEpcHelper(nrEpcHelper);
     nrEpcHelper->SetAttribute("S1uLinkDelay", TimeValue(MilliSeconds(0)));
-
-    // Initialize nrHelper
-    nrHelper->Initialize();
 
     NodeContainer gNbNodes;
     NodeContainer ueNodes;
@@ -278,52 +276,19 @@ main(int argc, char* argv[])
     NetDeviceContainer ueVrNetDev = nrHelper->InstallUeDevice(ueVrContainer, allBwps);
     NetDeviceContainer ueCgNetDev = nrHelper->InstallUeDevice(ueCgContainer, allBwps);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gNbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueArNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueVrNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueCgNetDev, randomStream);
-
-    for (auto it = gNbNetDev.Begin(); it != gNbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = ueArNetDev.Begin(); it != ueArNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = ueVrNetDev.Begin(); it != ueVrNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = ueCgNetDev.Begin(); it != ueCgNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
+    NetDeviceContainer ueNetDevs;
+    ueNetDevs.Add(ueArNetDev);
+    ueNetDevs.Add(ueVrNetDev);
+    ueNetDevs.Add(ueCgNetDev);
+    nrHelper->AssignStreams({.gnbDevs = gNbNetDev, .ueDevs = ueNetDevs});
 
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 1000, Seconds(0.000));
+    auto remoteHostContainer = NodeContainer(remoteHost);
+
     InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
-
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(1000));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
     internet.Install(ueNodes);
 
     Ipv4InterfaceContainer ueArIpIface;
@@ -333,14 +298,6 @@ main(int argc, char* argv[])
     ueArIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueArNetDev));
     ueVrIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueVrNetDev));
     ueCgIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueCgNetDev));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ueArNetDev, gNbNetDev);
@@ -358,47 +315,47 @@ main(int argc, char* argv[])
     uint16_t dlPortVrStart = 1131;
     uint16_t dlPortCgStart = 1141;
 
-    // The bearer that will carry AR traffic
-    NrEpsBearer arBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
-    Ptr<NrEpcTft> arTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfAr;
-    std::vector<Ptr<NrEpcTft>> arTfts;
+    // The QoS flow that will carry AR traffic
+    NrQosFlow arFlow(NrQosFlow::NGBR_LOW_LAT_EMBB);
+    Ptr<NrQosRule> arRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfAr;
+    std::vector<Ptr<NrQosRule>> arRules;
 
     if (isMx1)
     {
         dlpfAr.localPortStart = dlPortArStart;
         dlpfAr.localPortEnd = dlPortArStop;
-        arTft->Add(dlpfAr);
+        arRule->Add(dlpfAr);
     }
     else
     {
-        // create 3 xrTfts for 1x1 mapping
+        // create 3 xrRules for 1x1 mapping
         for (uint32_t i = 0; i < 3; i++)
         {
-            Ptr<NrEpcTft> tempTft = Create<NrEpcTft>();
+            Ptr<NrQosRule> tempRule = Create<NrQosRule>();
             dlpfAr.localPortStart = dlPortArStart + i;
             dlpfAr.localPortEnd = dlPortArStart + i;
-            tempTft->Add(dlpfAr);
-            arTfts.emplace_back(tempTft);
+            tempRule->Add(dlpfAr);
+            arRules.emplace_back(tempRule);
         }
     }
-    // The bearer that will carry VR traffic
-    NrEpsBearer vrBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    // The QoS flow that will carry VR traffic
+    NrQosFlow vrFlow(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
-    Ptr<NrEpcTft> vrTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfVr;
+    Ptr<NrQosRule> vrRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfVr;
     dlpfVr.localPortStart = dlPortVrStart;
     dlpfVr.localPortEnd = dlPortVrStart;
-    vrTft->Add(dlpfVr);
+    vrRule->Add(dlpfVr);
 
-    // The bearer that will carry CG traffic
-    NrEpsBearer cgBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    // The QoS flow that will carry CG traffic
+    NrQosFlow cgFlow(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
-    Ptr<NrEpcTft> cgTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfCg;
+    Ptr<NrQosRule> cgRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfCg;
     dlpfCg.localPortStart = dlPortCgStart;
     dlpfCg.localPortEnd = dlPortCgStart;
-    cgTft->Add(dlpfCg);
+    cgRule->Add(dlpfCg);
 
     // Install traffic generators
     ApplicationContainer clientApps;
@@ -419,15 +376,15 @@ main(int argc, char* argv[])
                        remoteHostContainer,
                        ueArNetDev,
                        nrHelper,
-                       arBearer,
-                       arTft,
+                       arFlow,
+                       arRule,
                        isMx1,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps);
     }
-    // TODO for VR and CG of 2 flows Tfts and isMx1 have to be set. Currently they are
+    // TODO for VR and CG of 2 flows Rules and isMx1 have to be set. Currently they are
     // hardcoded for 1 flow
     for (uint32_t i = 0; i < ueVrContainer.GetN(); ++i)
     {
@@ -442,10 +399,10 @@ main(int argc, char* argv[])
                        remoteHostContainer,
                        ueVrNetDev,
                        nrHelper,
-                       vrBearer,
-                       vrTft,
+                       vrFlow,
+                       vrRule,
                        true,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps);
@@ -463,10 +420,10 @@ main(int argc, char* argv[])
                        remoteHostContainer,
                        ueCgNetDev,
                        nrHelper,
-                       cgBearer,
-                       cgTft,
+                       cgFlow,
+                       cgRule,
                        true,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps);
@@ -503,9 +460,7 @@ main(int argc, char* argv[])
     double averageFlowThroughput = 0.0;
     double averageFlowDelay = 0.0;
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;

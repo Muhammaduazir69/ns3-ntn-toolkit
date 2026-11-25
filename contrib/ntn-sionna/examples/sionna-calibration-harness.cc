@@ -27,9 +27,12 @@
  * (ntn-cho geodesy) at elevations of 10 deg and up. --grid=fixed restores the
  * previous 1 to 1000 km list.
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
+#include "ns3/constant-position-mobility-model.h"
 #include "ns3/core-module.h"
 #include "ns3/mobility-model.h"
+#include "ns3/node-container.h"
 #include "ns3/propagation-loss-model.h"
 
 #include "ns3/sionna-calibrator.h"
@@ -42,6 +45,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <string>
 #include <vector>
 
 using namespace ns3;
@@ -178,6 +183,10 @@ main(int argc, char* argv[])
     const double freqs[] = {2.0e9, 12.0e9, 28.0e9};
 
     std::vector<SionnaCalibrator::PointResult> all;
+    // ntn-dataset@1: the per-point table as a dataset (empty Sionna and residual cells
+    // where the server did not answer), so the run's results follow its parameters.
+    std::ofstream pointCsv("sionna-calibration-harness.csv");
+    pointCsv << "freq_ghz,dist_m,sionna_ok,sionna_pl_db,model_pl_db,residual_db\n";
 
     for (double f : freqs)
     {
@@ -203,6 +212,16 @@ main(int argc, char* argv[])
                         f / 1e9, p.grid.dist_m,
                         p.sionna_pl_db, p.model_pl_db, p.residual_dB);
             all.push_back(p);
+            pointCsv << f / 1e9 << "," << p.grid.dist_m << "," << (p.sionna_ok ? 1 : 0) << ",";
+            if (p.sionna_ok)
+            {
+                pointCsv << p.sionna_pl_db << "," << p.model_pl_db << "," << p.residual_dB;
+            }
+            else
+            {
+                pointCsv << "," << p.model_pl_db << ",";
+            }
+            pointCsv << "\n";
         }
     }
 
@@ -222,6 +241,56 @@ main(int argc, char* argv[])
         sumSq += p.residual_dB * p.residual_dB;
         maxAbs = std::max(maxAbs, std::abs(p.residual_dB));
     }
+    pointCsv.close();
+
+    // Globe scene (ntn-dataset@1) of the calibration geometry, recorded after every
+    // calibration point is final: device-less nodes for satellite 0 of the Walker shell on
+    // its SGP4 orbit and the terminal 150 km north of its sub-satellite point at 300 s, over
+    // the 600 s pass the grid samples. Nothing here feeds back into the residuals.
+    auto recordPassScene = [altitudeKm]() {
+        ntncon::WalkerConfig w;
+        w.num_planes = 72;
+        w.total_sats = 72 * 22;
+        w.altitude_km = altitudeKm;
+        w.inclination_deg = 53.0;
+        w.epoch_unix_s = 1735689600.0;
+        const auto el = ntncon::WalkerConstellation::BuildDelta(w);
+        Ptr<ntncon::Sgp4MobilityModel> satCtx = CreateObject<ntncon::Sgp4MobilityModel>();
+        satCtx->SetElementsSgp4(el[0]);
+        Vector pc;
+        Vector vc;
+        satCtx->GetEcefStateAt(Seconds(300.0), pc, vc);
+        double lat;
+        double lon;
+        double alt;
+        ntngeo::EcefToGeodetic(pc, lat, lon, alt);
+        Ptr<ConstantPositionMobilityModel> ueCtx = CreateObject<ConstantPositionMobilityModel>();
+        ueCtx->SetPosition(ntngeo::GeodeticToEcef(lat + 150.0 / 111.195, lon, 0.0));
+        NodeContainer ctxNodes;
+        ctxNodes.Create(2);
+        ctxNodes.Get(0)->AggregateObject(satCtx);
+        ctxNodes.Get(1)->AggregateObject(ueCtx);
+        ns3::ntnobs::StartSceneFromNodeList(".");
+        Simulator::Stop(Seconds(600.0));
+        Simulator::Run();
+    };
+
+    std::vector<ns3::ntnobs::DatasetMetric> metrics;
+    metrics.push_back({"grid_points", std::to_string(dists.size()), "analytic"});
+    if (!dists.empty())
+    {
+        metrics.push_back(
+            {"min_slant_range_km",
+             std::to_string(*std::min_element(dists.begin(), dists.end()) / 1e3),
+             "analytic"});
+        metrics.push_back(
+            {"max_slant_range_km",
+             std::to_string(*std::max_element(dists.begin(), dists.end()) / 1e3),
+             "analytic"});
+    }
+    metrics.push_back({"calibration_points", std::to_string(all.size()), "analytic"});
+    metrics.push_back({"sionna_samples", std::to_string(sionna_ok), "analytic"});
+    metrics.push_back({"sionna_failures", std::to_string(all.size() - sionna_ok), "analytic"});
     std::printf("# samples=%zu  sionna_failures=%zu\n",
                 sionna_ok, all.size() - sionna_ok);
     if (sionna_ok > 0)
@@ -230,6 +299,14 @@ main(int argc, char* argv[])
         const double var = sumSq / sionna_ok - mean * mean;
         std::printf("# residual_dB:  max_abs=%.4f  mean=%.4f  std=%.4f\n",
                     maxAbs, mean, std::sqrt(std::max(0.0, var)));
+        metrics.push_back({"residual_max_abs_db", std::to_string(maxAbs), "analytic"});
+        metrics.push_back({"residual_mean_db", std::to_string(mean), "analytic"});
+        metrics.push_back(
+            {"residual_std_db", std::to_string(std::sqrt(std::max(0.0, var))), "analytic"});
+        if (losOnly)
+        {
+            metrics.push_back({"los_gate_pass", maxAbs < 1.0 ? "1" : "0", "analytic"});
+        }
         // §4.3.3 gate: LOS-only residual ≤ 1 dB.
         if (losOnly)
         {
@@ -253,8 +330,21 @@ main(int argc, char* argv[])
                          all.size());
             return 2;
         }
+        metrics.push_back({"raytrace_live", "0", "config"});
+        recordPassScene();
+        ns3::ntnobs::WriteDatasetRecord(".", "sionna-calibration-harness", "analytic", argc, argv,
+                                        metrics,
+                                        {{"note", "no Sionna RT server reachable; no calibration result"}});
+        Simulator::Destroy();
         return 0;
     }
     std::printf("raytrace_live=%d\n", sionna_ok == all.size() ? 1 : 0);
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    metrics.push_back({"raytrace_live", sionna_ok == all.size() ? "1" : "0", "measured"});
+    recordPassScene();
+    ns3::ntnobs::WriteDatasetRecord(".", "sionna-calibration-harness", "analytic", argc, argv,
+                                    metrics);
+    Simulator::Destroy();
     return 0;
 }

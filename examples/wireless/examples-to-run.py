@@ -85,17 +85,17 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-vht-network --simulationTime=0.2s --useRts=0 --minExpectedThroughput=5 --maxExpectedThroughput=620",
+        "wifi-vht-network --simulationTime=0.2s --useRts=0 --minExpectedThroughput=5 --maxExpectedThroughput=630",
         "True",
         "True",
     ),
     (
-        "wifi-vht-network --simulationTime=0.2s --useRts=1 --minExpectedThroughput=5 --maxExpectedThroughput=557",
+        "wifi-vht-network --simulationTime=0.2s --useRts=1 --minExpectedThroughput=5 --maxExpectedThroughput=565",
         "True",
         "True",
     ),
     (
-        "wifi-vht-network --simulationTime=0.2s --useRts=0 --use80Plus80=1 --minExpectedThroughput=5 --maxExpectedThroughput=620",
+        "wifi-vht-network --simulationTime=0.2s --useRts=0 --use80Plus80=1 --minExpectedThroughput=5 --maxExpectedThroughput=630",
         "True",
         "True",
     ),
@@ -165,7 +165,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-eht-network --simulationTime=0.1s --frequency=5 --useRts=1 --minExpectedThroughput=6 --maxExpectedThroughput=660",
+        "wifi-eht-network --simulationTime=0.1s --frequency=6 --useRts=1 --minExpectedThroughput=5 --maxExpectedThroughput=800",
         "True",
         "True",
     ),
@@ -180,7 +180,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-eht-network --simulationTime=0.23s --udp=0 --downlink=1 --useRts=0 --nStations=4 --dlAckType=ACK-SU-FORMAT --enableUlOfdma=1 --enableBsrp=0 --mcs=6 --frequency2=6  --minExpectedThroughput=60 --maxExpectedThroughput=430",
+        "wifi-eht-network --simulationTime=0.23s --udp=0 --downlink=1 --useRts=0 --nStations=4 --dlAckType=ACK-SU-FORMAT --enableUlOfdma=1 --enableBsrp=0 --mcs=6 --frequency2=6 --minExpectedThroughput=35 --maxExpectedThroughput=404",
         "True",
         "True",
     ),
@@ -195,7 +195,37 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-eht-network --simulationTime=0.25s --udp=0 --downlink=0 --useRts=0 --nStations=4 --dlAckType=AGGR-MU-BAR --enableUlOfdma=1 --enableBsrp=1 --mpduBufferSize=1024 --mcs=8 --muSchedAccessReqInterval=45ms --frequency2=6 --minExpectedThroughput=50 --maxExpectedThroughput=550",
+        "wifi-eht-network --simulationTime=0.25s --udp=0 --downlink=0 --useRts=0 --nStations=4 --dlAckType=AGGR-MU-BAR --enableUlOfdma=1 --enableBsrp=1 --mpduBufferSize=1024 --mcs=8 --muSchedAccessReqInterval=45ms --frequency2=6 --minExpectedThroughput=50 --maxExpectedThroughput=550 --RngRun=6",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-eht-network --simulationTime=0.2s --frequency=2.4 --frequency2=5 --guardInterval=1600 --udp=0 --downlink=1 --useRts=0 --mpduBufferSize=512 --emlsrLinks=0,1 --emlsrPaddingDelay=32 --emlsrTransitionDelay=32 --channelSwitchDelay=32us --emlsrAuxSwitch=True --emlsrAuxTxCapable=True --minExpectedThroughput=5 --maxExpectedThroughput=200",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-eht-network --simulationTime=0.2s --frequency=2.4 --frequency2=5 --guardInterval=1600 --udp=0 --downlink=1 --useRts=1 --mpduBufferSize=512 --emlsrLinks=0,1 --emlsrPaddingDelay=64 --emlsrTransitionDelay=64 --channelSwitchDelay=64us --emlsrMgrTypeId=ns3::AdvancedEmlsrManager --emlsrAuxSwitch=False --emlsrAuxTxCapable=True --minExpectedThroughput=5 --maxExpectedThroughput=190",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-eht-network --simulationTime=0.2s --frequency=2.4 --frequency2=5 --guardInterval=1600 --udp=0 --downlink=0 --useRts=0 --mpduBufferSize=512 --emlsrLinks=0,1 --emlsrPaddingDelay=0 --emlsrTransitionDelay=0 --channelSwitchDelay=1ns --emlsrMgrTypeId=ns3::AdvancedEmlsrManager --emlsrAuxSwitch=False --emlsrAuxTxCapable=False --minExpectedThroughput=5 --maxExpectedThroughput=40 --RngRun=9",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-eht-network --simulationTime=0.3s --frequency=2.4 --frequency2=5 --frequency3=6 --guardInterval=1600 --udp=0 --downlink=1 --useRts=0 --mpduBufferSize=512 --emlsrLinks=0,1,2 --emlsrPaddingDelay=32 --emlsrTransitionDelay=32 --channelSwitchDelay=32us --emlsrAuxSwitch=True --emlsrAuxTxCapable=True --nStations=4 --dlAckType=AGGR-MU-BAR --enableUlOfdma=1 --enableBsrp=0 --mcs=0,3,5,9,10 --minExpectedThroughput=8 --maxExpectedThroughput=300",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-eht-network --simulationTime=0.3s --frequency=2.4 --frequency2=5 --frequency3=6 --guardInterval=1600 --udp=0 --downlink=0 --useRts=1 --mpduBufferSize=512 --emlsrLinks=0,1,2 --emlsrPaddingDelay=64 --emlsrTransitionDelay=64 --channelSwitchDelay=64us --emlsrAuxSwitch=False --emlsrAuxTxCapable=True --nStations=4 --dlAckType=MU-BAR --enableUlOfdma=1 --enableBsrp=1 --mcs=1,4,8,11,13 --minExpectedThroughput=10 --maxExpectedThroughput=260",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-eht-network --simulationTime=0.3s --frequency=2.4 --frequency2=5 --frequency3=6 --guardInterval=1600 --udp=0 --downlink=0 --useRts=1 --mpduBufferSize=512 --emlsrLinks=0,1,2 --emlsrPaddingDelay=0 --emlsrTransitionDelay=0 --channelSwitchDelay=1ns --emlsrMgrTypeId=ns3::AdvancedEmlsrManager --emlsrAuxSwitch=False --emlsrAuxTxCapable=False --nStations=4 --dlAckType=ACK-SU-FORMAT --enableUlOfdma=1 --enableBsrp=1 --mcs=1,5,8,11 --minExpectedThroughput=30 --maxExpectedThroughput=333",
         "True",
         "True",
     ),
@@ -205,7 +235,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "wifi-simple-ht-hidden-stations --simulationTime=1s --enableRts=1 --nMpdus=32 --minExpectedThroughput=57 --maxExpectedThroughput=58",
+        "wifi-simple-ht-hidden-stations --simulationTime=1s --enableRts=1 --nMpdus=32 --minExpectedThroughput=56 --maxExpectedThroughput=57",
         "True",
         "True",
     ),
@@ -263,6 +293,61 @@ cpp_examples = [
         "wifi-backward-compatibility --apVersion=80211a --staVersion=80211ac --apRaa=Ideal --staRaa=Ideal --simulationTime=1s",
         "True",
         "False",
+    ),
+    (
+        "wifi-multicast --minExpectedPackets=10",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-multicast --gcrRetransmissionPolicy=GcrUr --minExpectedPackets=10",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-multicast --gcrRetransmissionPolicy=GcrUr --multicastFrameErrorRate=0.2 --minExpectedPackets=10",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-multicast --gcrRetransmissionPolicy=GcrUr --maxAmpduLength=65535 --maxPackets=0 --nStations=4 --dataRate=50Mbps --gcrProtection=Rts-Cts --rtsThreshold=0 --simulationTime=1 --minExpectedThroughput=35 --maxExpectedThroughput=40",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-multicast --gcrRetransmissionPolicy=GcrUr --maxAmpduLength=65535 --maxPackets=0 --nStations=4 --dataRate=50Mbps --gcrProtection=Cts-To-Self --simulationTime=1 --minExpectedThroughput=40 --maxExpectedThroughput=45",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-multicast --gcrRetransmissionPolicy=GcrBlockAck --minExpectedPackets=10",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-multicast --gcrRetransmissionPolicy=GcrBlockAck --multicastFrameErrorRate=0.2 --minExpectedPackets=10",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-multicast --gcrRetransmissionPolicy=GcrBlockAck --maxAmpduLength=65535 --maxPackets=0 --nStations=4 --dataRate=100Mbps --gcrProtection=Rts-Cts --rtsThreshold=0 --simulationTime=1s --minExpectedThroughput=100 --maxExpectedThroughput=100",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-multicast --gcrRetransmissionPolicy=GcrBlockAck --maxAmpduLength=65535 --maxPackets=0 --nStations=4 --dataRate=100Mbps --gcrProtection=Cts-To-Self --simulationTime=1s --minExpectedThroughput=100 --maxExpectedThroughput=100",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-ps-mode --dlLoad=10Mbps --ulLoad=25Mbps --simulationTime=500ms --nStas=2 --staticSetup=1 --psMode=0:true,1:true --channels=36,0,BAND_5GHZ,0:100,0,BAND_5GHZ,0",
+        "True",
+        "True",
+    ),
+    (
+        "wifi-roaming --simulationTime=5s --disassocTime=2.5s --dlLoad=10Mbps --udp=0",
+        "True",
+        "True",
     ),
 ]
 

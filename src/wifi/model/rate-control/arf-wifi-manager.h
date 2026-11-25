@@ -10,14 +10,15 @@
 #define ARF_WIFI_MANAGER_H
 
 #include "ns3/traced-value.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-remote-station-manager.h"
 
 namespace ns3
 {
 
 /**
- * \ingroup wifi
- * \brief ARF Rate control algorithm
+ * @ingroup wifi
+ * @brief ARF Rate control algorithm
  *
  * This class implements the so-called ARF algorithm which was
  * initially described in <i>WaveLAN-II: A High-performance wireless
@@ -34,12 +35,12 @@ namespace ns3
  * exit if the user tries to configure this RAA with a Wi-Fi MAC
  * that supports 802.11n or higher.
  */
-class ArfWifiManager : public WifiRemoteStationManager
+class WIFI_EXPORT ArfWifiManager : public WifiRemoteStationManager
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     ArfWifiManager();

@@ -76,11 +76,13 @@ ObssPdAlgorithm::ConnectWifiNetDevice(const Ptr<WifiNetDevice> device)
     auto phy = device->GetPhy();
     if (phy->GetStandard() >= WIFI_STANDARD_80211be)
     {
-        auto ehtPhy = DynamicCast<EhtPhy>(device->GetPhy()->GetPhyEntity(WIFI_MOD_CLASS_EHT));
+        auto ehtPhy =
+            std::dynamic_pointer_cast<EhtPhy>(device->GetPhy()->GetPhyEntity(WIFI_MOD_CLASS_EHT));
         NS_ASSERT(ehtPhy);
         ehtPhy->SetObssPdAlgorithm(this);
     }
-    auto hePhy = DynamicCast<HePhy>(device->GetPhy()->GetPhyEntity(WIFI_MOD_CLASS_HE));
+    auto hePhy =
+        std::dynamic_pointer_cast<HePhy>(device->GetPhy()->GetPhyEntity(WIFI_MOD_CLASS_HE));
     NS_ASSERT(hePhy);
     hePhy->SetObssPdAlgorithm(this);
 }
@@ -88,13 +90,15 @@ ObssPdAlgorithm::ConnectWifiNetDevice(const Ptr<WifiNetDevice> device)
 void
 ObssPdAlgorithm::ResetPhy(HeSigAParameters params)
 {
-    dBm_u txPowerMaxSiso = 0;
-    dBm_u txPowerMaxMimo = 0;
+    // PHY ignores txPowerMaxSiso (or txPowerMaxMimo) if powerRestricted is false, hence the default
+    // values for txPowerMaxSiso and txPowerMaxMimo do not matter
+    dBm_u txPowerMaxSiso{0};
+    dBm_u txPowerMaxMimo{0};
     bool powerRestricted = false;
     // Fetch my BSS color
     Ptr<HeConfiguration> heConfiguration = m_device->GetHeConfiguration();
     NS_ASSERT(heConfiguration);
-    uint8_t bssColor = heConfiguration->GetBssColor();
+    uint8_t bssColor = heConfiguration->m_bssColor;
     NS_LOG_DEBUG("My BSS color " << (uint16_t)bssColor << " received frame "
                                  << (uint16_t)params.bssColor);
 

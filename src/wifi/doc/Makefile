@@ -1,7 +1,4 @@
-EPSTOPDF = epstopdf
-DIA = dia
-DOT = dot
-CONVERT = convert -density 120
+include $(CURDIR)/../../../doc/sphinx/defines.mk
 
 SOURCE = source
 FIGURES = $(SOURCE)/figures
@@ -28,6 +25,7 @@ IMAGES_EPS = \
         $(FIGURES)/assoc-manager.eps \
         $(FIGURES)/clear-channel.eps \
         $(FIGURES)/emlsr-dl-txop.eps \
+        $(FIGURES)/emlsr-txop-ended-trace.eps \
         $(FIGURES)/emlsr-ul-txop.eps \
         $(FIGURES)/nist-frame-success-rate.eps \
         $(FIGURES)/nist-frame-success-rate-n.eps \
@@ -63,16 +61,7 @@ RESCALE = ../../../utils/rescale-pdf.sh
 	$(EPSTOPDF) $< -o=$@
 	if test x$($@_width) != x; then $(RESCALE) $($@_width) $@ ; fi
 
-
-# You can set these variables from the command line.
-SPHINXOPTS    = -W --keep-going
-SPHINXBUILD   = sphinx-build
-PAPER         =
-BUILDDIR      = build
-
 # Internal variables.
-PAPEROPT_a4     = -D latex_paper_size=a4
-PAPEROPT_letter = -D latex_paper_size=letter
 ALLSPHINXOPTS   = -d $(BUILDDIR)/doctrees $(PAPEROPT_$(PAPER)) $(SPHINXOPTS) $(SOURCE)
 
 .PHONY: help clean html dirhtml singlehtml pickle json htmlhelp qthelp devhelp epub latex latexpdf text man changes linkcheck doctest

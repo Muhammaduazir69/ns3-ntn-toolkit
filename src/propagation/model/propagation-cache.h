@@ -15,8 +15,8 @@
 namespace ns3
 {
 /**
- * \ingroup propagation
- * \brief Constructs a cache of objects, where each object is responsible for a single propagation
+ * @ingroup propagation
+ * @brief Constructs a cache of objects, where each object is responsible for a single propagation
  * path loss calculations. Propagation path a-->b and b-->a is the same thing. Propagation path is
  * identified by a couple of MobilityModels and a spectrum model UID
  */
@@ -24,15 +24,20 @@ template <class T>
 class PropagationCache
 {
   public:
-    PropagationCache(){};
-    ~PropagationCache(){};
+    PropagationCache()
+    {
+    }
+
+    ~PropagationCache()
+    {
+    }
 
     /**
      * Get the model associated with the path
-     * \param a 1st node mobility model
-     * \param b 2nd node mobility model
-     * \param modelUid model UID
-     * \return the model
+     * @param a 1st node mobility model
+     * @param b 2nd node mobility model
+     * @param modelUid model UID
+     * @return the model
      */
     Ptr<T> GetPathData(Ptr<const MobilityModel> a, Ptr<const MobilityModel> b, uint32_t modelUid)
     {
@@ -47,10 +52,10 @@ class PropagationCache
 
     /**
      * Add a model to the path
-     * \param data the model to associate to the path
-     * \param a 1st node mobility model
-     * \param b 2nd node mobility model
-     * \param modelUid model UID
+     * @param data the model to associate to the path
+     * @param a 1st node mobility model
+     * @param b 2nd node mobility model
+     * @param modelUid model UID
      */
     void AddPathData(Ptr<T> data,
                      Ptr<const MobilityModel> a,
@@ -89,7 +94,10 @@ class PropagationCache
                                   uint32_t modelUid)
             : m_srcMobility(a),
               m_dstMobility(b),
-              m_spectrumModelUid(modelUid){};
+              m_spectrumModelUid(modelUid)
+        {
+        }
+
         Ptr<const MobilityModel> m_srcMobility; //!< 1st node mobility model
         Ptr<const MobilityModel> m_dstMobility; //!< 2nd node mobility model
         uint32_t m_spectrumModelUid;            //!< model UID
@@ -103,8 +111,8 @@ class PropagationCache
          * If the models are different, the comparison is based on their Uid.
          * Otherwise, the comparison is based on the pointers of the Mobility models.
          *
-         * \param other Right value of the operator.
-         * \returns True if the Left value is less than the Right value.
+         * @param other Right value of the operator.
+         * @returns True if the Left value is less than the Right value.
          */
         bool operator<(const PropagationPathIdentifier& other) const
         {

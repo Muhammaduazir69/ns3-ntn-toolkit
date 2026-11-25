@@ -9,14 +9,16 @@
  */
 #include "lr-wpan-helper.h"
 
+#include "ns3/global-value.h"
+#include "ns3/iana-link-type-numbers.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-csmaca.h"
+#include "ns3/lr-wpan-error-model.h"
+#include "ns3/lr-wpan-net-device.h"
+#include "ns3/mobility-model.h"
+#include "ns3/multi-model-spectrum-channel.h"
 #include "ns3/names.h"
-#include <ns3/log.h>
-#include <ns3/lr-wpan-csmaca.h>
-#include <ns3/lr-wpan-error-model.h>
-#include <ns3/lr-wpan-net-device.h>
-#include <ns3/mobility-model.h>
-#include <ns3/multi-model-spectrum-channel.h>
-#include <ns3/single-model-spectrum-channel.h>
+#include "ns3/single-model-spectrum-channel.h"
 
 namespace ns3
 {
@@ -362,8 +364,18 @@ LrWpanHelper::EnablePcapInternal(std::string prefix,
         filename = pcapHelper.GetFilenameFromDevice(prefix, device);
     }
 
-    Ptr<PcapFileWrapper> file =
-        pcapHelper.CreateFile(filename, std::ios::out, PcapHelper::DLT_IEEE802_15_4);
+    BooleanValue checksumEnabled;
+    GlobalValue::GetValueByName("ChecksumEnabled", checksumEnabled);
+
+    Ptr<PcapFileWrapper> file;
+    if (checksumEnabled.Get())
+    {
+        file = pcapHelper.CreateFile(filename, std::ios::out, iana::linktype::IEEE802_15_4_WITHFCS);
+    }
+    else
+    {
+        file = pcapHelper.CreateFile(filename, std::ios::out, iana::linktype::IEEE802_15_4_NOFCS);
+    }
 
     if (promiscuous)
     {

@@ -208,7 +208,7 @@ TidToLinkMapping::SerializeInformationField(Buffer::Iterator start) const
     m_control.Serialize(start);
     if (m_control.mappingSwitchTimePresent)
     {
-        start.WriteHtolsbU16(*m_mappingSwitchTime);
+        start.WriteU16(*m_mappingSwitchTime);
     }
     if (m_control.expectedDurationPresent)
     {
@@ -228,7 +228,7 @@ TidToLinkMapping::SerializeInformationField(Buffer::Iterator start) const
         }
         else
         {
-            start.WriteHtolsbU16(linkMapping);
+            start.WriteU16(linkMapping);
         }
     }
 }
@@ -244,7 +244,7 @@ TidToLinkMapping::DeserializeInformationField(Buffer::Iterator start, uint16_t l
     count += nCtrlOctets;
     if (m_control.mappingSwitchTimePresent)
     {
-        m_mappingSwitchTime = i.ReadLsbtohU16();
+        m_mappingSwitchTime = i.ReadU16();
         count += 2;
     }
     if (m_control.expectedDurationPresent)
@@ -276,7 +276,7 @@ TidToLinkMapping::DeserializeInformationField(Buffer::Iterator start, uint16_t l
                 }
                 else
                 {
-                    m_linkMapping[tid] = i.ReadLsbtohU16();
+                    m_linkMapping[tid] = i.ReadU16();
                     count += 2;
                 }
             }
@@ -289,6 +289,36 @@ TidToLinkMapping::DeserializeInformationField(Buffer::Iterator start, uint16_t l
                                                       "from actual number of bytes read ("
                                                    << +count << ")");
     return count;
+}
+
+void
+TidToLinkMapping::Print(std::ostream& os) const
+{
+    os << "TID-To-Link Mapping=["
+       << "Direction: " << static_cast<uint16_t>(m_control.direction)
+       << ", Default Mapping: " << m_control.defaultMapping
+       << ", Link Mapping Size: " << +m_control.linkMappingSize;
+    if (m_control.mappingSwitchTimePresent)
+    {
+        os << ", Mapping Switch Time: " << *m_mappingSwitchTime;
+    }
+    if (m_control.expectedDurationPresent)
+    {
+        os << ", Expected Duration: " << *m_expectedDuration;
+    }
+    os << ", Link Mapping: {";
+    for (const auto& [tid, linkMapping] : m_linkMapping)
+    {
+        os << "TID " << +tid << ": ";
+        for (uint8_t linkId = 0; linkId < 15; linkId++)
+        {
+            if (((linkMapping >> linkId) & 0x0001) == 1)
+            {
+                os << +linkId << " ";
+            }
+        }
+    }
+    os << "}]";
 }
 
 } // namespace ns3

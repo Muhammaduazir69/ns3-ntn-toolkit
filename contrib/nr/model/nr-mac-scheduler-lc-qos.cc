@@ -36,16 +36,10 @@ NrMacSchedulerLcQos::GetTypeId()
     return tid;
 }
 
-TypeId
-NrMacSchedulerLcQos::GetInstanceTypeId() const
-{
-    return NrMacSchedulerLcQos::GetTypeId();
-}
-
 std::vector<NrMacSchedulerLcAlgorithm::Assignation>
-NrMacSchedulerLcQos::AssignBytesToDlLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
-                                       uint32_t tbs,
-                                       Time slotPeriod) const
+NrMacSchedulerLcQos::DoAssignBytesToDlLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
+                                         uint32_t tbs,
+                                         Time slotPeriod) const
 {
     NS_LOG_FUNCTION(this);
     GetFirst GetLCGID;
@@ -188,8 +182,8 @@ NrMacSchedulerLcQos::AssignBytesToDlLC(const std::unordered_map<uint8_t, LCGPtr>
 }
 
 std::vector<NrMacSchedulerLcAlgorithm::Assignation>
-NrMacSchedulerLcQos::AssignBytesToUlLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
-                                       uint32_t tbs) const
+NrMacSchedulerLcQos::DoAssignBytesToUlLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
+                                         uint32_t tbs) const
 {
     NS_LOG_FUNCTION(this);
     GetFirst GetLCGID;

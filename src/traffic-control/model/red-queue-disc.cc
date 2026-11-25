@@ -177,7 +177,7 @@ RedQueueDisc::GetTypeId()
                           MakeDoubleChecker<double>())
             .AddAttribute("LastSet",
                           "Store the last time m_curMaxP was updated",
-                          TimeValue(Seconds(0.0)),
+                          TimeValue(Seconds(0)),
                           MakeTimeAccessor(&RedQueueDisc::m_lastSet),
                           MakeTimeChecker())
             .AddAttribute("Rtt",
@@ -693,7 +693,7 @@ RedQueueDisc::DropEarly(Ptr<QueueDiscItem> item, uint32_t qSize)
         // DROP or MARK
         m_count = 0;
         m_countBytes = 0;
-        /// \todo Implement set bit to mark
+        /// @todo Implement set bit to mark
 
         return true; // drop
     }

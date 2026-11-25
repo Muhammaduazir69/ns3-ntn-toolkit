@@ -36,9 +36,10 @@ def CancelledEvent():
     print("I should never be called... ")
 
 
-ns.cppyy.cppdef(
-    """
+ns.cppyy.cppdef("""
     #include "CPyCppyy/API.h"
+
+    #include <iostream>
 
     using namespace ns3;
     /** Simple model object to illustrate event handling. */
@@ -52,9 +53,9 @@ ns.cppyy.cppdef(
       /**
        *  Simple event handler.
        *
-       * \param [in] eventValue Event argument.
+       * @param [in] eventValue Event argument.
        */
-      void HandleEvent (double eventValue);
+      void HandleEvent (Time eventValue);
     };
 
     void
@@ -62,18 +63,25 @@ ns.cppyy.cppdef(
     {
       Simulator::Schedule (Seconds (10.0),
                            &MyModel::HandleEvent,
-                           this, Simulator::Now ().GetSeconds ());
+                           this, Simulator::Now());
+
+      Simulator::Schedule (Seconds (11.0), []() {
+        std::cout << "Lambda scheduled from within a class method at "
+                  << Simulator::Now().As(Time::S)
+                  << std::endl;
+      });
     }
+
     void
-    MyModel::HandleEvent (double value)
+    MyModel::HandleEvent (Time value)
     {
       std::cout << "Member method received event at "
-                << Simulator::Now ().GetSeconds ()
-                << "s started at " << value << "s" << std::endl;
+                << Simulator::Now().As(Time::S)
+                << " started at " << value.As(Time::S) << std::endl;
     }
 
     void ExampleFunction(MyModel& model){
-      std::cout << "ExampleFunction received event at " << Simulator::Now().GetSeconds() << "s" << std::endl;
+      std::cout << "ExampleFunction received event at " << Simulator::Now().As(Time::S) << std::endl;
       model.Start();
     };
 
@@ -99,8 +107,7 @@ ns.cppyy.cppdef(
     {
         return MakeEvent(&CancelledFunctionCpp);
     }
-   """
-)
+   """)
 
 
 def main(argv):
@@ -113,13 +120,13 @@ def main(argv):
     v.SetAttribute("Max", ns.DoubleValue(20))
 
     ev = ns.cppyy.gbl.ExampleFunctionEvent(model)
-    ns.Simulator.Schedule(ns.Seconds(10.0), ev)
+    ns.Simulator.Schedule(ns.Seconds(10), ev)
 
     ev2 = ns.cppyy.gbl.RandomFunctionEvent(model)
     ns.Simulator.Schedule(ns.Seconds(v.GetValue()), ev2)
 
     ev3 = ns.cppyy.gbl.CancelledFunctionEvent()
-    id = ns.Simulator.Schedule(ns.Seconds(30.0), ev3)
+    id = ns.Simulator.Schedule(ns.Seconds(30), ev3)
     ns.Simulator.Cancel(id)
 
     ns.Simulator.Run()

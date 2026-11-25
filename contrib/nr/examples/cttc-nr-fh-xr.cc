@@ -14,14 +14,14 @@
 #include "ns3/nr-module.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/xr-traffic-mixer-helper.h"
-#include <ns3/radio-environment-map-helper.h>
 
+#include <unordered_map>
 #include <vector>
 
 /**
- * \file cttc-nr-fh-xr.cc
- * \ingroup examples
- * \brief An example to study Fronthaul limitations on XR traffic
+ * @file cttc-nr-fh-xr.cc
+ * @ingroup examples
+ * @brief An example to study Fronthaul limitations on XR traffic
  *
  * This example has been implemented in order to study the Fronthaul (FH) Control feature
  * implemented in the NrFhControl class. It allows for simulations of single- or multi-cell
@@ -87,8 +87,8 @@ struct VoiceApplicationSettings
     Ptr<Node> remoteHost;
     Ptr<NetDevice> ueNetDev;
     Ptr<NrHelper> nrHelper;
-    NrEpsBearer& bearer;
-    Ptr<NrEpcTft> tft;
+    NrQosFlow& flow;
+    Ptr<NrQosRule> rule;
     ApplicationContainer& serverApps;
     ApplicationContainer& clientApps;
     ApplicationContainer& pingApps;
@@ -118,10 +118,10 @@ void ConfigureXrApp(NodeContainer& ueContainer,
                     NodeContainer& remoteHostContainer,
                     NetDeviceContainer& ueNetDev,
                     Ptr<NrHelper> nrHelper,
-                    NrEpsBearer& bearer,
-                    Ptr<NrEpcTft> tft,
+                    NrQosFlow& flow,
+                    Ptr<NrQosRule> rule,
                     bool isMx1,
-                    std::vector<Ptr<NrEpcTft>>& tfts,
+                    std::vector<Ptr<NrQosRule>>& rules,
                     ApplicationContainer& serverApps,
                     ApplicationContainer& clientApps,
                     ApplicationContainer& pingApps,
@@ -133,6 +133,7 @@ void ConfigureXrApp(NodeContainer& ueContainer,
                     double cgDataRate,
                     Ipv4Address remoteHostAddress,
                     uint16_t remoteHostPort);
+static NrFhControl::FunctionalSplit StringToEnum(const std::string& str);
 
 int
 main(int argc, char* argv[])
@@ -141,42 +142,44 @@ main(int argc, char* argv[])
     bool logging = false;
 
     std::string nrConfigurationScenario = "DenseA";
-    std::string deployment = "HEX";
+    std::string deployment = "SIMPLE";
     uint32_t freqScenario = 0; // 0 is NON-OVERLAPPING, 1 OVERLAPPING
 
     // set simulation time and mobility
-    uint32_t appDurationParam = 10000;
+    uint32_t appDurationParam = 5000;
     Time appStartTimeMs = MilliSeconds(400);
 
-    uint16_t arUeNum = 0;
-    uint16_t vrUeNum = 0;
-    uint16_t cgUeNum = 0;
-    uint16_t voiceUeNum = 0;
+    uint16_t arUeNum = 3;
+    uint16_t vrUeNum = 3;
+    uint16_t cgUeNum = 3;
+    uint16_t voiceUeNum = 3;
 
-    double centralFrequency = 4e9;
-    double bandwidth = 10e6;
-    double txPower = 41;
+    double centralFrequency = 30e9;
+    double bandwidth = 400e6;
+    double txPower = 30;
     double ueTxPower = 23;
-    uint16_t numerology = 1;
+    uint16_t numerology = 3;
     std::string pattern = "DL|DL|DL|DL|UL|DL|DL|DL|DL|UL|";
-    bool enableTDD4_1 = false;
+    bool enableTDD4_1 = true;
 
     std::string propScenario = "UMa";
+    std::string propChannelCondition = "Default";
     uint16_t numOuterRings = 0;
     double isd = 200;
     double bsHeight = 25.0;
     double utHeight = 1.5;
     double maxUeClosestSiteDistance = 1000;
     double minBsUtDistance = 10.0;
-    double speed = 0;
+    double indoorSpeed = 0;
+    double outoorUeSpeed = 0;
     double antennaOffset = 1.0;
     double uesWithRandomUtHeight = 0;
-    double distance = 200;
+    double distance = 2;
 
     double gnbNoiseFigure = 5.0;
     double ueNoiseFigure = 7.0;
 
-    bool enableMimoFeedback = false;
+    bool enableMimoFeedback = true;
 
     bool isGnbDualPolarized = false;
     uint32_t gnbNumRows = 4;
@@ -204,33 +207,35 @@ main(int argc, char* argv[])
     std::string bfMethod = "CellScan";
 
     NrHelper::MimoPmiParams mimoPmiParams;
-    mimoPmiParams.pmSearchMethod = "ns3::NrPmSearchFull";
+    mimoPmiParams.pmSearchMethod = "ns3::NrPmSearchFast";
     mimoPmiParams.fullSearchCb = "ns3::NrCbTwoPort";
     mimoPmiParams.rankLimit = 2;
     mimoPmiParams.subbandSize = 8;
 
     bool enableOfdma = true;
-    std::string schedulerType = "RR";
+    std::string schedulerType = "PF";
 
-    bool isLos = false;
-    int channelUpdatePeriod = 20;
-    int channelConditionUpdatePeriod = 100;
+    bool isLos = true;
+    int channelUpdatePeriod = 0;
+    int channelConditionUpdatePeriod = 0;
 
     double o2iThreshold = 0;
     double o2iLowLossThreshold =
         1.0; // shows the percentage of low losses. Default value is 100% low
     bool linkO2iConditionToAntennaHeight = false;
 
-    bool enableShadowing = true;
+    bool enableShadowing = false;
     uint8_t fixedMcs = 0;
     bool useFixedMcs = false;
     std::string errorModel = "ns3::NrEesmIrT2";
 
     // modulation compression parameters:
-    uint32_t fhCapacity = 10000;                 // in Mbps
-    uint8_t ohDyn = 100;                         // in bits
+    uint32_t fhCapacity = 100000; // in Mbps
+    uint8_t ohDyn = 100;          // in bits
+    // Functional Split configuration and FH control method
+    std::string functionalSplit = "FS_7_2";
     std::string fhControlMethod = "OptimizeMcs"; // The FH Control Method to be applied
-    // (Dropping, Postponing, OptimmizeMcs, OptimizeRBs)
+    // (Dropping, Postponing, OptimizeMcs, OptimizeRBs)
 
     bool isMx1 = true;
     bool enableHarqRetx = true;
@@ -245,9 +250,9 @@ main(int argc, char* argv[])
     uint16_t vrFps = 60;
     double cgDataRate = 5; // Mbps
 
-    bool enablePdcpDiscarding = false;
+    bool enablePdcpDiscarding = true;
     uint32_t discardTimerMs = 0;
-    uint32_t reorderingTimerMs = 100;
+    uint32_t reorderingTimerMs = 10;
 
     bool enableNrHelperTraces = false;
     bool enableQosTrafficTraces = true;
@@ -297,7 +302,7 @@ main(int argc, char* argv[])
     cmd.AddValue("bsHeight", "The gNB antenna height", bsHeight);
     cmd.AddValue("distance",
                  "The radius of the disc (in meters) that the UEs will be distributed."
-                 "Default value is 200m",
+                 "Default value is 2m",
                  distance);
     cmd.AddValue("enableMimoFeedback", "Enables MIMO feedback", enableMimoFeedback);
     cmd.AddValue("gnbNumRows", "The number of rows of the phased array of the gNB", gnbNumRows);
@@ -401,6 +406,9 @@ main(int argc, char* argv[])
         "The FH Control Method to be applied. Choose among: Dropping, Postponing, OptimmizeMcs, "
         "OptimizeRBs",
         fhControlMethod);
+    cmd.AddValue("functionalSplit",
+                 "Select the functional split to evaluate its impact",
+                 functionalSplit);
 
     cmd.Parse(argc, argv);
 
@@ -458,7 +466,8 @@ main(int argc, char* argv[])
     else if (deployment == "SIMPLE")
     {
         nrConfigurationScenario = "InH_OfficeOpen_LoS";
-        propScenario = "InH_OfficeOpen_LoS";
+        propChannelCondition = "LOS";
+        propScenario = "InH-OfficeOpen";
         centralFrequency = 30e9;
         pattern = "DL|DL|DL|DL|UL|DL|DL|DL|DL|UL|";
         enableTDD4_1 = true;
@@ -488,7 +497,7 @@ main(int argc, char* argv[])
 
         if (enableMimoFeedback)
         {
-            Config::SetDefault("ns3::NrHelper::EnableMimoFeedback", BooleanValue(true));
+            Config::SetDefault("ns3::NrHelper::CsiFeedbackFlags", UintegerValue(CQI_PDSCH_MIMO));
 
             isGnbDualPolarized = true;
             gnbHorizPorts = 1;
@@ -545,7 +554,7 @@ main(int argc, char* argv[])
 
     if (logging)
     {
-        LogLevel logLevel1 =
+        auto logLevel1 =
             (LogLevel)(LOG_PREFIX_FUNC | LOG_PREFIX_TIME | LOG_PREFIX_NODE | LOG_LEVEL_INFO);
         // LogLevel logLevel2 =
         //     (LogLevel)(LOG_PREFIX_FUNC | LOG_PREFIX_TIME | LOG_PREFIX_NODE | LOG_LEVEL_DEBUG);
@@ -563,9 +572,13 @@ main(int argc, char* argv[])
 
     Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod",
                        TimeValue(MilliSeconds(channelUpdatePeriod)));
-    Config::SetDefault("ns3::NrGnbRrc::EpsBearerToRlcMapping",
+    Config::SetDefault("ns3::NrGnbRrc::QosFlowToRlcMapping",
                        EnumValue(useUdp ? NrGnbRrc::RLC_UM_ALWAYS : NrGnbRrc::RLC_AM_ALWAYS));
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
+
+    // Convert the string to enum value
+    NrFhControl::FunctionalSplit functionalSplitEnum = StringToEnum(functionalSplit);
+    Config::SetDefault("ns3::NrFhControl::FunctionalSplit", EnumValue(functionalSplitEnum));
 
     // Create Hex Deployment
     ScenarioParameters scenarioParams;
@@ -604,7 +617,8 @@ main(int argc, char* argv[])
 
         // Creates and plots the network deployment
         gridScenario.SetMaxUeDistanceToClosestSite(maxUeClosestSiteDistance);
-        gridScenario.CreateScenarioWithMobility(Vector(speed, 0, 0),
+        gridScenario.CreateScenarioWithMobility(Vector(indoorSpeed, 0, 0),
+                                                Vector(outoorUeSpeed, 0, 0),
                                                 uesWithRandomUtHeight); // move UEs along the x axis
 
         gnbNodes = gridScenario.GetBaseStations();
@@ -790,45 +804,40 @@ main(int argc, char* argv[])
     uint32_t n2Delay = 2;
     uint8_t dlCtrlSymbols = 1;
 
-    BandwidthPartInfo::Scenario scene = BandwidthPartInfo::UMa;
-
-    if (propScenario == "UMa")
+    // Create ChannelHelper API
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    if (isLos)
     {
-        scene = isLos == 1 ? BandwidthPartInfo::UMa_LoS : BandwidthPartInfo::UMa;
-    }
-    else if (propScenario == "RMa")
-    {
-        scene = isLos == 1 ? BandwidthPartInfo::RMa_LoS : BandwidthPartInfo::RMa;
-    }
-    else if (propScenario == "InH_OfficeOpen_LoS")
-    {
-        scene =
-            isLos == 1 ? BandwidthPartInfo::InH_OfficeOpen_LoS : BandwidthPartInfo::InH_OfficeOpen;
-    }
-    else
-    {
-        NS_ABORT_MSG("Unsupported scenario " << scenario << ". Supported values: UMa, RMa");
+        propChannelCondition = "LOS";
     }
 
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(enableShadowing));
+    NS_ABORT_MSG_UNLESS(
+        propScenario == "UMa" || propScenario == "RMa" || propScenario == "InH-OfficeOpen",
+        "Unsupported scenario " << scenario << ". Supported values: UMa, RMa, InH-OfficeOpen");
+    // Configure the factories for the channel creation
+    channelHelper->ConfigureFactories(propScenario, propChannelCondition);
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(enableShadowing));
     if (!isLos)
     {
-        nrHelper->SetChannelConditionModelAttribute(
+        channelHelper->SetChannelConditionModelAttribute(
             "UpdatePeriod",
             TimeValue(MilliSeconds(channelConditionUpdatePeriod)));
     }
-
+    // In case of DistanceBasedThreeGppSpectrumPropagationLossModel, the creation of the channel
+    // must be manually done, as the channel helper does not support the creation of this specific
+    // model.
+    ObjectFactory distanceBasedChannelFactory;
     if (deployment == "HEX")
     {
-        nrHelper->SetPhasedArraySpectrumPropagationLossModelTypeId(
+        distanceBasedChannelFactory.SetTypeId(
             DistanceBasedThreeGppSpectrumPropagationLossModel::GetTypeId());
-        nrHelper->SetPhasedArraySpectrumPropagationLossModelAttribute("MaxDistance",
-                                                                      DoubleValue(2 * isd));
-        nrHelper->SetChannelConditionModelAttribute("LinkO2iConditionToAntennaHeight",
-                                                    BooleanValue(linkO2iConditionToAntennaHeight));
-        nrHelper->SetChannelConditionModelAttribute("O2iThreshold", DoubleValue(o2iThreshold));
-        nrHelper->SetChannelConditionModelAttribute("O2iLowLossThreshold",
-                                                    DoubleValue(o2iLowLossThreshold));
+        distanceBasedChannelFactory.Set("MaxDistance", DoubleValue(2 * isd));
+        channelHelper->SetChannelConditionModelAttribute(
+            "LinkO2iConditionToAntennaHeight",
+            BooleanValue(linkO2iConditionToAntennaHeight));
+        channelHelper->SetChannelConditionModelAttribute("O2iThreshold", DoubleValue(o2iThreshold));
+        channelHelper->SetChannelConditionModelAttribute("O2iLowLossThreshold",
+                                                         DoubleValue(o2iLowLossThreshold));
 
         std::cout << "o2iThreshold: " << o2iThreshold << std::endl;
     }
@@ -877,7 +886,7 @@ main(int argc, char* argv[])
         nrHelper->SetGnbUlAmcAttribute("NumRefScPerRb",
                                        UintegerValue(1)); // FIXME: Might change in LTE
 
-        nrHelper->SetGnbPhyAttribute("RbOverhead", DoubleValue(rbOverhead));
+        nrHelper->SetAttribute("RbOverhead", DoubleValue(rbOverhead));
         nrHelper->SetGnbPhyAttribute("N2Delay", UintegerValue(n2Delay));
         nrHelper->SetGnbPhyAttribute("N1Delay", UintegerValue(n1Delay));
 
@@ -920,47 +929,37 @@ main(int argc, char* argv[])
     band1.m_bandId = 1;
     band2.m_bandId = 2;
 
-    auto bandMask = NrHelper::INIT_PROPAGATION | NrHelper::INIT_CHANNEL;
+    uint8_t bandMask = NrChannelHelper::INIT_PROPAGATION;
     if (enableFading)
     {
-        bandMask |= NrHelper::INIT_FADING;
+        bandMask |= NrChannelHelper::INIT_FADING;
     }
-
+    // Create NrChannelHelper
     if (deployment == "SIMPLE")
     {
         // simple band configuration and initialize
         CcBwpCreator ccBwpCreator;
-        CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency, bandwidth, 1, scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency, bandwidth, 1);
         band0 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-        nrHelper->InitializeOperationBand(&band0, bandMask);
+        channelHelper->AssignChannelsToBands({band0}, bandMask);
     }
     else if (deployment == "HEX" && freqScenario == 0) // NON_OVERLAPPING
     {
-        NS_LOG_LOGIC("NON_OVERLAPPING, "
-                     << ": " << bandwidthBand << ":" << bandwidthCc << ", " << (int)numCcPerBand
-                     << ", " << (int)numBwp);
+        NS_LOG_LOGIC("NON_OVERLAPPING, " << ": " << bandwidthBand << ":" << bandwidthCc << ", "
+                                         << (int)numCcPerBand << ", " << (int)numBwp);
 
         NS_LOG_LOGIC("bandConf0: " << bandCenter << " " << bandwidthBand);
-        CcBwpCreator::SimpleOperationBandConf bandConf0(bandCenter,
-                                                        bandwidthBand,
-                                                        numCcPerBand,
-                                                        scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf0(bandCenter, bandwidthBand, numCcPerBand);
         bandConf0.m_numBwp = numBwp;
         bandCenter += bandwidthBand;
 
         NS_LOG_LOGIC("bandConf1: " << bandCenter << " " << bandwidthBand);
-        CcBwpCreator::SimpleOperationBandConf bandConf1(bandCenter,
-                                                        bandwidthBand,
-                                                        numCcPerBand,
-                                                        scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf1(bandCenter, bandwidthBand, numCcPerBand);
         bandConf1.m_numBwp = numBwp;
         bandCenter += bandwidthBand;
 
         NS_LOG_LOGIC("bandConf2: " << bandCenter << " " << bandwidthBand);
-        CcBwpCreator::SimpleOperationBandConf bandConf2(bandCenter,
-                                                        bandwidthBand,
-                                                        numCcPerBand,
-                                                        scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf2(bandCenter, bandwidthBand, numCcPerBand);
         bandConf2.m_numBwp = numBwp;
 
         // Create, then configure
@@ -992,9 +991,74 @@ main(int argc, char* argv[])
                   << "\n"
                   << band0 << band1 << band2;
 
-        nrHelper->InitializeOperationBand(&band0, bandMask);
-        nrHelper->InitializeOperationBand(&band1, bandMask);
-        nrHelper->InitializeOperationBand(&band2, bandMask);
+        // Manually assignment of the distance-based channels to the bands
+        for (size_t i = 0; i < band0.GetBwps().size(); i++)
+        {
+            auto distanceBased3gpp =
+                distanceBasedChannelFactory
+                    .Create<DistanceBasedThreeGppSpectrumPropagationLossModel>();
+            distanceBased3gpp->SetChannelModelAttribute(
+                "Frequency",
+                DoubleValue(band0.GetBwpAt(0, i)->m_centralFrequency));
+            distanceBased3gpp->SetChannelModelAttribute("Scenario", StringValue(propScenario));
+            auto specChannelBand0 = channelHelper->CreateChannel(NrChannelHelper::INIT_PROPAGATION);
+            if (enableFading)
+            {
+                PointerValue channelConditionModel0;
+                specChannelBand0->GetPropagationLossModel()->GetAttribute("ChannelConditionModel",
+                                                                          channelConditionModel0);
+                distanceBased3gpp->SetChannelModelAttribute(
+                    "ChannelConditionModel",
+                    PointerValue(channelConditionModel0.Get<ChannelConditionModel>()));
+                specChannelBand0->AddPhasedArraySpectrumPropagationLossModel(distanceBased3gpp);
+            }
+            band0.GetBwpAt(0, i)->SetChannel(specChannelBand0);
+        }
+        for (size_t i = 0; i < band1.GetBwps().size(); i++)
+        {
+            auto distanceBased3gpp =
+                distanceBasedChannelFactory
+                    .Create<DistanceBasedThreeGppSpectrumPropagationLossModel>();
+            distanceBased3gpp->SetChannelModelAttribute(
+                "Frequency",
+                DoubleValue(band1.GetBwpAt(0, i)->m_centralFrequency));
+            distanceBased3gpp->SetChannelModelAttribute("Scenario", StringValue(propScenario));
+            auto specChannelBand1 = channelHelper->CreateChannel(NrChannelHelper::INIT_PROPAGATION);
+            if (enableFading)
+            {
+                PointerValue channelConditionModel1;
+                specChannelBand1->GetPropagationLossModel()->GetAttribute("ChannelConditionModel",
+                                                                          channelConditionModel1);
+                distanceBased3gpp->SetChannelModelAttribute(
+                    "ChannelConditionModel",
+                    PointerValue(channelConditionModel1.Get<ChannelConditionModel>()));
+                specChannelBand1->AddPhasedArraySpectrumPropagationLossModel(distanceBased3gpp);
+            }
+            band1.GetBwpAt(0, i)->SetChannel(specChannelBand1);
+        }
+        for (size_t i = 0; i < band2.GetBwps().size(); i++)
+        {
+            auto distanceBased3gpp =
+                distanceBasedChannelFactory
+                    .Create<DistanceBasedThreeGppSpectrumPropagationLossModel>();
+            distanceBased3gpp->SetAttribute("MaxDistance", DoubleValue(2 * isd));
+            distanceBased3gpp->SetChannelModelAttribute("Scenario", StringValue(propScenario));
+            distanceBased3gpp->SetChannelModelAttribute(
+                "Frequency",
+                DoubleValue(band2.GetBwpAt(0, i)->m_centralFrequency));
+            auto specChannelBand2 = channelHelper->CreateChannel(NrChannelHelper::INIT_PROPAGATION);
+            if (enableFading)
+            {
+                PointerValue channelConditionModel2;
+                specChannelBand2->GetPropagationLossModel()->GetAttribute("ChannelConditionModel",
+                                                                          channelConditionModel2);
+                distanceBased3gpp->SetChannelModelAttribute(
+                    "ChannelConditionModel",
+                    PointerValue(channelConditionModel2.Get<ChannelConditionModel>()));
+                specChannelBand2->AddPhasedArraySpectrumPropagationLossModel(distanceBased3gpp);
+            }
+            band2.GetBwpAt(0, i)->SetChannel(specChannelBand2);
+        }
     }
     else if (deployment == "HEX" && freqScenario == 1) // // OVERLAPPING
     {
@@ -1002,10 +1066,7 @@ main(int argc, char* argv[])
                                      << ", " << (int)numCcPerBand << ", " << (int)numBwp);
 
         NS_LOG_LOGIC("bandConf0: " << bandCenter << " " << bandwidthBand);
-        CcBwpCreator::SimpleOperationBandConf bandConf0(bandCenter,
-                                                        bandwidthBand,
-                                                        numCcPerBand,
-                                                        scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf0(bandCenter, bandwidthBand, numCcPerBand);
         bandConf0.m_numBwp = numBwp;
         bandCenter += bandwidthBand;
 
@@ -1020,7 +1081,28 @@ main(int argc, char* argv[])
         ConfigureBwpTo(band0.m_cc[0]->m_bwp[0], bandCenter, bandwidth);
         bandCenter += bandwidth;
 
-        nrHelper->InitializeOperationBand(&band0);
+        for (size_t i = 0; i < band0.GetBwps().size(); i++)
+        {
+            auto distanceBased3gpp =
+                distanceBasedChannelFactory
+                    .Create<DistanceBasedThreeGppSpectrumPropagationLossModel>();
+            distanceBased3gpp->SetChannelModelAttribute(
+                "Frequency",
+                DoubleValue(band0.GetBwpAt(0, i)->m_centralFrequency));
+            distanceBased3gpp->SetChannelModelAttribute("Scenario", StringValue(propScenario));
+            auto specChannelBand0 = channelHelper->CreateChannel(NrChannelHelper::INIT_PROPAGATION);
+            if (enableFading)
+            {
+                PointerValue channelConditionModel0;
+                specChannelBand0->GetPropagationLossModel()->GetAttribute("ChannelConditionModel",
+                                                                          channelConditionModel0);
+                distanceBased3gpp->SetChannelModelAttribute(
+                    "ChannelConditionModel",
+                    PointerValue(channelConditionModel0.Get<ChannelConditionModel>()));
+                specChannelBand0->AddPhasedArraySpectrumPropagationLossModel(distanceBased3gpp);
+            }
+            band0.GetBwpAt(0, i)->SetChannel(specChannelBand0);
+        }
     }
 
     BandwidthPartInfoPtrVector sector1Bwps;
@@ -1120,16 +1202,10 @@ main(int argc, char* argv[])
                                                  UintegerValue(bwpIdForLowLat));
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForVoice));
 
-    // Ue routing between Bearer and bandwidth part
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdForLowLat));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForVoice));
-
     if (enableInterServ)
     {
         nrHelper->SetGnbBwpManagerAlgorithmAttribute("DGBR_INTER_SERV_87",
                                                      UintegerValue(bwpIdForVR));
-        nrHelper->SetUeBwpManagerAlgorithmAttribute("DGBR_INTER_SERV_87",
-                                                    UintegerValue(bwpIdForVR));
     }
 
     // Initialize nrHelper
@@ -1199,9 +1275,7 @@ main(int argc, char* argv[])
         ueNetDevs.Add(ueCgSector3NetDev);
     }
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbNetDevs, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDevs, randomStream);
+    nrHelper->AssignStreams({.gnbDevs = gnbNetDevs, .ueDevs = ueNetDevs});
 
     // Sectors (cells) of a site are pointing at different directions
     std::vector<double> sectorOrientationRad{
@@ -1216,7 +1290,7 @@ main(int argc, char* argv[])
         for (uint32_t cellId = 0; cellId < gnbNetDevs.GetN(); ++cellId)
         {
             Ptr<NetDevice> gnb = gnbNetDevs.Get(cellId);
-            uint32_t numBwps = nrHelper->GetNumberBwp(gnb);
+            uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
             if (numBwps > 2)
             {
                 NS_ABORT_MSG("Incorrect number of BWPs per CC");
@@ -1235,15 +1309,6 @@ main(int argc, char* argv[])
     {
         nrHelper->ConfigureFhControl(gnbSector2NetDev);
         nrHelper->ConfigureFhControl(gnbSector3NetDev);
-    }
-
-    for (auto it = gnbNetDevs.Begin(); it != gnbNetDevs.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = ueNetDevs.Begin(); it != ueNetDevs.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
     }
 
     PrintUePosition(ueNodes);
@@ -1309,14 +1374,6 @@ main(int argc, char* argv[])
         ueCgSector3IpIface = epcHelper->AssignUeIpv4Address(NetDeviceContainer(ueCgSector3NetDev));
     }
 
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
-
     // attach UEs to the closest eNB
     nrHelper->AttachToClosestGnb(ueVoiceSector1NetDev, gnbSector1NetDev);
     nrHelper->AttachToClosestGnb(ueArSector1NetDev, gnbSector1NetDev);
@@ -1356,99 +1413,99 @@ main(int argc, char* argv[])
     uint16_t ulPortArStop = 2124;
     uint16_t ulPortVoiceStart = 2254; // VoIP has 1 flow
 
-    // The bearer that will carry AR traffic (QCI80)
-    NrEpsBearer arBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    // The flow that will carry AR traffic (5QI80)
+    NrQosFlow arBearer(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
-    Ptr<NrEpcTft> arTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfAr;
-    std::vector<Ptr<NrEpcTft>> arTfts;
+    Ptr<NrQosRule> arRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfAr;
+    std::vector<Ptr<NrQosRule>> arRules;
 
     if (isMx1)
     {
         dlpfAr.localPortStart = dlPortArStart;
         dlpfAr.localPortEnd = dlPortArStop;
-        arTft->Add(dlpfAr);
+        arRule->Add(dlpfAr);
     }
     else
     {
-        // create 3 xrTfts for 1x1 mapping
+        // create 3 xrRules for 1x1 mapping
         for (uint32_t i = 0; i < 3; i++)
         {
-            Ptr<NrEpcTft> tempTft = Create<NrEpcTft>();
+            Ptr<NrQosRule> tempRule = Create<NrQosRule>();
             dlpfAr.localPortStart = dlPortArStart + i;
             dlpfAr.localPortEnd = dlPortArStart + i;
-            tempTft->Add(dlpfAr);
-            arTfts.push_back(tempTft);
+            tempRule->Add(dlpfAr);
+            arRules.push_back(tempRule);
         }
     }
 
-    // The bearer that will carry VR traffic (can be QCI80/QCI87)
-    NrEpsBearer vrConfig =
-        enableInterServ == 0 ? NrEpsBearer::NGBR_LOW_LAT_EMBB : NrEpsBearer::DGBR_INTER_SERV_87;
-    NrEpsBearer vrBearer(vrConfig);
+    // The flow that will carry VR traffic (can be 5QI80/5QI87)
+    NrQosFlow vrConfig =
+        enableInterServ == 0 ? NrQosFlow::NGBR_LOW_LAT_EMBB : NrQosFlow::DGBR_INTER_SERV_87;
+    NrQosFlow vrBearer(vrConfig);
 
-    Ptr<NrEpcTft> vrTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfVr;
+    Ptr<NrQosRule> vrRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfVr;
     dlpfVr.localPortStart = dlPortVrStart;
     dlpfVr.localPortEnd = dlPortVrStart;
-    vrTft->Add(dlpfVr);
+    vrRule->Add(dlpfVr);
 
-    // The bearer that will carry CG traffic (QCI80)
-    NrEpsBearer cgBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    // The flow that will carry CG traffic (5QI80)
+    NrQosFlow cgBearer(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
-    Ptr<NrEpcTft> cgTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfCg;
+    Ptr<NrQosRule> cgRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfCg;
     dlpfCg.localPortStart = dlPortCgStart;
     dlpfCg.localPortEnd = dlPortCgStart;
-    cgTft->Add(dlpfCg);
+    cgRule->Add(dlpfCg);
 
-    // The bearer that will carry VoIP traffic
-    NrEpsBearer voiceBearer(NrEpsBearer::GBR_CONV_VOICE);
+    // The flow that will carry VoIP traffic
+    NrQosFlow voiceBearer(NrQosFlow::GBR_CONV_VOICE);
 
-    Ptr<NrEpcTft> voiceTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfVoice;
+    Ptr<NrQosRule> voiceRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfVoice;
     dlpfVoice.localPortStart = dlPortVoiceStart;
     dlpfVoice.localPortEnd = dlPortVoiceStart;
-    voiceTft->Add(dlpfVoice);
+    voiceRule->Add(dlpfVoice);
 
     // UL
-    //  The bearer that will carry UL AR traffic (QCI80)
-    NrEpsBearer arUlBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    //  The flow that will carry UL AR traffic (5QI80)
+    NrQosFlow arUlBearer(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
-    Ptr<NrEpcTft> arUlTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter ulpfAr;
-    std::vector<Ptr<NrEpcTft>> arUlTfts;
+    Ptr<NrQosRule> arUlRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter ulpfAr;
+    std::vector<Ptr<NrQosRule>> arUlRules;
 
     if (isMx1)
     {
         ulpfAr.localPortStart = ulPortArStart;
         ulpfAr.localPortEnd = ulPortArStop;
-        ulpfAr.direction = NrEpcTft::UPLINK;
-        arUlTft->Add(ulpfAr);
+        ulpfAr.direction = NrQosRule::UPLINK;
+        arUlRule->Add(ulpfAr);
     }
     else
     {
-        // create 3 xrTfts for 1x1 mapping
+        // create 3 xrRules for 1x1 mapping
         for (uint32_t i = 0; i < 3; i++)
         {
-            Ptr<NrEpcTft> tempTft = Create<NrEpcTft>();
+            Ptr<NrQosRule> tempRule = Create<NrQosRule>();
             ulpfAr.localPortStart = ulPortArStart + i;
             ulpfAr.localPortEnd = ulPortArStart + i;
-            ulpfAr.direction = NrEpcTft::UPLINK;
-            tempTft->Add(ulpfAr);
-            arUlTfts.push_back(tempTft);
+            ulpfAr.direction = NrQosRule::UPLINK;
+            tempRule->Add(ulpfAr);
+            arUlRules.push_back(tempRule);
         }
     }
 
-    // The bearer that will carry UL VoIP traffic
-    NrEpsBearer voiceUlBearer(NrEpsBearer::GBR_CONV_VOICE);
+    // The flow that will carry UL VoIP traffic
+    NrQosFlow voiceUlBearer(NrQosFlow::GBR_CONV_VOICE);
 
-    Ptr<NrEpcTft> voiceUlTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter ulpfVoice;
+    Ptr<NrQosRule> voiceUlRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter ulpfVoice;
     ulpfVoice.localPortStart = ulPortVoiceStart;
     ulpfVoice.localPortEnd = ulPortVoiceStart;
-    ulpfVoice.direction = NrEpcTft::UPLINK;
-    voiceUlTft->Add(ulpfVoice);
+    ulpfVoice.direction = NrQosRule::UPLINK;
+    voiceUlRule->Add(ulpfVoice);
 
     // Install traffic generators
     ApplicationContainer clientApps;
@@ -1464,15 +1521,15 @@ main(int argc, char* argv[])
         .uePort = dlPortVoiceStart,
         .transportProtocol = transportProtocol,
         .nrHelper = nrHelper,
-        .bearer = voiceBearer,
-        .tft = voiceTft,
+        .flow = voiceBearer,
+        .rule = voiceRule,
         .serverApps = serverApps,
         .clientApps = clientApps,
         .pingApps = pingApps,
         .direction = "DL",
 
     };
-    for (auto [nodeContainer, netDevContainer, ipIfaceContainer] : sectorContainers)
+    for (const auto& [nodeContainer, netDevContainer, ipIfaceContainer] : sectorContainers)
     {
         for (uint32_t i = 0; i < nodeContainer.GetN(); ++i)
         {
@@ -1487,10 +1544,10 @@ main(int argc, char* argv[])
     uint16_t remoteHostPort = 3254;
     if (enableUl)
     {
-        voiceAppSettings.bearer = voiceUlBearer;
-        voiceAppSettings.tft = voiceUlTft;
+        voiceAppSettings.flow = voiceUlBearer;
+        voiceAppSettings.rule = voiceUlRule;
         voiceAppSettings.direction = "UL";
-        for (auto [nodeContainer, netDevContainer, ipIfaceContainer] : sectorContainers)
+        for (const auto& [nodeContainer, netDevContainer, ipIfaceContainer] : sectorContainers)
         {
             for (uint32_t i = 0; i < nodeContainer.GetN(); ++i)
             {
@@ -1520,9 +1577,9 @@ main(int argc, char* argv[])
                        ueArSector1NetDev,
                        nrHelper,
                        arBearer,
-                       arTft,
+                       arRule,
                        isMx1,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1556,9 +1613,9 @@ main(int argc, char* argv[])
                        ueArSector2NetDev,
                        nrHelper,
                        arBearer,
-                       arTft,
+                       arRule,
                        isMx1,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1583,9 +1640,9 @@ main(int argc, char* argv[])
                        ueArSector3NetDev,
                        nrHelper,
                        arBearer,
-                       arTft,
+                       arRule,
                        isMx1,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1614,9 +1671,9 @@ main(int argc, char* argv[])
                            ueArSector1NetDev,
                            nrHelper,
                            arUlBearer,
-                           arUlTft,
+                           arUlRule,
                            isMx1,
-                           arUlTfts,
+                           arUlRules,
                            serverApps,
                            clientApps,
                            pingApps,
@@ -1642,9 +1699,9 @@ main(int argc, char* argv[])
                            ueArSector2NetDev,
                            nrHelper,
                            arUlBearer,
-                           arUlTft,
+                           arUlRule,
                            isMx1,
-                           arUlTfts,
+                           arUlRules,
                            serverApps,
                            clientApps,
                            pingApps,
@@ -1670,9 +1727,9 @@ main(int argc, char* argv[])
                            ueArSector3NetDev,
                            nrHelper,
                            arUlBearer,
-                           arUlTft,
+                           arUlRule,
                            isMx1,
-                           arUlTfts,
+                           arUlRules,
                            serverApps,
                            clientApps,
                            pingApps,
@@ -1700,9 +1757,9 @@ main(int argc, char* argv[])
                        ueVrSector1NetDev,
                        nrHelper,
                        vrBearer,
-                       vrTft,
+                       vrRule,
                        true,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1727,9 +1784,9 @@ main(int argc, char* argv[])
                        ueVrSector2NetDev,
                        nrHelper,
                        vrBearer,
-                       vrTft,
+                       vrRule,
                        true,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1754,9 +1811,9 @@ main(int argc, char* argv[])
                        ueVrSector3NetDev,
                        nrHelper,
                        vrBearer,
-                       vrTft,
+                       vrRule,
                        true,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1782,9 +1839,9 @@ main(int argc, char* argv[])
                        ueCgSector1NetDev,
                        nrHelper,
                        cgBearer,
-                       cgTft,
+                       cgRule,
                        true,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1809,9 +1866,9 @@ main(int argc, char* argv[])
                        ueCgSector2NetDev,
                        nrHelper,
                        cgBearer,
-                       cgTft,
+                       cgRule,
                        true,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1836,9 +1893,9 @@ main(int argc, char* argv[])
                        ueCgSector3NetDev,
                        nrHelper,
                        cgBearer,
-                       cgTft,
+                       cgRule,
                        true,
-                       arTfts,
+                       arRules,
                        serverApps,
                        clientApps,
                        pingApps,
@@ -1867,8 +1924,7 @@ main(int argc, char* argv[])
         nrHelper->EnableTraces();
     }
 
-    for (NetDeviceContainer::Iterator i = gnbSector1NetDev.Begin(); i != gnbSector1NetDev.End();
-         ++i)
+    for (auto i = gnbSector1NetDev.Begin(); i != gnbSector1NetDev.End(); ++i)
     {
         Ptr<NrGnbNetDevice> gnbNetDev = DynamicCast<NrGnbNetDevice>(*i);
         gnbNetDev->GetNrFhControl()->TraceConnectWithoutContext("RequiredFhDlThroughput",
@@ -1879,8 +1935,7 @@ main(int argc, char* argv[])
 
     if (deployment == "HEX")
     {
-        for (NetDeviceContainer::Iterator i = gnbSector2NetDev.Begin(); i != gnbSector2NetDev.End();
-             ++i)
+        for (auto i = gnbSector2NetDev.Begin(); i != gnbSector2NetDev.End(); ++i)
         {
             Ptr<NrGnbNetDevice> gnbNetDev = DynamicCast<NrGnbNetDevice>(*i);
             gnbNetDev->GetNrFhControl()->TraceConnectWithoutContext("RequiredFhDlThroughput",
@@ -1889,8 +1944,7 @@ main(int argc, char* argv[])
                                                                     MakeCallback(&ReportAiTrace));
         }
 
-        for (NetDeviceContainer::Iterator i = gnbSector3NetDev.Begin(); i != gnbSector3NetDev.End();
-             ++i)
+        for (auto i = gnbSector3NetDev.Begin(); i != gnbSector3NetDev.End(); ++i)
         {
             Ptr<NrGnbNetDevice> gnbNetDev = DynamicCast<NrGnbNetDevice>(*i);
             gnbNetDev->GetNrFhControl()->TraceConnectWithoutContext("RequiredFhDlThroughput",
@@ -1911,8 +1965,8 @@ main(int argc, char* argv[])
         NetDeviceContainer remNd;
         Ptr<NetDevice> remDevice;
 
-        std::vector<NetDeviceContainer*> remNdBySector{gnbNdBySector};
-        std::vector<NetDeviceContainer*> remDevBySector{ueNdBySector};
+        const std::vector<NetDeviceContainer*>& remNdBySector{gnbNdBySector};
+        const std::vector<NetDeviceContainer*>& remDevBySector{ueNdBySector};
 
         uint32_t sectorIndex = 0;
         // Reverse order so we get sector 1 for the remSector == 0 case
@@ -2047,9 +2101,7 @@ main(int argc, char* argv[])
                        << "\n";
     }
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
 
@@ -2194,7 +2246,7 @@ ConfigurePhy(Ptr<NrHelper> nrHelper,
              double beamConfElevation)
 {
     // Change the antenna orientation
-    Ptr<NrGnbPhy> phy0 = nrHelper->GetGnbPhy(gnb, 0); // BWP 0
+    Ptr<NrGnbPhy> phy0 = NrHelper::GetGnbPhy(gnb, 0); // BWP 0
     Ptr<UniformPlanarArray> antenna0 = ConstCast<UniformPlanarArray>(
         phy0->GetSpectrumPhy()->GetAntenna()->GetObject<UniformPlanarArray>());
     antenna0->SetAttribute("BearingAngle", DoubleValue(orientationRads));
@@ -2214,10 +2266,10 @@ ConfigureXrApp(NodeContainer& ueContainer,
                NodeContainer& remoteHostContainer,
                NetDeviceContainer& ueNetDev,
                Ptr<NrHelper> nrHelper,
-               NrEpsBearer& bearer,
-               Ptr<NrEpcTft> tft,
+               NrQosFlow& flow,
+               Ptr<NrQosRule> rule,
                bool isMx1,
-               std::vector<Ptr<NrEpcTft>>& tfts,
+               std::vector<Ptr<NrQosRule>>& rules,
                ApplicationContainer& serverApps,
                ApplicationContainer& clientApps,
                ApplicationContainer& pingApps,
@@ -2241,7 +2293,7 @@ ConfigureXrApp(NodeContainer& ueContainer,
     std::vector<Address> addresses;
     std::vector<InetSocketAddress> localAddresses;
 
-    for (uint j = 0; j < it->second.size(); j++)
+    for (size_t j = 0; j < it->second.size(); j++)
     {
         addresses.push_back(InetSocketAddress(address, port + j));
         // The sink will always listen to the specified ports
@@ -2269,20 +2321,20 @@ ConfigureXrApp(NodeContainer& ueContainer,
 
     Ptr<NetDevice> ueDevice = ueNetDev.Get(i);
 
-    // Activate a dedicated bearer for the traffic type per node
-    nrHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, tft);
+    // Activate a dedicated flow for the traffic type per node
+    nrHelper->ActivateDedicatedQosFlow(ueDevice, flow, rule);
 
-    // Activate a dedicated bearer for the traffic type per node
+    // Activate a dedicated flow for the traffic type per node
     if (isMx1)
     {
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, tft);
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, flow, rule);
     }
     else
     {
-        NS_ASSERT(tfts.size() >= currentUeClientApps.GetN());
+        NS_ASSERT(rules.size() >= currentUeClientApps.GetN());
         for (uint32_t j = 0; j < currentUeClientApps.GetN(); j++)
         {
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, tfts[j]);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, flow, rules[j]);
         }
     }
 
@@ -2351,10 +2403,10 @@ ConfigureVoiceApp(VoiceApplicationSettings& voiceAppSettings)
     }
 
     Ptr<NetDevice> ueDevice = voiceAppSettings.ueNetDev;
-    // Activate a dedicated bearer for the traffic type per node
-    voiceAppSettings.nrHelper->ActivateDedicatedEpsBearer(ueDevice,
-                                                          voiceAppSettings.bearer,
-                                                          voiceAppSettings.tft);
+    // Activate a dedicated flow for the traffic type per node
+    voiceAppSettings.nrHelper->ActivateDedicatedQosFlow(ueDevice,
+                                                        voiceAppSettings.flow,
+                                                        voiceAppSettings.rule);
 
     InetSocketAddress localAddress(Ipv4Address::GetAny(), port);
     PacketSinkHelper dlPacketSinkHelper(voiceAppSettings.transportProtocol, localAddress);
@@ -2414,4 +2466,22 @@ ReportAiTrace(const SfnSf& sfn, uint16_t physCellId, uint16_t bwpId, uint32_t ai
         }
     }
     m_aiTraceFile << physCellId << "\t" << bwpId << "\t" << airRbs << std::endl;
+}
+
+// Function to convert string to enum
+static NrFhControl::FunctionalSplit
+StringToEnum(const std::string& str)
+{
+    static const std::unordered_map<std::string, NrFhControl::FunctionalSplit> stringToEnumMap = {
+        {"FS_6", NrFhControl::FS_6},
+        {"FS_7_3", NrFhControl::FS_7_3},
+        {"FS_7_2", NrFhControl::FS_7_2},
+        {"FS_7_1", NrFhControl::FS_7_1}};
+
+    auto it = stringToEnumMap.find(str);
+    if (it != stringToEnumMap.end())
+    {
+        return it->second;
+    }
+    throw std::invalid_argument("Invalid functional split string: " + str);
 }

@@ -2,10 +2,21 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file sinr-output-stats.cc
+ *
+ * @brief Implementation of SinrOutputStats, used by the lena-lte-comparison example to record
+ * the SINR perceived by each UE into the SQLite output database (table "sinr"). Each row stores
+ * cell ID, BWP ID, RNTI and the average SINR, keyed by RNG seed and run number; it is fed by the
+ * NrUePhy "DlDataSinr" trace in 5G-LENA runs and by the LteUePhy "ReportCurrentCellRsrpSinr"
+ * trace in LENA runs. Samples are cached in memory and written to disk in batches.
+ */
+
 #include "sinr-output-stats.h"
 
-#include <ns3/abort.h>
-#include <ns3/rng-seed-manager.h>
+#include "ns3/abort.h"
+#include "ns3/rng-seed-manager.h"
 
 namespace ns3
 {

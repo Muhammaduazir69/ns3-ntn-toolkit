@@ -401,10 +401,13 @@ class NtnHttpRttScalingTest : public TestCase
         http.SetVariablesAttribute("ReadingTimeMean", TimeValue(Seconds(2.0)));
         ApplicationContainer apps = http.InstallUsingIpv4(n.Get(0), n.Get(1));
         apps.Start(Seconds(0.0));
-        apps.Stop(Seconds(60.0));
+        // 120 s of browsing: the GEO run needs enough pages for the per-page round-trip check;
+        // 60 s gave a count right at the "several pages" floor once the random streams moved
+        // (ns-3.48), a sample-size artefact rather than a change in the property under test.
+        apps.Stop(Seconds(120.0));
         Browse b;
         b.Connect(http.GetClients().Get(0));
-        Simulator::Stop(Seconds(61.0));
+        Simulator::Stop(Seconds(121.0));
         Simulator::Run();
         Simulator::Destroy();
         return b.pltS;

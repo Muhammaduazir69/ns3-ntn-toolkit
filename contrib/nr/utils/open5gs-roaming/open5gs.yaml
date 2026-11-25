@@ -1,0 +1,222 @@
+# Copyright (c) 2026 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+#
+# SPDX-License-Identifier: GPL-2.0-only
+
+# Visited network (PLMN 001/01) of the UEs of ns-3, whose home network (PLMN 002/02) is
+# reached through the SEPP emulated by nr-bridge. The network functions, nr-bridge and ns-3 share
+# one network namespace: the SBI, NGAP and N32 servers listen on loopback addresses, and the
+# UPF on the N3 link with the visited gNB of ns-3.
+db_uri: mongodb://mongo/open5gs
+
+logger:
+  level: info
+
+global:
+  parameter:
+    no_scp: true
+    no_mme: true
+    no_sgwc: true
+    no_sgwu: true
+    no_pcrf: true
+    no_hss: true
+
+nrf:
+  serving:
+    - plmn_id:
+        mcc: 001
+        mnc: 01
+  sbi:
+    server:
+      - address: 127.0.2.10
+        port: 7777
+
+amf:
+  sbi:
+    server:
+      - address: 127.0.2.5
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777
+  ngap:
+    server:
+      - address: 127.0.2.5
+  access_control:
+    - plmn_id:
+        mcc: 001
+        mnc: 01
+    - plmn_id:
+        mcc: 002
+        mnc: 02
+  guami:
+    - plmn_id:
+        mcc: 001
+        mnc: 01
+      amf_id:
+        region: 2
+        set: 1
+  tai:
+    - plmn_id:
+        mcc: 001
+        mnc: 01
+      tac: 1
+  plmn_support:
+    - plmn_id:
+        mcc: 001
+        mnc: 01
+      s_nssai:
+        - sst: 1
+  security:
+    integrity_order : [ NIA2, NIA1, NIA0 ]
+    ciphering_order : [ NEA0, NEA1, NEA2 ]
+  network_name:
+    full: Open5GS
+  amf_name: open5gs-amf0
+  time:
+    t3512:
+      value: 540
+
+smf:
+  sbi:
+    server:
+      - address: 127.0.2.4
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777
+  pfcp:
+    server:
+      - address: 127.0.2.4
+    client:
+      upf:
+        - address: 127.0.2.7
+  gtpc:
+    server:
+      - address: 127.0.2.4
+  gtpu:
+    server:
+      - address: 127.0.2.4
+  session:
+    - subnet: 10.46.0.0/16
+      gateway: 10.46.0.1
+  dns:
+    - 8.8.8.8
+    - 8.8.4.4
+  mtu: 1400
+
+upf:
+  pfcp:
+    server:
+      - address: 127.0.2.7
+  gtpu:
+    server:
+      - address: 10.210.1.1
+  session:
+    - subnet: 10.46.0.0/16
+      gateway: 10.46.0.1
+      dev: ogstun2
+
+sepp:
+  sbi:
+    server:
+      - address: 127.0.2.250
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777
+  n32:
+    server:
+      - sender: sepp.5gc.mnc001.mcc001.3gppnetwork.org
+        address: 127.0.2.251
+        port: 7777
+        n32f:
+          address: 127.0.2.252
+          port: 7777
+    client:
+      sepp:
+        - receiver: sepp.5gc.mnc002.mcc002.3gppnetwork.org
+          uri: http://127.0.3.251:7777
+          n32f:
+            uri: http://127.0.3.252:7777
+
+ausf:
+  sbi:
+    server:
+      - address: 127.0.2.11
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777
+
+udm:
+  sbi:
+    server:
+      - address: 127.0.2.12
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777
+
+udr:
+  sbi:
+    server:
+      - address: 127.0.2.20
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777
+
+pcf:
+  sbi:
+    server:
+      - address: 127.0.2.13
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777
+  # the policy of the roaming UEs, whose subscription is in their home network
+  policy:
+    - plmn_id:
+        mcc: 002
+        mnc: 02
+      slice:
+        - sst: 1
+          default_indicator: true
+          session:
+            - name: internet
+              type: 1  # IPv4
+              ambr:
+                downlink:
+                  value: 1
+                  unit: 3  # Gbps
+                uplink:
+                  value: 1
+                  unit: 3
+              qos:
+                index: 9
+                arp:
+                  priority_level: 8
+                  pre_emption_vulnerability: 1
+                  pre_emption_capability: 1
+
+nssf:
+  sbi:
+    server:
+      - address: 127.0.2.14
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777
+      nsi:
+        - uri: http://127.0.2.10:7777
+          s_nssai:
+            sst: 1
+
+bsf:
+  sbi:
+    server:
+      - address: 127.0.2.15
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.2.10:7777

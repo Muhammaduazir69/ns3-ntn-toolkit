@@ -15,19 +15,19 @@
 #include "spectrum-signal-parameters.h"
 #include "spectrum-value.h"
 
-#include <ns3/data-rate.h>
-#include <ns3/event-id.h>
-#include <ns3/generic-phy.h>
-#include <ns3/mobility-model.h>
-#include <ns3/net-device.h>
-#include <ns3/nstime.h>
-#include <ns3/packet.h>
+#include "ns3/data-rate.h"
+#include "ns3/event-id.h"
+#include "ns3/generic-phy.h"
+#include "ns3/mobility-model.h"
+#include "ns3/net-device.h"
+#include "ns3/nstime.h"
+#include "ns3/packet.h"
 
 namespace ns3
 {
 
 /**
- * \ingroup spectrum
+ * @ingroup spectrum
  *
  * This PHY layer implementation realizes an ideal OFDM PHY which
  * transmits half-duplex (i.e., it can either receive or transmit at a
@@ -81,8 +81,8 @@ class HalfDuplexIdealPhy : public SpectrumPhy
     };
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -97,7 +97,7 @@ class HalfDuplexIdealPhy : public SpectrumPhy
     void StartRx(Ptr<SpectrumSignalParameters> params) override;
 
     /**
-     * \brief Set the Power Spectral Density of outgoing signals in power units
+     * @brief Set the Power Spectral Density of outgoing signals in power units
      * (Watt, Pascal...) per Hz.
      *
      * @param txPsd Tx Power Spectral Density
@@ -105,7 +105,7 @@ class HalfDuplexIdealPhy : public SpectrumPhy
     void SetTxPowerSpectralDensity(Ptr<SpectrumValue> txPsd);
 
     /**
-     * \brief Set the Noise Power Spectral Density in power units
+     * @brief Set the Noise Power Spectral Density in power units
      * (Watt, Pascal...) per Hz.
      * @param noisePsd the Noise Power Spectral Density
      */
@@ -171,7 +171,7 @@ class HalfDuplexIdealPhy : public SpectrumPhy
     /**
      * set the AntennaModel to be used
      *
-     * \param a the Antenna Model
+     * @param a the Antenna Model
      */
     void SetAntenna(Ptr<AntennaModel> a);
 
@@ -180,7 +180,7 @@ class HalfDuplexIdealPhy : public SpectrumPhy
 
     /**
      * Change the PHY state
-     * \param newState new state
+     * @param newState new state
      */
     void ChangeState(State newState);
     /**

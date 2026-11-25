@@ -5,22 +5,22 @@
  *
  * Author: Gary Pei <guangyu.pei@boeing.com>
  */
-#include <ns3/command-line.h>
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/log.h>
-#include <ns3/lr-wpan-mac.h>
-#include <ns3/lr-wpan-phy.h>
-#include <ns3/packet.h>
-#include <ns3/simulator.h>
-#include <ns3/single-model-spectrum-channel.h>
-#include <ns3/test.h>
+#include "ns3/command-line.h"
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-mac.h"
+#include "ns3/lr-wpan-phy.h"
+#include "ns3/packet.h"
+#include "ns3/simulator.h"
+#include "ns3/single-model-spectrum-channel.h"
+#include "ns3/test.h"
 
 using namespace ns3;
 using namespace ns3::lrwpan;
 
 /**
  * Function called when a the PHY state change is confirmed
- * \param status PHY state
+ * @param status PHY state
  */
 void
 GetSetTRXStateConfirm(PhyEnumeration status)
@@ -30,21 +30,22 @@ GetSetTRXStateConfirm(PhyEnumeration status)
 
 /**
  * Function called when a the PHY receives a packet
- * \param psduLength PSDU length
- * \param p packet
- * \param lqi link quality indication
+ * @param psduLength PSDU length
+ * @param p packet
+ * @param lqi link quality indication
+ * @param rssi received signal strength indicator
  */
 void
-ReceivePdDataIndication(uint32_t psduLength, Ptr<Packet> p, uint8_t lqi)
+ReceivePdDataIndication(uint32_t psduLength, Ptr<Packet> p, uint8_t lqi, int8_t rssi)
 {
-    NS_LOG_UNCOND("At: " << Simulator::Now() << " Received frame size: " << psduLength
-                         << " LQI: " << (uint16_t)lqi);
+    NS_LOG_UNCOND("At: " << Simulator::Now() << " Received frame size: " << psduLength << " LQI: "
+                         << static_cast<int16_t>(lqi) << " RSSI: " << static_cast<int16_t>(rssi));
 }
 
 /**
  * Send one packet
- * \param sender sender PHY
- * \param receiver receiver PHY
+ * @param sender sender PHY
+ * @param receiver receiver PHY
  */
 void
 SendOnePacket(Ptr<LrWpanPhy> sender, Ptr<LrWpanPhy> receiver)
@@ -89,9 +90,9 @@ main(int argc, char* argv[])
 
     receiver->SetPdDataIndicationCallback(MakeCallback(&ReceivePdDataIndication));
 
-    Simulator::Schedule(Seconds(1.0), &SendOnePacket, sender, receiver);
+    Simulator::Schedule(Seconds(1), &SendOnePacket, sender, receiver);
 
-    Simulator::Stop(Seconds(10.0));
+    Simulator::Stop(Seconds(10));
 
     Simulator::Run();
 

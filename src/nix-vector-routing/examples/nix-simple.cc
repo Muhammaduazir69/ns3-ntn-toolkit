@@ -25,7 +25,7 @@
  * 2) Print Routing Path, given source and destination.
  *
  * Simple point to point links:
- * \verbatim
+ * @verbatim
        ________
       /        \
     n0 -- n1 -- n2 -- n3
@@ -54,7 +54,7 @@
            fe80::200:ff:fe00:8 (Link-local on n0 -- n2)
     n3 IP: 2001:3::200:ff:fe00:6 (Global Unicast on n2 -- n3)
            fe80::200:ff:fe00:6 (Link-local on n2 -- n3)
-   \endverbatim
+   @endverbatim
  *
  * Route Path for considered cases:
  * - Source (n0) and Destination (n3)
@@ -69,7 +69,7 @@
  *
  * Expected IPv4 Routing Path output for above
  * cases (in the output stream):
- * \verbatim
+ * @verbatim
   Time: +3s, Nix Routing
   Route path from Node 0 to Node 3, Nix Vector: 101 (3 bits left)
   10.1.4.1                 (Node 0)  ---->   10.1.4.2                 (Node 2)
@@ -113,11 +113,11 @@
   10.1.4.1                      010 (3 bits left)
   IpRouteCache:
   Destination                   Gateway                       Source OutputDevice 10.1.4.1 10.1.3.1
- 10.1.3.2                        0 \endverbatim
+ 10.1.3.2                        0 @endverbatim
  *
  * Expected IPv6 Routing Path output for above
  * cases (in the output stream):
- * \verbatim
+ * @verbatim
   Time: +3s, Nix Routing
   Route path from Node 0 to Node 3, Nix Vector: 101 (3 bits left)
   2001:4::200:ff:fe00:7    (Node 0)  ---->   fe80::200:ff:fe00:8      (Node 2)
@@ -162,7 +162,7 @@
   IpRouteCache:
   Destination                   Gateway                       Source OutputDevice
   2001:4::200:ff:fe00:7         fe80::200:ff:fe00:5           2001:3::200:ff:fe00:6           0
-  \endverbatim
+  @endverbatim
  */
 
 using namespace ns3;
@@ -297,8 +297,8 @@ main(int argc, char* argv[])
     UdpEchoServerHelper echoServer(9);
 
     ApplicationContainer serverApps = echoServer.Install(nodes.Get(3));
-    serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(10.0));
+    serverApps.Start(Seconds(1));
+    serverApps.Stop(Seconds(10));
 
     UdpEchoClientHelper echoClient(udpServerAddress, 9);
     echoClient.SetAttribute("MaxPackets", UintegerValue(1));
@@ -306,8 +306,8 @@ main(int argc, char* argv[])
     echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 
     ApplicationContainer clientApps = echoClient.Install(nodes.Get(0));
-    clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(10.0));
+    clientApps.Start(Seconds(2));
+    clientApps.Stop(Seconds(10));
 
     Simulator::Run();
     Simulator::Destroy();

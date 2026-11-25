@@ -10,6 +10,7 @@
 #ifndef HE_OPERATION_H
 #define HE_OPERATION_H
 
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-information-element.h"
 #include "ns3/wifi-opt-field.h"
 
@@ -17,16 +18,31 @@ namespace ns3
 {
 
 /**
- * \brief The HE Operation Information Element
- * \ingroup wifi
+ * @brief The HE Operation Information Element
+ * @ingroup wifi
  *
- * This class knows how to serialise and deserialise
+ * This class knows how to serialize and deserialize
  * the HE Operation Information Element
  */
-class HeOperation : public WifiInformationElement
+class WIFI_EXPORT HeOperation : public WifiInformationElement
 {
   public:
     HeOperation();
+
+    /**
+     * Copy constructor
+     *
+     * @param other the object to copy from
+     */
+    HeOperation(const HeOperation& other);
+
+    /**
+     * Copy assignment operator
+     *
+     * @param other the object to assign from
+     * @return a reference to this object
+     */
+    HeOperation& operator=(const HeOperation& other);
 
     // Implementations of pure virtual methods of WifiInformationElement
     WifiInformationElementId ElementId() const override;
@@ -34,7 +50,7 @@ class HeOperation : public WifiInformationElement
     void Print(std::ostream& os) const override;
 
     /// HE Operation Parameters field
-    struct HeOperationParams
+    struct WIFI_EXPORT HeOperationParams
     {
         uint8_t m_defaultPeDuration : 3 {0};  ///< Default PE Duration
         uint8_t m_twtRequired : 1 {0};        ///< TWT Required
@@ -48,33 +64,33 @@ class HeOperation : public WifiInformationElement
         /**
          * Print the content of the HE Operation Parameters field.
          *
-         * \param os output stream
+         * @param os output stream
          */
         void Print(std::ostream& os) const;
 
         /**
-         * \return the serialized size of the HE Operation Parameters field
+         * @return the serialized size of the HE Operation Parameters field
          */
         uint16_t GetSerializedSize() const;
 
         /**
          * Serialize the HE Operation Parameters field
          *
-         * \param start an iterator which points to where the information should be written
+         * @param start an iterator which points to where the information should be written
          */
         void Serialize(Buffer::Iterator& start) const;
 
         /**
          * Deserialize the HE Operation Parameters field.
          *
-         * \param start an iterator which points to where the information should be read from
-         * \return the number of bytes read
+         * @param start an iterator which points to where the information should be read from
+         * @return the number of bytes read
          */
         uint16_t Deserialize(Buffer::Iterator& start);
     };
 
     /// BSS Color Information field
-    struct BssColorInfo
+    struct WIFI_EXPORT BssColorInfo
     {
         uint8_t m_bssColor : 6 {0};         ///< BSS Color
         uint8_t m_partialBssColor : 1 {0};  ///< Partial BSS Color
@@ -83,33 +99,33 @@ class HeOperation : public WifiInformationElement
         /**
          * Print the content of the BSS Color Information field.
          *
-         * \param os output stream
+         * @param os output stream
          */
         void Print(std::ostream& os) const;
 
         /**
-         * \return the serialized size of the BSS Color Information field
+         * @return the serialized size of the BSS Color Information field
          */
         uint16_t GetSerializedSize() const;
 
         /**
          * Serialize the BSS Color Information field
          *
-         * \param start an iterator which points to where the information should be written
+         * @param start an iterator which points to where the information should be written
          */
         void Serialize(Buffer::Iterator& start) const;
 
         /**
          * Deserialize the BSS Color Information field.
          *
-         * \param start an iterator which points to where the information should be read from
-         * \return the number of bytes read
+         * @param start an iterator which points to where the information should be read from
+         * @return the number of bytes read
          */
         uint16_t Deserialize(Buffer::Iterator& start);
     };
 
     /// 6 GHz Operation Information field
-    struct OpInfo6GHz
+    struct WIFI_EXPORT OpInfo6GHz
     {
         uint8_t m_primCh{0};         ///< Primary Channel
         uint8_t m_chWid : 2 {0};     ///< Channel Width
@@ -123,27 +139,27 @@ class HeOperation : public WifiInformationElement
         /**
          * Print the content of the 6 GHz Operation Information field.
          *
-         * \param os output stream
+         * @param os output stream
          */
         void Print(std::ostream& os) const;
 
         /**
-         * \return the serialized size of the 6 GHz Operation Information field
+         * @return the serialized size of the 6 GHz Operation Information field
          */
         uint16_t GetSerializedSize() const;
 
         /**
          * Serialize the 6 GHz Operation Information field
          *
-         * \param start an iterator which points to where the information should be written
+         * @param start an iterator which points to where the information should be written
          */
         void Serialize(Buffer::Iterator& start) const;
 
         /**
          * Deserialize the 6 GHz Operation Information field.
          *
-         * \param start an iterator which points to where the information should be read from
-         * \return the number of bytes read
+         * @param start an iterator which points to where the information should be read from
+         * @return the number of bytes read
          */
         uint16_t Deserialize(Buffer::Iterator& start);
     };
@@ -152,8 +168,8 @@ class HeOperation : public WifiInformationElement
      * Set the Basic HE-MCS and NSS field in the HE Operation information element
      * by specifying the pair (<i>nss</i>, <i>maxMcs</i>).
      *
-     * \param nss the NSS
-     * \param maxHeMcs the maximum supported HE-MCS value corresponding to that NSS
+     * @param nss the NSS
+     * @param maxHeMcs the maximum supported HE-MCS value corresponding to that NSS
      */
     void SetMaxHeMcsPerNss(uint8_t nss, uint8_t maxHeMcs);
 

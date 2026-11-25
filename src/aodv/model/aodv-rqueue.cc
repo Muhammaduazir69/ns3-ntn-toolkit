@@ -106,19 +106,19 @@ RequestQueue::Find(Ipv4Address dst)
 }
 
 /**
- * \brief IsExpired structure
+ * @brief IsExpired structure
  */
 struct IsExpired
 {
     /**
      * Check if the entry is expired
      *
-     * \param e QueueEntry entry
-     * \return true if expired, false otherwise
+     * @param e QueueEntry entry
+     * @return true if expired, false otherwise
      */
     bool operator()(const QueueEntry& e) const
     {
-        return (e.GetExpireTime() < Seconds(0));
+        return (e.GetExpireTime().IsStrictlyNegative());
     }
 };
 

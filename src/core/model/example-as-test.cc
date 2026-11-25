@@ -9,19 +9,17 @@
 #include "example-as-test.h"
 
 #include "ascii-test.h"
-#include "assert.h"
 #include "environment-variable.h"
 #include "fatal-error.h"
 #include "log.h"
 
 #include <cstdlib> // itoa(), system ()
-#include <cstring>
 #include <sstream>
 #include <string>
 
 /**
- * \file
- * \ingroup testing
+ * @file
+ * @ingroup testing
  * Implementation of classes ns3::ExampleAsTestSuite and ns3::ExampleTestCase.
  */
 
@@ -83,7 +81,9 @@ ExampleAsTestCase::DoRun()
         // Strip any system- or compiler-dependent messages
         // resulting from invoking NS_FATAL..., which in turn
         // calls std::terminate
-        post += " | sed '1,/" + std::string(NS_FATAL_MSG) + "/!d' ";
+        post += " | sed \"1,/" + std::string(NS_FATAL_MSG) + "/!d\" ";
+        post += " | sed \"s/file=[^,]*/file=.../\" ";
+        post += " | sed \"s/line=[^,]*/line=.../\" ";
     }
 
     std::stringstream ss;
@@ -122,7 +122,7 @@ ExampleAsTestCase::DoRun()
     if (m_shouldNotErr)
     {
         // Make sure the example didn't outright crash
-        NS_TEST_ASSERT_MSG_EQ(status, 0, "example " + m_program + " failed");
+        NS_TEST_ASSERT_MSG_EQ(status, 0, "example " + m_program + " exited abnormally");
     }
 
     // If we're just introspecting the command-line

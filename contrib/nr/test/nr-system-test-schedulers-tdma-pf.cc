@@ -1,24 +1,25 @@
 // Copyright (c) 2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
 //
 // SPDX-License-Identifier: GPL-2.0-only
-
 #include "system-scheduler-test.h"
 
 #include "ns3/test.h"
 
+#include <map>
+
 using namespace ns3;
 
 /**
- * \file nr-system-test-schedulers-tdma-pf.cc
- * \ingroup test
+ * @file nr-system-test-schedulers-tdma-pf.cc
+ * @ingroup test
  *
- * \brief System test for TDMA - Proportional Fair scheduler.  It checks that all the
+ * @brief System test for TDMA - Proportional Fair scheduler.  It checks that all the
  * packets sent are delivered correctly.
  */
 
 /**
- * \brief The TDMA PF scheduler system test suite
- * \ingroup test
+ * @brief The TDMA PF scheduler system test suite
+ * @ingroup test
  *
  * It will check Tdma PF with:
  *
@@ -31,7 +32,7 @@ class NrSystemTestSchedulerTdmaPfSuite : public TestSuite
 {
   public:
     /**
-     * \brief constructor
+     * @brief constructor
      */
     NrSystemTestSchedulerTdmaPfSuite();
 };
@@ -52,6 +53,12 @@ NrSystemTestSchedulerTdmaPfSuite::NrSystemTestSchedulerTdmaPfSuite()
     std::list<std::string> scheds = {"PF"};
     std::list<TxMode> mode = {DL, UL, DL_UL};
     std::list<uint32_t> uesPerBeamList = {1, 2, 4, 8};
+    std::map<uint32_t, Duration> durationForUesPerBeam = {
+        {1, Duration::QUICK},
+        {2, Duration::QUICK},
+        {4, Duration::EXTENSIVE},
+        {8, Duration::EXTENSIVE},
+    };
     std::list<uint32_t> beams = {1, 2};
     std::list<uint32_t> numerologies = {
         0,
@@ -99,7 +106,7 @@ NrSystemTestSchedulerTdmaPfSuite::NrSystemTestSchedulerTdmaPfSuite()
                                                                 isDl,
                                                                 isUl,
                                                                 schedName.str()),
-                                        Duration::QUICK);
+                                        durationForUesPerBeam.at(uesPerBeam));
                         }
                     }
                 }

@@ -21,10 +21,10 @@
 #include "ns3/point-to-point-module.h"
 
 /**
- * \file cttc-nr-cc-bwp-demo.cc
- * \ingroup examples
+ * @file cttc-nr-cc-bwp-demo.cc
+ * @ingroup examples
  *
- * \brief Creates a NR TDD deployment with a configurable number of sites, UEs, downlink and uplink
+ * @brief Creates a NR TDD deployment with a configurable number of sites, UEs, downlink and uplink
 flows.
  *
  * This example describes how to setup a simulation using the 3GPP channel model
@@ -93,7 +93,6 @@ main(int argc, char* argv[])
         "F|F|F|F|F|F|F|F|F|F|"; // Pattern can be e.g. "DL|S|UL|UL|DL|DL|S|UL|UL|DL|"
     double totalTxPower = 8;
     bool cellScan = false;
-    double beamSearchAngleStep = 10.0;
 
     bool udpFullBuffer = false;
     uint32_t udpPacketSizeUll = 100;
@@ -131,11 +130,11 @@ main(int argc, char* argv[])
     cmd.AddValue("centralFrequencyCc0",
                  "The system frequency to be used in CC 0",
                  centralFrequencyCc0);
-    cmd.AddValue("bandwidthBand", "The system bandwidth to be used in CC 0", bandwidthCc0);
+    cmd.AddValue("bandwidthBand0", "The system bandwidth to be used in CC 0", bandwidthCc0);
     cmd.AddValue("centralFrequencyCc1",
                  "The system frequency to be used in CC 1",
                  centralFrequencyCc1);
-    cmd.AddValue("bandwidthBand", "The system bandwidth to be used in CC 1", bandwidthCc1);
+    cmd.AddValue("bandwidthBand1", "The system bandwidth to be used in CC 1", bandwidthCc1);
     cmd.AddValue("numerologyCc0Bwp0", "Numerlogy to be used in CC 0, BWP 0", numerologyCc0Bwp0);
     cmd.AddValue("numerologyCc0Bwp1", "Numerlogy to be used in CC 0, BWP 1", numerologyCc0Bwp1);
     cmd.AddValue("numerologyCc1Bwp0", "Numerlogy to be used in CC 1, BWP 0", numerologyCc1Bwp0);
@@ -150,9 +149,6 @@ main(int argc, char* argv[])
                  "Use beam search method to determine beamforming vector,"
                  "true to use cell scanning method",
                  cellScan);
-    cmd.AddValue("beamSearchAngleStep",
-                 "Beam search angle step for beam search method",
-                 beamSearchAngleStep);
     cmd.AddValue("udpFullBuffer",
                  "Whether to set the full buffer traffic; if this parameter is "
                  "set then the udpInterval parameter will be neglected.",
@@ -262,9 +258,12 @@ main(int argc, char* argv[])
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
 
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
+    // Configure the factories with UMi scenario, LOS channel condition and 3GPP channel model
+    channelHelper->ConfigureFactories("UMi", "LOS", "ThreeGpp");
 
     /*
      * Setup the configuration of the spectrum. There is a contiguous and a non-contiguous
@@ -305,8 +304,7 @@ main(int argc, char* argv[])
         // Create the configuration for the CcBwpHelper
         CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequencyBand,
                                                        bandwidthBand,
-                                                       numContiguousCcs,
-                                                       BandwidthPartInfo::UMi_StreetCanyon_LoS);
+                                                       numContiguousCcs);
 
         bandConf.m_numBwp = 1; // 1 BWP per CC
 
@@ -381,8 +379,10 @@ main(int argc, char* argv[])
       }*/
 
     // NS_ABORT_MSG_IF (ccId < 1,"No CC created");
-
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    // Set the path loss configuration
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    // Set and create the channel to be used in this band
+    channelHelper->AssignChannelsToBands({band});
     nrEpcHelper->SetAttribute("S1uLinkDelay", TimeValue(MilliSeconds(0)));
     nrHelper->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerTdmaRR"));
     // Beamforming method
@@ -390,16 +390,12 @@ main(int argc, char* argv[])
     {
         idealBeamformingHelper->SetAttribute("BeamformingMethod",
                                              TypeIdValue(CellScanBeamforming::GetTypeId()));
-        idealBeamformingHelper->SetBeamformingAlgorithmAttribute("BeamSearchAngleStep",
-                                                                 DoubleValue(beamSearchAngleStep));
     }
     else
     {
         idealBeamformingHelper->SetAttribute("BeamformingMethod",
                                              TypeIdValue(DirectPathBeamforming::GetTypeId()));
     }
-
-    nrHelper->InitializeOperationBand(&band);
     allBwps = CcBwpCreator::GetAllBwps({band});
 
     double x = pow(10, totalTxPower / 10);
@@ -433,114 +429,76 @@ main(int argc, char* argv[])
     NetDeviceContainer gnbNetDev = nrHelper->InstallGnbDevice(gNbNodes, allBwps);
     NetDeviceContainer ueNetDev = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+    nrHelper->AssignStreams({.gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     if (contiguousCc)
     {
         // Manually set the attribute of the netdevice (gnbNetDev.Get (0)) and bandwidth part (0),
         // (1), ...
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
             ->SetAttribute("Numerology", UintegerValue(numerology));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
             ->SetAttribute("TxPower", DoubleValue(10 * log10(0.25 * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Pattern", StringValue(pattern));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Pattern", StringValue(pattern));
 
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
             ->SetAttribute("Numerology", UintegerValue(numerology));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
             ->SetAttribute("TxPower", DoubleValue(10 * log10(0.25 * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("Pattern", StringValue(pattern));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("Pattern", StringValue(pattern));
 
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
             ->SetAttribute("Numerology", UintegerValue(numerology));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
             ->SetAttribute("TxPower", DoubleValue(10 * log10(0.25 * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Pattern", StringValue(pattern));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Pattern", StringValue(pattern));
 
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 3)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 3)
             ->SetAttribute("Numerology", UintegerValue(numerology));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 3)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 3)
             ->SetAttribute("TxPower", DoubleValue(10 * log10(0.25 * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 3)->SetAttribute("Pattern", StringValue(pattern));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 3)->SetAttribute("Pattern", StringValue(pattern));
     }
     else
     {
         // Set the attribute of the netdevice (gnbNetDev.Get (0)) and bandwidth part (0), (1), ...
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
             ->SetAttribute("Numerology", UintegerValue(numerologyCc0Bwp0));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
             ->SetAttribute(
                 "TxPower",
                 DoubleValue(10 *
                             log10((band.GetBwpAt(0, 0)->m_channelBandwidth / bandwidthBand) * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Pattern", StringValue(pattern));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Pattern", StringValue(pattern));
 
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
             ->SetAttribute("Numerology", UintegerValue(numerologyCc0Bwp1));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
             ->SetAttribute(
                 "TxPower",
                 DoubleValue(10 *
                             log10((band.GetBwpAt(1, 0)->m_channelBandwidth / bandwidthBand) * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("Pattern", StringValue(pattern));
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)->SetAttribute("Pattern", StringValue(pattern));
 
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
             ->SetAttribute("Numerology", UintegerValue(numerologyCc1Bwp0));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)
             ->SetAttribute(
                 "TxPower",
                 DoubleValue(10 *
                             log10((band.GetBwpAt(1, 1)->m_channelBandwidth / bandwidthBand) * x)));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Pattern", StringValue(pattern));
-    }
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 2)->SetAttribute("Pattern", StringValue(pattern));
     }
 
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
     internet.Install(ueNodes);
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
-
-    Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress(1);
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB before creating the dedicated flows
     nrHelper->AttachToClosestGnb(ueNetDev, gnbNetDev);
@@ -568,36 +526,36 @@ main(int argc, char* argv[])
                 dlClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
                 clientApps.Add(dlClient.Install(remoteHost));
 
-                Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-                NrEpcTft::PacketFilter dlpf;
+                Ptr<NrQosRule> rule = Create<NrQosRule>();
+                NrQosRule::PacketFilter dlpf;
                 dlpf.localPortStart = dlPort;
                 dlpf.localPortEnd = dlPort;
                 ++dlPort;
-                tft->Add(dlpf);
+                rule->Add(dlpf);
 
-                enum NrEpsBearer::Qci q;
+                enum NrQosFlow::FiveQi q;
                 if (flow == 0)
                 {
-                    q = NrEpsBearer::NGBR_LOW_LAT_EMBB;
+                    q = NrQosFlow::NGBR_LOW_LAT_EMBB;
                 }
                 else if (flow == 1)
                 {
-                    q = NrEpsBearer::GBR_CONV_VOICE;
+                    q = NrQosFlow::GBR_CONV_VOICE;
                 }
                 else if (flow == 2)
                 {
-                    q = NrEpsBearer::NGBR_VIDEO_TCP_PREMIUM;
+                    q = NrQosFlow::NGBR_VIDEO_TCP_PREMIUM;
                 }
                 else if (flow == 3)
                 {
-                    q = NrEpsBearer::NGBR_VOICE_VIDEO_GAMING;
+                    q = NrQosFlow::NGBR_VOICE_VIDEO_GAMING;
                 }
                 else
                 {
-                    q = NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT;
+                    q = NrQosFlow::NGBR_VIDEO_TCP_DEFAULT;
                 }
-                NrEpsBearer bearer(q);
-                nrHelper->ActivateDedicatedEpsBearer(ueNetDev.Get(u), bearer, tft);
+                NrQosFlow flow(q);
+                nrHelper->ActivateDedicatedQosFlow(ueNetDev.Get(u), flow, rule);
             }
 
             if (!disableUl)
@@ -607,42 +565,42 @@ main(int argc, char* argv[])
                     InetSocketAddress(Ipv4Address::GetAny(), ulPort));
                 serverApps.Add(ulPacketSinkHelper.Install(remoteHost));
 
-                UdpClientHelper ulClient(remoteHostAddr, ulPort);
+                UdpClientHelper ulClient(remoteHostIpv4Address, ulPort);
                 ulClient.SetAttribute("PacketSize", UintegerValue(udpPacketSizeBe));
                 ulClient.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaUll)));
                 ulClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
                 clientApps.Add(ulClient.Install(ueNodes.Get(u)));
 
-                Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-                NrEpcTft::PacketFilter ulpf;
+                Ptr<NrQosRule> rule = Create<NrQosRule>();
+                NrQosRule::PacketFilter ulpf;
                 ulpf.remotePortStart = ulPort;
                 ulpf.remotePortEnd = ulPort;
                 ++ulPort;
-                tft->Add(ulpf);
+                rule->Add(ulpf);
 
-                enum NrEpsBearer::Qci q;
+                enum NrQosFlow::FiveQi q;
                 if (flow == 0)
                 {
-                    q = NrEpsBearer::NGBR_LOW_LAT_EMBB;
+                    q = NrQosFlow::NGBR_LOW_LAT_EMBB;
                 }
                 else if (flow == 1)
                 {
-                    q = NrEpsBearer::GBR_CONV_VOICE;
+                    q = NrQosFlow::GBR_CONV_VOICE;
                 }
                 else if (flow == 2)
                 {
-                    q = NrEpsBearer::NGBR_VIDEO_TCP_PREMIUM;
+                    q = NrQosFlow::NGBR_VIDEO_TCP_PREMIUM;
                 }
                 else if (flow == 3)
                 {
-                    q = NrEpsBearer::NGBR_VOICE_VIDEO_GAMING;
+                    q = NrQosFlow::NGBR_VOICE_VIDEO_GAMING;
                 }
                 else
                 {
-                    q = NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT;
+                    q = NrQosFlow::NGBR_VIDEO_TCP_DEFAULT;
                 }
-                NrEpsBearer bearer(q);
-                nrHelper->ActivateDedicatedEpsBearer(ueNetDev.Get(u), bearer, tft);
+                NrQosFlow flow(q);
+                nrHelper->ActivateDedicatedQosFlow(ueNetDev.Get(u), flow, rule);
             }
         }
     }
@@ -696,9 +654,7 @@ main(int argc, char* argv[])
 
     outFile.setf(std::ios_base::fixed);
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;
@@ -752,6 +708,8 @@ main(int argc, char* argv[])
 
     outFile.close();
 
+    bool failed = averageFlowThroughput == 0.0 || stats.empty();
+
     std::ifstream f(filename.c_str());
 
     if (f.is_open())
@@ -760,5 +718,5 @@ main(int argc, char* argv[])
     }
 
     Simulator::Destroy();
-    return 0;
+    return failed;
 }

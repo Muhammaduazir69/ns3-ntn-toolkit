@@ -20,10 +20,10 @@ namespace ns3
 namespace olsr
 {
 /**
- * \ingroup olsr-test
- * \ingroup tests
+ * @ingroup olsr-test
+ * @ingroup tests
  *
- * \brief Less trivial test of OLSR Topology Control message generation
+ * @brief Less trivial test of OLSR Topology Control message generation
  *
  * This test simulates 3 Wi-Fi stations with chain topology and runs OLSR without any extra traffic.
  * It is expected that only second station will send TC messages.
@@ -32,7 +32,7 @@ namespace olsr
  */
 // clang-format off
 /**
- * \verbatim
+ * @verbatim
           1       2       3
           |<------|------>|         HELLO (empty) src = 10.1.1.2
           |       |<------|------>  HELLO (empty) src = 10.1.1.3
@@ -65,9 +65,10 @@ namespace olsr
    <------|------>|       |         HELLO (Link Type: MPR Link, Neighbor: 10.1.1.2) src = 10.1.1.1
           |       |<------|------>  HELLO (Link Type: MPR Link, Neighbor: 10.1.1.2) src = 10.1.1.3
           |<------|------>|         HELLO (Link Type: Symmetric, Neighbor: 10.1.1.3; Link Type: Symmetric, Neighbor: 10.1.1.1) src = 10.1.1.2
-   \endverbatim
+   @endverbatim
  */
 // clang-format on
+
 class TcRegressionTest : public TestCase
 {
   public:
@@ -83,7 +84,7 @@ class TcRegressionTest : public TestCase
 
     /**
      * Receive raw data on node A
-     * \param socket receiving socket
+     * @param socket receiving socket
      */
     void ReceivePktProbeA(Ptr<Socket> socket);
     /// Packet counter on node A
@@ -93,7 +94,7 @@ class TcRegressionTest : public TestCase
 
     /**
      * Receive raw data on node B
-     * \param socket receiving socket
+     * @param socket receiving socket
      */
     void ReceivePktProbeB(Ptr<Socket> socket);
     /// Packet counter on node B
@@ -103,7 +104,7 @@ class TcRegressionTest : public TestCase
 
     /**
      * Receive raw data on node C
-     * \param socket receiving socket
+     * @param socket receiving socket
      */
     void ReceivePktProbeC(Ptr<Socket> socket);
     /// Packet counter on node C

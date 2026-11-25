@@ -77,6 +77,11 @@ PointAtElevation(double hM, double elDeg, double sign)
 class CircularOrbitMobility : public MobilityModel
 {
   public:
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<CircularOrbitMobility>(*this);
+    }
+
     static TypeId GetTypeId()
     {
         static TypeId tid = TypeId("ns3::NtnRrcDepthCircularOrbitMobility")
@@ -161,7 +166,7 @@ class TaMaxRoundTripTr38821Test : public TestCase
 {
   public:
     TaMaxRoundTripTr38821Test()
-        : TestCase("TR 38.821 Table 5.3.2.1-1: max RTD 25.77/12.89 ms LEO-600, 541.46/270.73 ms GEO")
+        : TestCase("TR 38.821 Table 5.3.2.1-1: max RTD 25.77-12.89 ms LEO-600, 541.46-270.73 ms GEO")
     {
     }
 
@@ -211,7 +216,7 @@ class TaAlongLeoPassTest : public TestCase
 {
   public:
     TaAlongLeoPassTest()
-        : TestCase("TA along a LEO-600 pass: 2d/c, drift = 2 rdot/c, |drift| <= 2v/c, one sign change")
+        : TestCase("TA along a LEO-600 pass: 2d-c, drift = 2 rdot-c, -drift- <= 2v-c, one sign change")
     {
     }
 
@@ -282,7 +287,7 @@ class Sib19OverRangeDelayLinkTest : public TestCase
 {
   public:
     Sib19OverRangeDelayLinkTest()
-        : TestCase("SIB19 as UDP over a slant-range-delay link: delay = d/c, error < Te_NTN, outage")
+        : TestCase("SIB19 as UDP over a slant-range-delay link: delay = d-c, error < Te_NTN, outage")
     {
     }
 
@@ -547,7 +552,7 @@ class LocationReporterUnderMotionTest : public TestCase
 {
   public:
     LocationReporterUnderMotionTest()
-        : TestCase("Location reporter: event trigger at 100 m on a 30 m/s UE, periodic count, noise")
+        : TestCase("Location reporter: event trigger at 100 m on a 30 m-s UE, periodic count, noise")
     {
     }
 

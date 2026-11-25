@@ -11,6 +11,7 @@
 
 #include "ns3/callback.h"
 #include "ns3/simple-ref-count.h"
+#include "ns3/wifi-export.h"
 
 #include <map>
 
@@ -24,11 +25,11 @@ class Mac48Address;
 class WifiMpdu;
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  *
  * This class handles duplicate detection and recomposition of fragments.
  */
-class MacRxMiddle : public SimpleRefCount<MacRxMiddle>
+class WIFI_EXPORT MacRxMiddle : public SimpleRefCount<MacRxMiddle>
 {
   public:
     /**
@@ -42,15 +43,15 @@ class MacRxMiddle : public SimpleRefCount<MacRxMiddle>
     /**
      * Set a callback to forward the packet up.
      *
-     * \param callback the callback to set
+     * @param callback the callback to set
      */
     void SetForwardCallback(ForwardUpCallback callback);
 
     /**
      * Receive an MPDU on the given link.
      *
-     * \param mpdu the MPDU
-     * \param linkId the ID of the given link
+     * @param mpdu the MPDU
+     * @param linkId the ID of the given link
      */
     void Receive(Ptr<const WifiMpdu> mpdu, uint8_t linkId);
 
@@ -59,22 +60,23 @@ class MacRxMiddle : public SimpleRefCount<MacRxMiddle>
     friend class MacRxMiddleTest;
     /**
      * Look up for OriginatorRxStatus associated with the sender address
-     * (by looking at ADDR2 field in the header).
+     * (by looking at ADDR2 field in the header) for unicast. For groupcast,
+     * the (nonconcealed) group address is used instead.
      * The method creates a new OriginatorRxStatus if one is not already presented.
      *
-     * \param hdr the MAC header
+     * @param mpdu the received MPDU
      *
-     * \return OriginatorRxStatus
+     * @return OriginatorRxStatus
      */
-    OriginatorRxStatus& Lookup(const WifiMacHeader& hdr);
+    OriginatorRxStatus& Lookup(Ptr<const WifiMpdu> mpdu);
     /**
      * Check if we have already received the packet from the sender before
      * (by looking at the sequence control field).
      *
-     * \param hdr the MAC header
-     * \param originator the packet originator status
+     * @param hdr the MAC header
+     * @param originator the packet originator status
      *
-     * \return true if we already received the packet previously,
+     * @return true if we already received the packet previously,
      *         false otherwise
      */
     bool IsDuplicate(const WifiMacHeader& hdr, const OriginatorRxStatus& originator) const;
@@ -86,11 +88,11 @@ class MacRxMiddle : public SimpleRefCount<MacRxMiddle>
      * If the packet is the last fragment, the method tries to re-construct the full packet
      * and return the packet if success.
      *
-     * \param packet the packet
-     * \param hdr the MAC header
-     * \param originator the packet originator status
+     * @param packet the packet
+     * @param hdr the MAC header
+     * @param originator the packet originator status
      *
-     * \return a packet if the packet is successfully reassembled (or not a fragment),
+     * @return a packet if the packet is successfully reassembled (or not a fragment),
      *         0 if we failed to reassemble the packet (e.g. missing fragments/out-of-order).
      */
     Ptr<const Packet> HandleFragments(Ptr<const Packet> packet,

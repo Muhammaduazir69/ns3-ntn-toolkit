@@ -93,7 +93,7 @@ YansWifiChannel::Send(Ptr<YansWifiPhy> sender, Ptr<const WifiPpdu> ppdu, dBm_u t
 
             auto receiverMobility = (*i)->GetMobility()->GetObject<MobilityModel>();
             const auto delay = m_delay->GetDelay(senderMobility, receiverMobility);
-            const auto rxPower = m_loss->CalcRxPower(txPower, senderMobility, receiverMobility);
+            const dBm_u rxPower{m_loss->CalcRxPower(txPower, senderMobility, receiverMobility)};
             NS_LOG_DEBUG("propagation: txPower="
                          << txPower << "dBm, rxPower=" << rxPower << "dBm, "
                          << "distance=" << senderMobility->GetDistanceFrom(receiverMobility)
@@ -129,14 +129,19 @@ YansWifiChannel::Receive(Ptr<YansWifiPhy> phy, Ptr<const WifiPpdu> ppdu, dBm_u r
     // Current implementation assumes constant RX power over the PPDU duration
     // Compare received TX power per MHz to normalized RX sensitivity
     const auto txWidth = ppdu->GetTxChannelWidth();
-    if (totalRxPower < phy->GetRxSensitivity() + RatioToDb(txWidth / 20.0))
+    if (totalRxPower < phy->GetRxSensitivity() + RatioToDb(txWidth / MHz_u{20}))
     {
         NS_LOG_INFO("Received signal too weak to process: " << rxPower << " dBm");
         return;
     }
     RxPowerWattPerChannelBand rxPowerW;
-    rxPowerW.insert({{{{0, 0}}, {{0, 0}}}, (DbmToW(totalRxPower))}); // dummy band for YANS
-    phy->StartReceivePreamble(ppdu, rxPowerW, ppdu->GetTxDuration());
+    rxPowerW.insert(
+        {{{{0, 0}}, {{Hz_u{0}, Hz_u{0}}}}, (DbmToW(totalRxPower))}); // dummy band for YANS
+    // Use ScheduleNow so StartReceivePreamble runs after all cleanup callbacks
+    // Capture by value to avoid dangling references after this function returns
+    Simulator::ScheduleNow([phy, ppdu, rxPowerW]() mutable {
+        phy->StartReceivePreamble(ppdu, rxPowerW, ppdu->GetTxDuration());
+    });
 }
 
 std::size_t

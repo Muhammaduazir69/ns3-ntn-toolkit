@@ -6,23 +6,23 @@
 
 #include "nr-spectrum-value-helper.h"
 
-#include <ns3/abort.h>
-#include <ns3/beamforming-vector.h>
-#include <ns3/buildings-module.h>
-#include <ns3/config.h>
-#include <ns3/double.h>
-#include <ns3/enum.h>
-#include <ns3/log.h>
-#include <ns3/mobility-model.h>
-#include <ns3/node.h>
-#include <ns3/nr-gnb-net-device.h>
-#include <ns3/nr-spectrum-phy.h>
-#include <ns3/nr-ue-net-device.h>
-#include <ns3/pointer.h>
-#include <ns3/simulator.h>
-#include <ns3/spectrum-converter.h>
-#include <ns3/string.h>
-#include <ns3/uinteger.h>
+#include "ns3/abort.h"
+#include "ns3/beamforming-vector.h"
+#include "ns3/buildings-module.h"
+#include "ns3/config.h"
+#include "ns3/double.h"
+#include "ns3/enum.h"
+#include "ns3/log.h"
+#include "ns3/mobility-model.h"
+#include "ns3/node.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/nr-spectrum-phy.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/pointer.h"
+#include "ns3/simulator.h"
+#include "ns3/spectrum-converter.h"
+#include "ns3/string.h"
+#include "ns3/uinteger.h"
 
 #include <fstream>
 #include <limits>
@@ -310,7 +310,7 @@ NrRadioEnvironmentMapHelper::ConfigureRrd(const Ptr<NetDevice>& rrdDevice)
     Ptr<MobilityBuildingInfo> buildingInfo = CreateObject<MobilityBuildingInfo>();
     m_rrd.mob->AggregateObject(buildingInfo);
 
-    m_rrd.antenna = m_deviceToAntenna.find(rrdDevice)->second;
+    m_rrd.antenna = CopyAntenna(m_deviceToAntenna.find(rrdDevice)->second);
 
     m_noisePsd = NrSpectrumValueHelper::CreateNoisePowerSpectralDensity(m_rrdPhy->GetNoiseFigure(),
                                                                         m_rrd.spectrumModel);
@@ -319,13 +319,35 @@ NrRadioEnvironmentMapHelper::ConfigureRrd(const Ptr<NetDevice>& rrdDevice)
         m_rrdPhy); // we can call only once configuration of prop.models
 }
 
+Ptr<UniformPlanarArray>
+NrRadioEnvironmentMapHelper::CopyAntenna(Ptr<UniformPlanarArray> antenna) const
+{
+    NS_ABORT_MSG_IF(antenna == nullptr, "antenna is null");
+    Ptr<UniformPlanarArray> copy = CreateObject<UniformPlanarArray>();
+    TypeId tid = antenna->GetInstanceTypeId();
+    NS_ABORT_MSG_IF(tid != UniformPlanarArray::GetTypeId(), "Expected UniformPlanarArray instance");
+    for (uint32_t i = 0; i < tid.GetAttributeN(); ++i)
+    {
+        const auto info = tid.GetAttribute(i);
+        const std::string attrName = info.name;
+        Ptr<AttributeValue> attrValue = info.checker->Create();
+        bool ok = antenna->GetAttributeFailSafe(attrName, *attrValue);
+        NS_ASSERT_MSG(ok, "Failed to obtain an attribute " << attrName);
+        ok = copy->SetAttributeFailSafe(attrName, *attrValue);
+        NS_ASSERT_MSG(ok, "Failed to copy an attribute " << attrName);
+    }
+    copy->SetAntennaElement(
+        ConstCast<AntennaModel, const AntennaModel>(antenna->GetAntennaElement()));
+    copy->SetBeamformingVector(antenna->GetBeamformingVector());
+    return copy;
+}
+
 void
 NrRadioEnvironmentMapHelper::ConfigureRtdList(const NetDeviceContainer& rtdDevs)
 {
     NS_LOG_FUNCTION(this);
 
-    for (NetDeviceContainer::Iterator netDevIt = rtdDevs.Begin(); netDevIt != rtdDevs.End();
-         ++netDevIt)
+    for (auto netDevIt = rtdDevs.Begin(); netDevIt != rtdDevs.End(); ++netDevIt)
     {
         Ptr<NrPhy> rtdPhy = m_rtdDeviceToPhy.find(*netDevIt)->second;
         if (rtdPhy->GetSpectrumModel() != m_rrd.spectrumModel)
@@ -354,7 +376,7 @@ NrRadioEnvironmentMapHelper::ConfigureRtdList(const NetDeviceContainer& rtdDevs)
         Ptr<MobilityBuildingInfo> buildingInfo = CreateObject<MobilityBuildingInfo>();
         rtd.mob->AggregateObject(buildingInfo);
 
-        rtd.antenna = m_deviceToAntenna.find(*netDevIt)->second;
+        rtd.antenna = CopyAntenna(m_deviceToAntenna.find(*netDevIt)->second);
 
         rtd.txPower = rtdPhy->GetTxPower();
 
@@ -509,8 +531,7 @@ NrRadioEnvironmentMapHelper::CreateRem(const NetDeviceContainer& rtdNetDev,
 {
     NS_LOG_FUNCTION(this);
 
-    for (NetDeviceContainer::Iterator netDevIt = rtdNetDev.Begin(); netDevIt != rtdNetDev.End();
-         ++netDevIt)
+    for (auto netDevIt = rtdNetDev.Begin(); netDevIt != rtdNetDev.End(); ++netDevIt)
     {
         Ptr<NrGnbNetDevice> gnbRtdNetDevice = DynamicCast<NrGnbNetDevice>(*netDevIt);
         Ptr<NrUeNetDevice> ueRtdNetDevice = DynamicCast<NrUeNetDevice>(*netDevIt);
@@ -574,9 +595,7 @@ NrRadioEnvironmentMapHelper::SaveAntennasWithUserDefinedBeams(const NetDeviceCon
     m_deviceToAntenna.insert(std::make_pair(
         rrdDevice,
         Copy(m_rrdPhy->GetSpectrumPhy()->GetAntenna()->GetObject<UniformPlanarArray>())));
-    for (NetDeviceContainer::Iterator rtdNetDevIt = rtdNetDev.Begin();
-         rtdNetDevIt != rtdNetDev.End();
-         ++rtdNetDevIt)
+    for (auto rtdNetDevIt = rtdNetDev.Begin(); rtdNetDevIt != rtdNetDev.End(); ++rtdNetDevIt)
     {
         Ptr<NrPhy> rtdPhy = m_rtdDeviceToPhy.find(*rtdNetDevIt)->second;
         m_deviceToAntenna.insert(std::make_pair(
@@ -693,11 +712,11 @@ NrRadioEnvironmentMapHelper::CalcRxPsdValue(RemDevice& device, RemDevice& otherD
 {
     PropagationModels tempPropModels = CreateTemporalPropagationModels();
 
-    std::vector<int> activeRbs;
-    for (size_t rbId = 0; rbId < device.spectrumModel->GetNumBands(); rbId++)
-    {
-        activeRbs.push_back(rbId);
-    }
+    // create a new antenna ID to enforce new channel generation (adjacency matrix saves all the
+    // channels)
+    device.antenna = CopyAntenna(device.antenna);
+    std::vector<int> activeRbs(device.spectrumModel->GetNumBands());
+    std::iota(activeRbs.begin(), activeRbs.end(), 0);
 
     Ptr<const SpectrumValue> txPsd = NrSpectrumValueHelper::CreateTxPowerSpectralDensity(
         device.txPower,
@@ -740,12 +759,14 @@ NrRadioEnvironmentMapHelper::CalcRxPsdValue(RemDevice& device, RemDevice& otherD
     NS_LOG_DEBUG("RX power in dBm after pathloss:" << WToDbm(Integral(*(rxParams->psd))));
 
     // Now we call spectrum model, which in this keys add a beamforming gain
-    rxParams =
-        tempPropModels.remSpectrumLossModelCopy->DoCalcRxPowerSpectralDensity(rxParams,
-                                                                              device.mob,
-                                                                              otherDevice.mob,
-                                                                              device.antenna,
-                                                                              otherDevice.antenna);
+    rxParams = tempPropModels.remSpectrumLossModelCopy->DoCalcRxPowerSpectralDensity(
+        rxParams,
+        device.mob,
+        otherDevice.mob,
+        device.antenna,
+        otherDevice.antenna,
+        device.antenna->GetBeamformingVector(),
+        otherDevice.antenna->GetBeamformingVector());
 
     NS_LOG_DEBUG("RX power in dBm after fading: " << WToDbm(Integral(*(rxParams->psd))));
 
@@ -827,7 +848,7 @@ NrRadioEnvironmentMapHelper::CalculateSir(
     if (interferenceSignals.empty())
     {
         // return CalculateSnr (usefulSignal);
-        SpectrumValue signal = (*usefulSignal);
+        const SpectrumValue& signal = (*usefulSignal);
         return RatioToDb(Sum(signal) / signal.GetSpectrumModel()->GetNumBands());
     }
     else
@@ -856,13 +877,11 @@ NrRadioEnvironmentMapHelper::CalculateMaxSinr(
     // interferers
     std::list<double> sinrList;
 
-    for (std::list<Ptr<SpectrumValue>>::const_iterator it = receivedPowerList.begin();
-         it != receivedPowerList.end();
-         it++)
+    for (auto it = receivedPowerList.begin(); it != receivedPowerList.end(); it++)
     {
         // all signals - rxPower = interference
         std::list<Ptr<SpectrumValue>> interferenceSignals;
-        std::list<Ptr<SpectrumValue>>::const_iterator tempit = it;
+        auto tempit = it;
 
         if (it != receivedPowerList.begin())
         {
@@ -884,13 +903,11 @@ NrRadioEnvironmentMapHelper::CalculateMaxSir(
     // interferers
     std::list<double> sirList;
 
-    for (std::list<Ptr<SpectrumValue>>::const_iterator it = receivedPowerList.begin();
-         it != receivedPowerList.end();
-         it++)
+    for (auto it = receivedPowerList.begin(); it != receivedPowerList.end(); it++)
     {
         // all signals - rxPower = interference
         std::list<Ptr<SpectrumValue>> interferenceSignals;
-        std::list<Ptr<SpectrumValue>>::const_iterator tempit = it;
+        auto tempit = it;
 
         if (it != receivedPowerList.begin())
         {
@@ -912,8 +929,7 @@ NrRadioEnvironmentMapHelper::CalcBeamShapeRemMap()
     uint32_t remSizeNextReport = m_rem.size() / 100;
     uint32_t remPointCounter = 0;
 
-    for (std::list<RemPoint>::iterator itRemPoint = m_rem.begin(); itRemPoint != m_rem.end();
-         ++itRemPoint)
+    for (auto itRemPoint = m_rem.begin(); itRemPoint != m_rem.end(); ++itRemPoint)
     {
         // perform calculation m_numOfIterationsToAverage times and get the average value
         double sumSnr = 0.0;
@@ -1037,8 +1053,7 @@ NrRadioEnvironmentMapHelper::CalcCoverageAreaRemMap()
     uint32_t remSizeNextReport = m_rem.size() / 100;
     uint32_t remPointCounter = 0;
 
-    for (std::list<RemPoint>::iterator itRemPoint = m_rem.begin(); itRemPoint != m_rem.end();
-         ++itRemPoint)
+    for (auto itRemPoint = m_rem.begin(); itRemPoint != m_rem.end(); ++itRemPoint)
     {
         // perform calculation m_numOfIterationsToAverage times and get the average value
         double sumSnr = 0.0;
@@ -1065,9 +1080,7 @@ NrRadioEnvironmentMapHelper::CalcCoverageAreaRemMap()
 
             // For each beam configuration at RemPoint/RRD we should calculate SINR, there are as
             // many beam configurations at RemPoint as many RTDs
-            for (std::list<RemDevice>::iterator itRtdBeam = m_remDev.begin();
-                 itRtdBeam != m_remDev.end();
-                 ++itRtdBeam)
+            for (auto itRtdBeam = m_remDev.begin(); itRtdBeam != m_remDev.end(); ++itRtdBeam)
             {
                 // configure RRD beam toward RTD
                 ConfigureDirectPathBfv(m_rrd, *itRtdBeam, m_rrd.antenna);
@@ -1166,10 +1179,10 @@ NrRadioEnvironmentMapHelper::PrintProgressReport(uint32_t* remSizeNextReport)
     double minutesUpToNow = ((double)remElapsedSecondsUpToNow.count()) / 60;
     double minutesLeftEstimated =
         ((double)(minutesUpToNow) / *remSizeNextReport) * ((m_rem.size() - *remSizeNextReport));
-    std::cout << "\n REM done:" << ceil(((double)*remSizeNextReport / m_rem.size()) * 100) << " %."
+    std::cout << " REM done:" << ceil(((double)*remSizeNextReport / m_rem.size()) * 100) << " %."
               << " Minutes up to now: " << minutesUpToNow
               << ". Minutes left estimated:" << minutesLeftEstimated
-              << "."; // how many times will be called CalcRxPsdValues
+              << ".\n"; // how many times will be called CalcRxPsdValues
     // we want progress report for 1%, 10%, 20%, 30%, and so on
     if (*remSizeNextReport < m_rem.size() / 10)
     {
@@ -1360,7 +1373,7 @@ NrRadioEnvironmentMapHelper::PrintGnuplottableBuildingListToFile(const std::stri
 
     uint32_t index = 0;
 
-    for (BuildingList::Iterator it = BuildingList::Begin(); it != BuildingList::End(); ++it)
+    for (auto it = BuildingList::Begin(); it != BuildingList::End(); ++it)
     {
         ++index;
         Box box = (*it)->GetBoundaries();

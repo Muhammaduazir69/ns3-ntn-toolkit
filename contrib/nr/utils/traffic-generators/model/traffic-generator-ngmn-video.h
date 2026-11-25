@@ -8,7 +8,8 @@
 
 #include "traffic-generator.h"
 
-#include <ns3/random-variable-stream.h>
+#include "ns3/nr-export.h"
+#include "ns3/random-variable-stream.h"
 
 namespace ns3
 {
@@ -30,14 +31,14 @@ class TrafficGeneratorNgmnVideoTestCase;
  * assume a source video rate of 64 kbps.
  */
 
-class TrafficGeneratorNgmnVideo : public TrafficGenerator
+class NR_EXPORT TrafficGeneratorNgmnVideo : public TrafficGenerator
 {
     friend TrafficGeneratorNgmnVideoTestCase;
 
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -50,8 +51,8 @@ class TrafficGeneratorNgmnVideo : public TrafficGenerator
      * used by this model. Return the number of streams (possibly zero) that
      * have been assigned.
      *
-     * \param stream first stream index to use
-     * \return the number of stream indices assigned by this model
+     * @param stream first stream index to use
+     * @return the number of stream indices assigned by this model
      */
     int64_t AssignStreams(int64_t stream) override;
 
@@ -67,17 +68,17 @@ class TrafficGeneratorNgmnVideo : public TrafficGenerator
     // inherited from TrafficGenerator
     void PacketBurstSent() override;
     /**
-     * \brief Get the amount of data to transfer
-     * \return the amount of data to transfer
+     * @brief Get the amount of data to transfer
+     * @return the amount of data to transfer
      */
     uint32_t GetNextPacketSize() const override;
     /**
-     * \brief Get the relative time when the next packet should be sent
-     * \return the relative time when the next packet will be sent
+     * @brief Get the relative time when the next packet should be sent
+     * @return the relative time when the next packet will be sent
      */
     Time GetNextPacketTime() const override;
     /**
-     * \brief Generates the frame length in number of packets
+     * @brief Generates the frame length in number of packets
      */
     void GenerateNextPacketBurstSize() override;
 

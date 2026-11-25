@@ -27,7 +27,7 @@ namespace ns3
 NS_LOG_COMPONENT_DEFINE("Athstats");
 
 AthstatsHelper::AthstatsHelper()
-    : m_interval(Seconds(1.0))
+    : m_interval(Seconds(1))
 {
 }
 
@@ -110,7 +110,7 @@ AthstatsWifiTraceSink::GetTypeId()
                             .AddConstructor<AthstatsWifiTraceSink>()
                             .AddAttribute("Interval",
                                           "Time interval between reports",
-                                          TimeValue(Seconds(1.0)),
+                                          TimeValue(Seconds(1)),
                                           MakeTimeAccessor(&AthstatsWifiTraceSink::m_interval),
                                           MakeTimeChecker());
     return tid;
@@ -234,10 +234,10 @@ AthstatsWifiTraceSink::PhyTxTrace(std::string context,
                                   Ptr<const Packet> packet,
                                   WifiMode mode,
                                   WifiPreamble preamble,
-                                  uint8_t txPower)
+                                  uint8_t txPowerLevel)
 {
     NS_LOG_FUNCTION(this << context << packet << "PHYTX mode=" << mode << "Preamble=" << preamble
-                         << "Power=" << txPower);
+                         << "Power level=" << txPowerLevel);
     ++m_phyTxCount;
 }
 

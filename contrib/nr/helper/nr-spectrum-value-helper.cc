@@ -4,10 +4,10 @@
 
 #include "nr-spectrum-value-helper.h"
 
+#include "ns3/abort.h"
+#include "ns3/fatal-error.h"
+#include "ns3/log.h"
 #include "ns3/simulator.h"
-#include <ns3/abort.h>
-#include <ns3/fatal-error.h>
-#include <ns3/log.h>
 
 #include <cmath>
 #include <map>
@@ -22,9 +22,9 @@ struct NrSpectrumModelId
     /**
      * Constructor
      *
-     * \param f center frequency
-     * \param b bandwidth in RBs
-     * \param s subcarrierSpacing
+     * @param f center frequency
+     * @param b bandwidth in RBs
+     * @param s subcarrierSpacing
      */
     NrSpectrumModelId(double f, uint16_t b, double s);
     double frequency;   ///<
@@ -40,10 +40,10 @@ NrSpectrumModelId::NrSpectrumModelId(double f, uint16_t b, double s)
 }
 
 /**
- * \brief Operator < so that it can be the key in a g_nrSpectrumModelMap
- * \param a lhs
- * \param b rhs
- * \returns true if earfcn less than or if earfcn equal and bandwidth less than or if earfcn and
+ * @brief Operator < so that it can be the key in a g_nrSpectrumModelMap
+ * @param a lhs
+ * @param b rhs
+ * @returns true if earfcn less than or if earfcn equal and bandwidth less than or if earfcn and
  * bandwidth equal and sucarrier spacing less than
  */
 bool
@@ -66,8 +66,8 @@ NrSpectrumValueHelper::GetSpectrumModel(uint32_t numRbs,
     NS_LOG_FUNCTION(centerFrequency << numRbs << subcarrierSpacing);
 
     NS_ABORT_MSG_IF(numRbs == 0, "Total bandwidth cannot be 0 RBs");
-    NS_ABORT_MSG_IF(centerFrequency < 0.5e9 || centerFrequency > 100e9,
-                    "Central frequency should be in range from 0.5GHz to 100GHz");
+    NS_ABORT_MSG_IF(centerFrequency < 0.5e9 || centerFrequency > 150e9,
+                    "Central frequency should be in range from 0.5GHz to 150GHz");
     NS_ABORT_MSG_IF(subcarrierSpacing != 15000 && subcarrierSpacing != 30000 &&
                         subcarrierSpacing != 60000 && subcarrierSpacing != 120000 &&
                         subcarrierSpacing != 240000 && subcarrierSpacing != 480000,
@@ -186,7 +186,7 @@ NrSpectrumValueHelper::GetEffectiveBandwidth(double bandwidth, uint8_t numerolog
 {
     NS_LOG_FUNCTION(bandwidth << numerology);
     uint32_t scSpacing = 15000 * static_cast<uint32_t>(std::pow(2, numerology));
-    uint32_t numRbs = static_cast<uint32_t>(bandwidth / (scSpacing * SUBCARRIERS_PER_RB));
+    auto numRbs = static_cast<uint32_t>(bandwidth / (scSpacing * SUBCARRIERS_PER_RB));
     NS_LOG_DEBUG("Total bandwidth: " << bandwidth << " effective bandwidth:"
                                      << numRbs * (scSpacing * SUBCARRIERS_PER_RB));
     return numRbs * (scSpacing * SUBCARRIERS_PER_RB);

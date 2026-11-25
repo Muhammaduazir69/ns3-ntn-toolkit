@@ -28,8 +28,8 @@ static bool g_verbose = true;
 /**
  * MAC-level TX trace.
  *
- * \param context The context.
- * \param p The packet.
+ * @param context The context.
+ * @param p The packet.
  */
 void
 DevTxTrace(std::string context, Ptr<const Packet> p)
@@ -43,8 +43,8 @@ DevTxTrace(std::string context, Ptr<const Packet> p)
 /**
  * MAC-level RX trace.
  *
- * \param context The context.
- * \param p The packet.
+ * @param context The context.
+ * @param p The packet.
  */
 void
 DevRxTrace(std::string context, Ptr<const Packet> p)
@@ -58,11 +58,11 @@ DevRxTrace(std::string context, Ptr<const Packet> p)
 /**
  * PHY-level RX OK trace
  *
- * \param context The context.
- * \param packet The packet.
- * \param snr The SNR.
- * \param mode The wifi mode.
- * \param preamble The preamble.
+ * @param context The context.
+ * @param packet The packet.
+ * @param snr The SNR.
+ * @param mode The wifi mode.
+ * @param preamble The preamble.
  */
 void
 PhyRxOkTrace(std::string context,
@@ -80,9 +80,9 @@ PhyRxOkTrace(std::string context,
 /**
  * PHY-level RX error trace
  *
- * \param context The context.
- * \param packet The packet.
- * \param snr The SNR.
+ * @param context The context.
+ * @param packet The packet.
+ * @param snr The SNR.
  */
 void
 PhyRxErrorTrace(std::string context, Ptr<const Packet> packet, double snr)
@@ -96,11 +96,11 @@ PhyRxErrorTrace(std::string context, Ptr<const Packet> packet, double snr)
 /**
  * PHY-level TX trace.
  *
- * \param context The context.
- * \param packet The packet.
- * \param mode The wifi mode.
- * \param preamble The preamble.
- * \param txPower The TX power.
+ * @param context The context.
+ * @param packet The packet.
+ * @param mode The wifi mode.
+ * @param preamble The preamble.
+ * @param txPower The TX power.
  */
 void
 PhyTxTrace(std::string context,
@@ -118,10 +118,10 @@ PhyTxTrace(std::string context,
 /**
  * PHY state trace.
  *
- * \param context The context.
- * \param start Start time of the state.
- * \param duration Duration of the state.
- * \param state The state.
+ * @param context The context.
+ * @param start Start time of the state.
+ * @param duration Duration of the state.
+ * @param state The state.
  */
 void
 PhyStateTrace(std::string context, Time start, Time duration, WifiPhyState state)
@@ -136,7 +136,7 @@ PhyStateTrace(std::string context, Time start, Time duration, WifiPhyState state
 /**
  * Move a node position by 5m on the x axis every second, up to 210m.
  *
- * \param node The node.
+ * @param node The node.
  */
 static void
 AdvancePosition(Ptr<Node> node)
@@ -150,7 +150,7 @@ AdvancePosition(Ptr<Node> node)
     }
     mobility->SetPosition(pos);
 
-    Simulator::Schedule(Seconds(1.0), &AdvancePosition, node);
+    Simulator::Schedule(Seconds(1), &AdvancePosition, node);
 }
 
 int
@@ -196,7 +196,7 @@ main(int argc, char* argv[])
     mobility.Install(stas);
     mobility.Install(ap);
 
-    Simulator::Schedule(Seconds(1.0), &AdvancePosition, ap.Get(0));
+    Simulator::Schedule(Seconds(1), &AdvancePosition, ap.Get(0));
 
     PacketSocketAddress socket;
     socket.SetSingleDevice(staDevs.Get(0)->GetIfIndex());
@@ -208,9 +208,9 @@ main(int argc, char* argv[])
 
     ApplicationContainer apps = onoff.Install(stas.Get(0));
     apps.Start(Seconds(0.5));
-    apps.Stop(Seconds(43.0));
+    apps.Stop(Seconds(43));
 
-    Simulator::Stop(Seconds(44.0));
+    Simulator::Stop(Seconds(44));
 
     Config::Connect("/NodeList/*/DeviceList/*/Mac/MacTx", MakeCallback(&DevTxTrace));
     Config::Connect("/NodeList/*/DeviceList/*/Mac/MacRx", MakeCallback(&DevRxTrace));

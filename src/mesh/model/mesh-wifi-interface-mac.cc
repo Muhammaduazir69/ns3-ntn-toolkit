@@ -142,9 +142,9 @@ MeshWifiInterfaceMac::AssignStreams(int64_t stream)
     NS_LOG_FUNCTION(this << stream);
     int64_t currentStream = stream + WifiMac::AssignStreams(stream);
     m_coefficient->SetStream(currentStream++);
-    for (auto i = m_plugins.begin(); i < m_plugins.end(); i++)
+    for (auto& plugin : m_plugins)
     {
-        currentStream += (*i)->AssignStreams(currentStream);
+        currentStream += plugin->AssignStreams(currentStream);
     }
     return (currentStream - stream);
 }
@@ -178,7 +178,7 @@ MeshWifiInterfaceMac::SwitchFrequencyChannel(uint16_t new_id)
     NS_LOG_FUNCTION(this);
     NS_ASSERT(GetWifiPhy()); // need PHY to set/get channel
     /**
-     * \todo
+     * @todo
      * Correct channel switching is:
      *
      * 1. Interface down, e.g. to stop packets from layer 3
@@ -189,7 +189,7 @@ MeshWifiInterfaceMac::SwitchFrequencyChannel(uint16_t new_id)
      * Now we use dirty channel switch -- just change frequency
      */
     GetWifiPhy()->SetOperatingChannel(
-        WifiPhy::ChannelTuple{new_id, 0, GetWifiPhy()->GetPhyBand(), 0});
+        WifiPhy::ChannelTuple{static_cast<uint8_t>(new_id), 0, GetWifiPhy()->GetPhyBand(), 0});
     // Don't know NAV on new channel
     GetLink(SINGLE_LINK_OP_ID).channelAccessManager->NotifyNavResetNow(Seconds(0));
 }
@@ -213,7 +213,7 @@ MeshWifiInterfaceMac::Enqueue(Ptr<WifiMpdu> mpdu, Mac48Address to, Mac48Address 
     // Address 1 is unknown here. Routing plugin is responsible to correctly set it.
     hdr.SetAddr1(Mac48Address());
     // Filter packet through all installed plugins
-    for (auto i = m_plugins.end() - 1; i != m_plugins.begin() - 1; i--)
+    for (auto i = m_plugins.rbegin(); i != m_plugins.rend(); ++i)
     {
         bool drop = !((*i)->UpdateOutcomingFrame(packet, hdr, from, to));
         if (drop)
@@ -247,7 +247,7 @@ MeshWifiInterfaceMac::SendManagementFrame(Ptr<Packet> packet, const WifiMacHeade
 {
     // Filter management frames:
     WifiMacHeader header = hdr;
-    for (auto i = m_plugins.end() - 1; i != m_plugins.begin() - 1; i--)
+    for (auto i = m_plugins.rbegin(); i != m_plugins.rend(); ++i)
     {
         bool drop = !((*i)->UpdateOutcomingFrame(packet, header, Mac48Address(), Mac48Address()));
         if (drop)
@@ -519,7 +519,7 @@ void
 MeshWifiInterfaceMac::Statistics::Print(std::ostream& os) const
 {
     os << "<Statistics "
-          /// \todo txBeacons
+          /// @todo txBeacons
           "rxBeacons=\""
        << recvBeacons
        << "\" "
@@ -578,6 +578,6 @@ MeshWifiInterfaceMac::ConfigureContentionWindow(uint32_t cwMin, uint32_t cwMax)
     m_txop->SetMinCw(0);
     m_txop->SetMaxCw(0);
     m_txop->SetAifsn(1);
-    m_scheduler->SetWifiMac(this);
+    m_scheduler->SetWifiMacQueue(AC_BE_NQOS, m_txop->GetWifiMacQueue());
 }
 } // namespace ns3

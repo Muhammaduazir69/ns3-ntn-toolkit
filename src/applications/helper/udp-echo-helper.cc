@@ -8,6 +8,7 @@
 
 #include "udp-echo-helper.h"
 
+#include "ns3/address-utils.h"
 #include "ns3/udp-echo-client.h"
 #include "ns3/udp-echo-server.h"
 #include "ns3/uinteger.h"
@@ -21,17 +22,21 @@ UdpEchoServerHelper::UdpEchoServerHelper(uint16_t port)
     SetAttribute("Port", UintegerValue(port));
 }
 
-UdpEchoClientHelper::UdpEchoClientHelper(const Address& address, uint16_t port)
-    : ApplicationHelper(UdpEchoClient::GetTypeId())
+UdpEchoServerHelper::UdpEchoServerHelper(const Address& address)
+    : ApplicationHelper(UdpEchoServer::GetTypeId())
 {
-    SetAttribute("RemoteAddress", AddressValue(address));
-    SetAttribute("RemotePort", UintegerValue(port));
+    SetAttribute("Local", AddressValue(address));
+}
+
+UdpEchoClientHelper::UdpEchoClientHelper(const Address& address, uint16_t port)
+    : UdpEchoClientHelper(addressUtils::ConvertToSocketAddress(address, port))
+{
 }
 
 UdpEchoClientHelper::UdpEchoClientHelper(const Address& address)
     : ApplicationHelper(UdpEchoClient::GetTypeId())
 {
-    SetAttribute("RemoteAddress", AddressValue(address));
+    SetAttribute("Remote", AddressValue(address));
 }
 
 void

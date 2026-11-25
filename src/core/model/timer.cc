@@ -8,12 +8,11 @@
 #include "timer.h"
 
 #include "log.h"
-#include "simulation-singleton.h"
 #include "simulator.h"
 
 /**
- * \file
- * \ingroup timer
+ * @file
+ * @ingroup timer
  * ns3::Timer implementation.
  */
 
@@ -24,7 +23,7 @@ NS_LOG_COMPONENT_DEFINE("Timer");
 
 Timer::Timer()
     : m_flags(CHECK_ON_DESTROY),
-      m_delay(FemtoSeconds(0)),
+      m_delay(),
       m_event(),
       m_impl(nullptr)
 {
@@ -33,7 +32,7 @@ Timer::Timer()
 
 Timer::Timer(DestroyPolicy destroyPolicy)
     : m_flags(destroyPolicy),
-      m_delay(FemtoSeconds(0)),
+      m_delay(),
       m_event(),
       m_impl(nullptr)
 {

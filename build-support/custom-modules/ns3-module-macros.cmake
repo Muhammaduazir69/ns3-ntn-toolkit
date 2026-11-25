@@ -17,7 +17,7 @@ function(copy_headers_before_building_lib libname outputdir headers visibility)
 
     # If output directory does not exist, create it
     if(NOT (EXISTS ${outputdir}))
-      file(MAKE_DIRECTORY ${outputdir})
+      make_directory(${outputdir})
     endif()
 
     # If header already exists, skip symlinking/stub header creation
@@ -100,6 +100,11 @@ function(check_for_missing_libraries output_variable_name libraries)
       continue()
     endif()
 
+    # Match external imported targets out
+    if(lib MATCHES "^(ns3::)?[^:]+::.+$")
+      continue()
+    endif()
+
     # check if the example depends on disabled modules
     remove_lib_prefix("${lib}" lib)
 
@@ -125,18 +130,20 @@ endfunction()
 #
 # DEPRECATED_HEADER_FILES = "list;of;deprecated;.h;files", copy won't get triggered if DEPRECATED_HEADER_FILES isn't set
 # IGNORE_PCH = TRUE or FALSE, prevents the PCH from including undesired system libraries (e.g. custom GLIBC for DCE)
+# GENERATE_EXPORT_HEADER = TRUE or FALSE, auto-generate a header file to set *_EXPORT symbols for Windows builds
 # MODULE_ENABLED_FEATURES = "list;of;enabled;features;for;this;module" (used by fd-net-device)
 # cmake-format: on
 
 function(build_lib)
   # Argument parsing
-  set(options IGNORE_PCH)
+  set(options IGNORE_PCH GENERATE_EXPORT_HEADER)
   set(oneValueArgs LIBNAME)
   set(multiValueArgs
       SOURCE_FILES
       HEADER_FILES
       LIBRARIES_TO_LINK
       TEST_SOURCES
+      TEST_LIBRARIES_TO_LINK
       DEPRECATED_HEADER_FILES
       MODULE_ENABLED_FEATURES
       PRIVATE_HEADER_FILES
@@ -167,6 +174,35 @@ function(build_lib)
   # Set alias
   add_library(ns3::${BLIB_LIBNAME} ALIAS ${BLIB_LIBNAME})
 
+  set(export_file)
+  if(${BLIB_GENERATE_EXPORT_HEADER})
+    include(GenerateExportHeader)
+    string(TOUPPER "${BLIB_LIBNAME}" uppercase_libname)
+    string(
+      CONCAT force_undef_export
+             "\n// Undefine the *_EXPORT symbols for non-Windows based builds"
+             "\n#ifndef NS_MSVC"
+             "\n#undef ${uppercase_libname}_EXPORT"
+             "\n#define ${uppercase_libname}_EXPORT"
+             "\n#undef ${uppercase_libname}_NO_EXPORT"
+             "\n#define ${uppercase_libname}_NO_EXPORT"
+             "\n#endif"
+    )
+    set(export_file ${CMAKE_HEADER_OUTPUT_DIRECTORY}/${BLIB_LIBNAME}-export.h)
+
+    generate_export_header(
+      ${BLIB_LIBNAME} EXPORT_FILE_NAME ${export_file}
+      CUSTOM_CONTENT_FROM_VARIABLE force_undef_export
+    )
+
+    # In case building on Visual Studio
+    if(${MSVC})
+      target_compile_definitions(
+        ${BLIB_LIBNAME} PRIVATE ${BLIB_LIBNAME}_EXPORTS
+      )
+    endif()
+  endif()
+
   # Reuse PCH
   if(${PRECOMPILE_HEADERS_ENABLED} AND (NOT ${BLIB_IGNORE_PCH}))
     target_precompile_headers(${BLIB_LIBNAME} REUSE_FROM stdlib_pch)
@@ -177,11 +213,14 @@ function(build_lib)
     ${BLIB_LIBNAME}
     PROPERTIES
       PUBLIC_HEADER
-      "${BLIB_HEADER_FILES};${BLIB_DEPRECATED_HEADER_FILES};${CMAKE_HEADER_OUTPUT_DIRECTORY}/${BLIB_LIBNAME}-module.h"
+      "${BLIB_HEADER_FILES};${BLIB_DEPRECATED_HEADER_FILES};${CMAKE_HEADER_OUTPUT_DIRECTORY}/${BLIB_LIBNAME}-module.h;${export_file}"
       PRIVATE_HEADER "${BLIB_PRIVATE_HEADER_FILES}"
-      RUNTIME_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} # set output
-                                                                 # directory for
-                                                                 # DLLs
+      # set output directory for DLLs
+      RUNTIME_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+      RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+      RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+      RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+      RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
   )
 
   if(${NS3_CLANG_TIMETRACE})
@@ -204,7 +243,10 @@ function(build_lib)
 
   # Write a module header that includes all headers from that module
   write_module_header("${BLIB_LIBNAME}" "${BLIB_HEADER_FILES}")
-
+  # Require upstream module libraries not to use module headers
+  if(DEFINED FOLDER AND "${FOLDER}" MATCHES "src")
+    target_compile_definitions("${BLIB_LIBNAME}" PRIVATE NS3_MODULE_COMPILATION)
+  endif()
   # Check if headers actually exist to prevent copying errors during
   # installation (includes the module header created above)
   build_lib_check_headers(${BLIB_LIBNAME})
@@ -226,7 +268,12 @@ function(build_lib)
   # Build tests if requested
   build_lib_tests(
     "${BLIB_LIBNAME}" "${BLIB_IGNORE_PCH}" "${FOLDER}" "${BLIB_TEST_SOURCES}"
+    "${BLIB_TEST_LIBRARIES_TO_LINK}"
   )
+
+  if(${MSVC})
+    target_link_options(${lib${BLIB_LIBNAME}} PUBLIC "/OPT:NOREF")
+  endif()
 
   # Handle package export
   install(
@@ -246,8 +293,8 @@ endfunction()
 function(build_lib_reexport_third_party_libraries libname libraries_to_link)
   # Separate ns-3 and non-ns-3 libraries to manage their propagation properly
   separate_ns3_from_non_ns3_libs(
-    "${libname}" "${libraries_to_link}" ns_libraries_to_link
-    non_ns_libraries_to_link
+    "${libname}" "${libraries_to_link};${stacktrace_flags}"
+    ns_libraries_to_link non_ns_libraries_to_link
   )
 
   set(ns3-external-libs "${non_ns_libraries_to_link};${ns3-external-libs}"
@@ -325,13 +372,24 @@ endfunction()
 
 function(build_lib_export_definitions_as_interface_definitions libname)
   get_target_property(target_definitions ${libname} COMPILE_DEFINITIONS)
-  if(${target_definitions} STREQUAL "target_definitions-NOTFOUND")
+  if("${target_definitions}" STREQUAL "target_definitions-NOTFOUND")
     set(target_definitions)
   endif()
   get_directory_property(dir_definitions COMPILE_DEFINITIONS)
   set(exported_definitions "${target_definitions};${dir_definitions}")
   list(REMOVE_DUPLICATES exported_definitions)
   list(REMOVE_ITEM exported_definitions "")
+  list(REMOVE_ITEM exported_definitions "NS3_MODULE_COMPILATION")
+  # Never propagate the module's own dll-export marker (<libname>_EXPORTS, added
+  # PRIVATE for MSVC/ClangCL builds) to consumers. That macro is what flips the
+  # generated <LIB>_EXPORT macros to __declspec(dllexport): it means "I am
+  # building this DLL" and must only ever be set for the module's own sources.
+  # Leaking it into INTERFACE_COMPILE_DEFINITIONS makes every module that links
+  # this one compile its headers as if it were building the DLL (dllexport)
+  # instead of importing it (dllimport), which is wrong and, for modules that
+  # annotate their whole API with hidden default visibility (e.g. wifi), breaks
+  # the build outright.
+  list(REMOVE_ITEM exported_definitions "${libname}_EXPORTS")
   set_target_properties(
     ${libname} PROPERTIES INTERFACE_COMPILE_DEFINITIONS
                           "${exported_definitions}"
@@ -410,7 +468,10 @@ endfunction()
 function(separate_ns3_from_non_ns3_libs libname libraries_to_link
          ns_libraries_to_link non_ns_libraries_to_link
 )
-  set(non_ns_libs ${CMAKE_THREAD_LIBS_INIT})
+  set(non_ns_libs)
+  if(DEFINED CMAKE_THREAD_LIBS_INIT)
+    list(APPEND non_ns_libs ${CMAKE_THREAD_LIBS_INIT})
+  endif()
   set(ns_libs)
   foreach(library ${libraries_to_link})
     remove_lib_prefix("${library}" module_name)
@@ -465,8 +526,11 @@ endfunction()
 # This macro builds the test library for the module library
 #
 # Arguments: libname (e.g. core), ignore_pch (TRUE/FALSE), folder (src/contrib),
-# sources (list of .cc's)
-function(build_lib_tests libname ignore_pch folder test_sources)
+# sources (list of .cc's), test_libraries_to_link (additional libs for test
+# target)
+function(build_lib_tests libname ignore_pch folder test_sources
+         test_libraries_to_link
+)
   if(${ENABLE_TESTS})
     # Check if the module tests should be built
     build_lib_check_examples_and_tests_filtered_in(${libname} filtered_in)
@@ -491,7 +555,12 @@ function(build_lib_tests libname ignore_pch folder test_sources)
             CACHE INTERNAL "list of test libraries"
         )
         add_library(${test${libname}} SHARED "${test_sources}")
-
+        # Require upstream test libraries not to use module headers
+        if(DEFINED folder AND "${folder}" MATCHES "src")
+          target_compile_definitions(
+            ${test${libname}} PRIVATE NS3_MODULE_COMPILATION
+          )
+        endif()
         # Link test library to the module library
         if(${NS3_MONOLIB})
           target_link_libraries(
@@ -499,9 +568,15 @@ function(build_lib_tests libname ignore_pch folder test_sources)
             ${LIB_AS_NEEDED_POST}
           )
         else()
+          # Keep linking the module's full LIBRARIES_TO_LINK alongside any extra
+          # TEST_LIBRARIES_TO_LINK: third-party libs declared as PRIVATE module
+          # deps (e.g. GSL) do not propagate transitively when
+          # NS3_REEXPORT_THIRD_PARTY_LIBRARIES is OFF, and would otherwise leave
+          # test sources that #include them unresolvable.
           target_link_libraries(
             ${test${libname}} ${LIB_AS_NEEDED_PRE} ${libname}
-            "${BLIB_LIBRARIES_TO_LINK}" ${LIB_AS_NEEDED_POST}
+            "${BLIB_LIBRARIES_TO_LINK}" "${test_libraries_to_link}"
+            ${LIB_AS_NEEDED_POST}
           )
         endif()
         set_target_properties(
@@ -575,37 +650,24 @@ function(write_module_header name header_files)
   string(TOUPPER "${name}" uppercase_name)
   string(REPLACE "-" "_" final_name "${uppercase_name}")
   # Common module_header
-  list(APPEND contents "#ifdef NS3_MODULE_COMPILATION ")
+  list(APPEND contents "#ifdef NS3_MODULE_COMPILATION\n")
   list(
     APPEND
     contents
-    "
-    error \"Do not include ns3 module aggregator headers from other modules; these are meant only for end user scripts.\" "
+    "    #error \"Do not include ns3 module aggregator headers from other modules; these are meant only for end user scripts.\"\n"
   )
-  list(APPEND contents "
-#endif "
-  )
-  list(APPEND contents "
-#ifndef NS3_MODULE_"
-  )
-  list(APPEND contents ${final_name})
-  list(APPEND contents "
-    // Module headers: "
-  )
+  list(APPEND contents "#endif\n")
+  list(APPEND contents "#ifndef NS3_MODULE_${final_name}\n")
+  list(APPEND contents "    // Module headers:\n")
 
   # Write each header listed to the contents variable
   foreach(header ${header_files})
     get_filename_component(head ${header} NAME)
-    list(APPEND contents "
-    #include <ns3/${head}>"
-    )
-    # include \"ns3/${head}\"")
+    list(APPEND contents "    #include \"ns3/${head}\"\n")
   endforeach()
 
   # Common module footer
-  list(APPEND contents "
-#endif "
-  )
+  list(APPEND contents "#endif\n")
   if(EXISTS ${CMAKE_HEADER_OUTPUT_DIRECTORY}/${name}-module.h)
     file(READ ${CMAKE_HEADER_OUTPUT_DIRECTORY}/${name}-module.h oldcontents)
     string(REPLACE ";" "" contents "${contents}")

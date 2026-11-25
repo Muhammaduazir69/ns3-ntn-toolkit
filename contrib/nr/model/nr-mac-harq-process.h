@@ -6,14 +6,16 @@
 
 #include "nr-phy-mac-common.h"
 
+#include "ns3/nr-export.h"
+
 #include <memory>
 #include <vector>
 
 namespace ns3
 {
 /**
- * \ingroup scheduler
- * \brief The HarqProcess struct
+ * @ingroup scheduler
+ * @brief The HarqProcess struct
  *
  * The struct represent a single HARQ process, identified by an ID
  * (unfortunately the ID is not stored in the struct, but somewhere else,
@@ -26,10 +28,10 @@ namespace ns3
  * The HarqProcess will be stored inside the class NrMacHarqVector, which
  * is a unordered map that maps the HARQ ID with the HARQ content (this struct).
  */
-struct HarqProcess
+struct NR_EXPORT HarqProcess
 {
     /**
-     * \brief Status of the process
+     * @brief Status of the process
      *
      * Other than the obvious meaning of the values, it is worth to state that
      * the RECEIVED_FEEDBACK status is equivalent to "the process has received
@@ -44,29 +46,30 @@ struct HarqProcess
     };
 
     /**
-     * \brief Default constructor
+     * @brief Default constructor
      */
     HarqProcess() = default;
 
     /**
-     * \brief HarqProcess copy constructor
-     * \param other other instance
+     * @brief HarqProcess copy constructor
+     * @param other other instance
      */
     HarqProcess(const HarqProcess& other)
         : m_active(other.m_active),
           m_status(other.m_status),
           m_timer(other.m_timer),
           m_dciElement(other.m_dciElement),
-          m_rlcPduInfo(other.m_rlcPduInfo)
+          m_rlcPduInfo(other.m_rlcPduInfo),
+          m_txAttempts(other.m_txAttempts)
     {
     }
 
     /**
-     * \brief HarqProcess value-by-value constructor
-     * \param active Is the process active?
-     * \param status Status of the process
-     * \param timer Timer of the process (in slot)
-     * \param dci DCI of the process
+     * @brief HarqProcess value-by-value constructor
+     * @param active Is the process active?
+     * @param status Status of the process
+     * @param timer Timer of the process (in slot)
+     * @param dci DCI of the process
      */
     HarqProcess(bool active,
                 Status status,
@@ -80,7 +83,7 @@ struct HarqProcess
     }
 
     /**
-     * \brief Reset the Process content.
+     * @brief Reset the Process content.
      */
     void Erase()
     {
@@ -89,6 +92,7 @@ struct HarqProcess
         m_timer = 0;
         m_dciElement.reset();
         m_rlcPduInfo.clear();
+        m_txAttempts = 0;
     }
 
     bool m_active{false};      //!< False indicate that the process is not active
@@ -96,13 +100,15 @@ struct HarqProcess
     uint8_t m_timer{0};        //!< Timer of the process (in slot)
     std::shared_ptr<DciInfoElementTdma> m_dciElement{}; //!< DCI element
     std::vector<RlcPduInfo> m_rlcPduInfo{};             //!< vector of RLC PDU
+    uint8_t m_txAttempts{0}; //!< Number of transmissions of the current TB, including
+                             //!< the initial one (0 when the process is inactive)
 };
 
 /**
- * \brief operator << for HARQ processes
- * \param os output stream
- * \param item process to print
- * \return a copy of the output stream
+ * @brief operator << for HARQ processes
+ * @param os output stream
+ * @param item process to print
+ * @return a copy of the output stream
  */
 static inline std::ostream&
 operator<<(std::ostream& os, const HarqProcess& item)

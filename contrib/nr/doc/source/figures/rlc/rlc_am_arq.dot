@@ -1,0 +1,23 @@
+digraph NrRlcAmArq {
+
+    rankdir=LR;
+    node [shape="box", style="filled", fillcolor="lightblue", fontname="Helvetica"];
+    edge [fontname="Helvetica", fontsize=10];
+
+    pdcp  [shape="ellipse", fillcolor="white", label="PDCP PDU"]
+    TXON  [label="m_txonBuffer\n(new SDU,\nawaiting first TX)"]
+    TXED  [label="m_txedBuffer\n(transmitted,\nawaiting ACK,\nindexed by SN)"]
+    RETX  [label="m_retxBuffer\n(marked for\nretransmission)"]
+    ACKED [shape="ellipse", fillcolor="palegreen", label="ACKed:\nfreed, VT(A)++"]
+    RLF   [shape="ellipse", fillcolor="mistyrose",
+           label="max-retx reached\n=> radio link failure\n(SetMaxRetxReachedCallback,\nTS 38.331 5.3.10.3)"]
+
+    pdcp -> TXON [label="DoTransmitPdcpPdu"]
+    TXON -> TXED [label="DoNotifyTxOpportunity:\nsegment / build PDU,\nSN = VT(S)++, set poll bit"]
+    TXED -> ACKED [color="darkgreen", fontcolor="darkgreen",
+                   label="STATUS PDU:\nACK_SN past this SN"]
+    TXED -> RETX [color="red", fontcolor="red",
+                  label="STATUS PDU: NACK for SN\nor t-PollRetransmit expiry\n(bulk move of unacked PDUs)"]
+    RETX -> TXED [label="retransmit:\nrebuild PDU, retxCount++"]
+    RETX -> RLF [color="red", fontcolor="red", label="retxCount >=\nmaxRetxThreshold (5)"]
+}

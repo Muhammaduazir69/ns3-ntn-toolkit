@@ -10,6 +10,7 @@
 #define EHT_CAPABILITIES_H
 
 #include "ns3/he-capabilities.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-information-element.h"
 
 #include <map>
@@ -25,7 +26,7 @@ class HeCapabilities;
  * EHT MAC Capabilities Info subfield.
  * See IEEE 802.11be D1.5 9.4.2.313.2 EHT MAC Capabilities Information subfield
  */
-struct EhtMacCapabilities
+struct WIFI_EXPORT EhtMacCapabilities
 {
     uint8_t epcsPriorityAccessSupported : 1;      //!< EPCS Priority Access Supported
     uint8_t ehtOmControlSupport : 1;              //!< EHT OM Control Support
@@ -39,21 +40,21 @@ struct EhtMacCapabilities
     /**
      * Get the size of the serialized EHT MAC capabilities subfield
      *
-     * \return the size of the serialized EHT MAC capabilities subfield
+     * @return the size of the serialized EHT MAC capabilities subfield
      */
     uint16_t GetSize() const;
     /**
      * Serialize the EHT MAC capabilities subfield
      *
-     * \param start iterator pointing to where the EHT MAC capabilities subfield should be written
+     * @param start iterator pointing to where the EHT MAC capabilities subfield should be written
      * to
      */
     void Serialize(Buffer::Iterator& start) const;
     /**
      * Deserialize the EHT MAC capabilities subfield
      *
-     * \param start iterator pointing to where the EHT MAC capabilities subfield should be read from
-     * \return the number of bytes read
+     * @param start iterator pointing to where the EHT MAC capabilities subfield should be read from
+     * @return the number of bytes read
      */
     uint16_t Deserialize(Buffer::Iterator start);
 };
@@ -62,7 +63,7 @@ struct EhtMacCapabilities
  * EHT PHY Capabilities Info subfield.
  * See IEEE 802.11be D1.5 9.4.2.313.3 EHT PHY Capabilities Information subfield
  */
-struct EhtPhyCapabilities
+struct WIFI_EXPORT EhtPhyCapabilities
 {
     uint8_t support320MhzIn6Ghz : 1;                 //!< Support For 320 MHz In 6 GHz
     uint8_t support242ToneRuInBwLargerThan20Mhz : 1; //!< Support For 242-tone RU In BW Wider Than
@@ -100,9 +101,10 @@ struct EhtPhyCapabilities
     uint8_t maxNumSupportedEhtLtfs : 5; //!< Maximum Number Of Supported EHT-LTFs
     uint8_t supportMcs15 : 4;           //!< Support Of MCS 15
     uint8_t supportEhtDupIn6GHz : 1;    //!< Support Of EHT DUP (MCS 14) In 6 GHz
-    uint8_t
-        support20MhzOperatingStaReceivingNdpWithWiderBw : 1; //!< Support For 20 MHz Operating STA
-                                                             //!< Receiving NDP With Wider Bandwidth
+    uint8_t support20MhzOperatingStaReceivingNdpWithWiderBw : 1; //!< Support For 20 MHz Operating
+                                                                 //!< STA Receiving NDP With Wider
+                                                                 //!< Bandwidth
+
     uint8_t nonOfdmaUlMuMimoBwNotLargerThan80Mhz : 1; //!< Non-OFDMA UL MU-MIMO (BW ≤ 80 MHz)
     uint8_t nonOfdmaUlMuMimo160Mhz : 1;               //!< Non-OFDMA UL MU-MIMO (BW = 160 MHz)
     uint8_t nonOfdmaUlMuMimo320Mhz : 1;               //!< Non-OFDMA UL MU-MIMO (BW = 320 MHz)
@@ -110,29 +112,29 @@ struct EhtPhyCapabilities
     uint8_t muBeamformer160Mhz : 1;                   //!< MU Beamformer (BW = 160 MHz)
     uint8_t muBeamformer320Mhz : 1;                   //!< MU Beamformer (BW = 320 MHz)
     uint8_t tbSoundingFeedbackRateLimit : 1;          //!< TB Sounding Feedback Rate Limit
-    uint8_t
-        rx1024QamInWiderBwDlOfdmaSupport : 1; //!< Rx 1024-QAM In Wider Bandwidth DL OFDMA Support
-    uint8_t
-        rx4096QamInWiderBwDlOfdmaSupport : 1; //!< Rx 4096-QAM In Wider Bandwidth DL OFDMA Support
+    uint8_t rx1024QamInWiderBwDlOfdmaSupport : 1;     //!< Rx 1024-QAM In Wider Bandwidth DL
+                                                      //!< OFDMA Support
+    uint8_t rx4096QamInWiderBwDlOfdmaSupport : 1;     //!< Rx 4096-QAM In Wider Bandwidth DL
+                                                      //!< OFDMA Support
 
     /**
      * Get the size of the serialized EHT PHY capabilities subfield
      *
-     * \return the size of the serialized EHT PHY capabilities subfield
+     * @return the size of the serialized EHT PHY capabilities subfield
      */
     uint16_t GetSize() const;
     /**
      * Serialize the EHT PHY capabilities subfield
      *
-     * \param start iterator pointing to where the EHT PHY capabilities subfield should be written
+     * @param start iterator pointing to where the EHT PHY capabilities subfield should be written
      * to
      */
     void Serialize(Buffer::Iterator& start) const;
     /**
      * Deserialize the EHT PHY capabilities subfield
      *
-     * \param start iterator pointing to where the EHT PHY capabilities subfield should be read from
-     * \return the number of bytes read
+     * @param start iterator pointing to where the EHT PHY capabilities subfield should be read from
+     * @return the number of bytes read
      */
     uint16_t Deserialize(Buffer::Iterator start);
 };
@@ -141,7 +143,7 @@ struct EhtPhyCapabilities
  * EHT MCS and NSS Set subfield.
  * See IEEE 802.11be D1.5 9.4.2.313.4 Supported EHT-MCS And NSS Set subfield
  */
-struct EhtMcsAndNssSet
+struct WIFI_EXPORT EhtMcsAndNssSet
 {
     /**
      * The different EHT-MCS map types as defined in 9.4.2.313.4 Supported EHT-MCS And NSS Set
@@ -162,25 +164,28 @@ struct EhtMcsAndNssSet
     /**
      * Get the size of the serialized Supported EHT-MCS And NSS Set subfield
      *
-     * \return the size of the serialized Supported EHT-MCS And NSS Set  subfield
+     * @return the size of the serialized Supported EHT-MCS And NSS Set  subfield
      */
     uint16_t GetSize() const;
     /**
      * Serialize the Supported EHT-MCS And NSS Set subfield
      *
-     * \param start iterator pointing to where the Supported EHT-MCS And NSS Set subfield should be
+     * @param start iterator pointing to where the Supported EHT-MCS And NSS Set subfield should be
      * written to
      */
     void Serialize(Buffer::Iterator& start) const;
     /**
      * Deserialize the Supported EHT-MCS And NSS Set subfield
      *
-     * \param start iterator pointing to where the Supported EHT-MCS And NSS Set subfield should be
-     * read from \param is2_4Ghz indicating whether PHY is operating in 2.4 GHz based on previously
-     * serialized IEs \param heSupportedChannelWidthSet supported channel width set based on
-     * previously deserialized HE capabilities IE \param support320MhzIn6Ghz flag whether 320 MHz is
-     * supported in 6 GHz band based on EHT PHY capabilities subfield \return the number of bytes
-     * read
+     * @param start iterator pointing to where the Supported EHT-MCS And NSS Set subfield should be
+     * read from
+     * @param is2_4Ghz indicating whether PHY is operating in 2.4 GHz based on previously serialized
+     * IEs
+     * @param heSupportedChannelWidthSet supported channel width set based on previously
+     * deserialized HE capabilities IE
+     * @param support320MhzIn6Ghz flag whether 320 MHz is supported in 6 GHz band based on EHT PHY
+     * capabilities subfield
+     * @return the number of bytes read
      */
     uint16_t Deserialize(Buffer::Iterator start,
                          bool is2_4Ghz,
@@ -192,12 +197,12 @@ struct EhtMcsAndNssSet
  * EHT PPE Thresholds subfield.
  * See IEEE 802.11be D1.5 9.4.2.313.5 EHT PPE Thresholds subfield
  */
-struct EhtPpeThresholds
+struct WIFI_EXPORT EhtPpeThresholds
 {
     /**
      * EHT PPE Thresholds Info
      */
-    struct EhtPpeThresholdsInfo
+    struct WIFI_EXPORT EhtPpeThresholdsInfo
     {
         uint8_t ppetMax : 3; //!< PPETmax
         uint8_t ppet8 : 3;   //!< PPE8
@@ -210,30 +215,30 @@ struct EhtPpeThresholds
     /**
      * Get the size of the serialized EHT PPE Thresholds subfield
      *
-     * \return the size of the serialized EHT PPE Thresholds subfield
+     * @return the size of the serialized EHT PPE Thresholds subfield
      */
     uint16_t GetSize() const;
     /**
      * Serialize the EHT PPE Thresholds subfield
      *
-     * \param start iterator pointing to where the EHT PPE Thresholds subfield should be written to
+     * @param start iterator pointing to where the EHT PPE Thresholds subfield should be written to
      */
     void Serialize(Buffer::Iterator& start) const;
     /**
      * Deserialize the EHT PPE Thresholds subfield
      *
-     * \param start iterator pointing to where the EHT PPE Thresholds subfield should be read from
-     * \return the number of bytes read
+     * @param start iterator pointing to where the EHT PPE Thresholds subfield should be read from
+     * @return the number of bytes read
      */
     uint16_t Deserialize(Buffer::Iterator start);
 };
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  *
  * The IEEE 802.11be EHT Capabilities
  */
-class EhtCapabilities : public WifiInformationElement
+class WIFI_EXPORT EhtCapabilities : public WifiInformationElement
 {
   public:
     /**
@@ -243,9 +248,9 @@ class EhtCapabilities : public WifiInformationElement
     /**
      * Constructor
      *
-     * \param is2_4Ghz indicating whether PHY is operating in 2.4 GHz based on previously serialized
+     * @param is2_4Ghz indicating whether PHY is operating in 2.4 GHz based on previously serialized
      * IEs
-     * \param heCapabilities the optional HE capabilities contained in the same management frame
+     * @param heCapabilities the optional HE capabilities contained in the same management frame
      */
     EhtCapabilities(bool is2_4Ghz, const std::optional<HeCapabilities>& heCapabilities);
     // Implementations of pure virtual methods, or overridden from base class.
@@ -256,37 +261,37 @@ class EhtCapabilities : public WifiInformationElement
     /**
      * Set the maximum MPDU length.
      *
-     * \param length the maximum MPDU length (3895, 7991 or 11454)
+     * @param length the maximum MPDU length (3895, 7991 or 11454)
      */
     void SetMaxMpduLength(uint16_t length);
 
     /**
      * Set the maximum A-MPDU length.
      *
-     * \param maxAmpduLength 2^(23 + x) - 1, x in the range 0 to 1
+     * @param maxAmpduLength 2^(23 + x) - 1, x in the range 0 to 1
      */
     void SetMaxAmpduLength(uint32_t maxAmpduLength);
 
     /**
      * Return the maximum A-MPDU length.
      *
-     * \return the maximum A-MPDU length
+     * @return the maximum A-MPDU length
      */
     uint32_t GetMaxAmpduLength() const;
 
     /**
      * Get the maximum MPDU length.
      *
-     * \return the maximum MPDU length in bytes
+     * @return the maximum MPDU length in bytes
      */
     uint16_t GetMaxMpduLength() const;
 
     /**
      * Set a subfield of the Supported EHT-MCS And NSS Set.
      *
-     * \param mapType the type of the subfield
-     * \param upperMcs the upper MCS of the range
-     * \param maxNss the maximum NSS supported for transmission in the MCS range
+     * @param mapType the type of the subfield
+     * @param upperMcs the upper MCS of the range
+     * @param maxNss the maximum NSS supported for transmission in the MCS range
      */
     void SetSupportedTxEhtMcsAndNss(EhtMcsAndNssSet::EhtMcsMapType mapType,
                                     uint8_t upperMcs,
@@ -294,9 +299,9 @@ class EhtCapabilities : public WifiInformationElement
     /**
      * Set a subfield of the Supported EHT-MCS And NSS Set.
      *
-     * \param mapType the type of the subfield
-     * \param upperMcs the upper MCS of the range
-     * \param maxNss the maximum NSS supported for reception in the MCS range
+     * @param mapType the type of the subfield
+     * @param upperMcs the upper MCS of the range
+     * @param maxNss the maximum NSS supported for reception in the MCS range
      */
     void SetSupportedRxEhtMcsAndNss(EhtMcsAndNssSet::EhtMcsMapType mapType,
                                     uint8_t upperMcs,
@@ -305,24 +310,24 @@ class EhtCapabilities : public WifiInformationElement
     /**
      * Get the highest supported RX MCS for a given EHT-MCS map type.
      *
-     * \param mapType the EHT-MCS map type
-     * \return the highest supported RX MCS for the given EHT-MCS map type
+     * @param mapType the EHT-MCS map type
+     * @return the highest supported RX MCS for the given EHT-MCS map type
      */
-    uint8_t GetHighestSupportedRxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType);
+    uint8_t GetHighestSupportedRxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType) const;
     /**
      * Get the highest supported TX MCS for a given EHT-MCS map type.
      *
-     * \param mapType the EHT-MCS map type
-     * \return the highest supported TX MCS for the given EHT-MCS map type
+     * @param mapType the EHT-MCS map type
+     * @return the highest supported TX MCS for the given EHT-MCS map type
      */
-    uint8_t GetHighestSupportedTxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType);
+    uint8_t GetHighestSupportedTxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType) const;
 
     /**
      * Set the EHT PPE threshold info subfield
      *
-     * \param nssPe the NSS_PE subfield
-     * \param ruIndexBitmask the RU Index Bitmask subfield
-     * \param ppeThresholds the PPE thresholds made of pairs (PPETmax, PPET8)
+     * @param nssPe the NSS_PE subfield
+     * @param ruIndexBitmask the RU Index Bitmask subfield
+     * @param ppeThresholds the PPE thresholds made of pairs (PPETmax, PPET8)
      */
     void SetPpeThresholds(uint8_t nssPe,
                           uint8_t ruIndexBitmask,

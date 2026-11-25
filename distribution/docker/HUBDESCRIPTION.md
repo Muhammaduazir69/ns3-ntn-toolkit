@@ -4,7 +4,7 @@
 
 # ns3-ntn-toolkit
 
-**Pre-integrated ns-3.43 simulation platform for 6G non-terrestrial network research.** 14 integrated modules covering LEO constellations, 3GPP Rel-17/18/19 NR-NTN procedures, O-RAN + FlexRIC, a measured NTN/O-RAN application layer, sub-THz physics, NVIDIA Sionna RT, SAGIN, V2X, slicing, AI/ML and a live digital twin: all building in a single `./ns3 build`.
+**Pre-integrated ns-3.49 simulation platform for 6G non-terrestrial network research.** 14 integrated modules covering LEO constellations, 3GPP Rel-17/18/19 NR-NTN procedures, O-RAN + FlexRIC, a measured NTN/O-RAN application layer, sub-THz physics, NVIDIA Sionna RT, SAGIN, V2X, slicing, AI/ML and a live digital twin: all building in a single `./ns3 build`.
 
 The C++ kernel, all 14 bundled modules, the SNS3 satellite stack, mmWave 5G NR, NetSimulyzer JSON sinks, InfluxDB observability bindings, and the FastAPI / Cesium-Live digital-twin server are baked in. Open the container and run any of the shipped reference scenarios immediately: no system-package wrangling, no missing protobuf, no Python-version drift.
 
@@ -34,8 +34,9 @@ docker pull uzairdocker69/ns3-ntn-toolkit:2.7.1
 
 | Tag      | Notes |
 |----------|-------|
-| `latest` | Tracks the most recent tagged release (currently `2.7.1`) |
-| `2.7.1`  | **Current stable**: 2.7.0 plus the in-depth test campaign (690 test cases in 41 suites, every module) and the fixes it found: TCP timestamps on data segments (RFC 7323), TR 36.814 HTTP page model, CBR/HTTP robustness, slice-quota validation, NR PRB accounting, O-RAN gym and KPM dataset fields |
+| `latest` | ns-3.49 + 5G-LENA v5.2 (November 2026). Same as `ns3.49` |
+| `ns3.49` | The toolkit on ns-3.49 and 5G-LENA v5.2: upstream channel speed-ups and fixes, a corrected UE receive beam (a multi-element UE no longer loses array gain as the satellite moves), the mmWave SVD precoder fix, v5.2's link filter where exact, inter-UE spatial consistency, an opt-in Flent benchmark (`--NtnRealStackFlentTest=rrul`), Ubuntu 24.04 base |
+| `2.7.1`  | Last release on ns-3.43: 2.7.0 plus the in-depth test campaign (690 test cases in 41 suites, every module) and the fixes it found: TCP timestamps on data segments (RFC 7323), TR 36.814 HTTP page model, CBR/HTTP robustness, slice-quota validation, NR PRB accounting, O-RAN gym and KPM dataset fields |
 | `2.7.0`  | 3GPP Rel-17 NTN radio procedures in 5G-LENA (paired FDD, UL power control, PHR, BSR triggers, HARQ for long RTT), TR 38.821 Set-1 default link budget, exact SGP4 propagation delay, ITU-R P.676/P.840/P.834 atmosphere, BPv7 + SABR delay-tolerant routing, E2AP over TCP. Portable build (no `-march=native`) |
 | `2.1.1`  | 2026-06-12 architecture-audit hardening: Rel-18 CondEventD2, E2 loop realism, KPM flow monitor across 40+ examples |
 | `2.1.0`  | AI-Native ORAN-NTN release: real measured NR NTN data plane, NTN/O-RAN application layer, E2SM-KPM flow monitor, multi-tier RIC, TR 38.821 calibration |
@@ -83,7 +84,7 @@ The `2.7.1` image (`linux/amd64`, compressed size on the Tags page) is compiled 
 
 | Capability | Specifics |
 |---|---|
-| ns-3 base | **3.43** (patched LTE for dual connectivity) + 5G-LENA nr v3.3.1 with 17 NTN patches |
+| ns-3 base | **3.49** (patched LTE for dual connectivity) + 5G-LENA nr v5.2 with the NTN patches (`contrib/nr/ntn-patches`) |
 | Custom modules contributed | **14** (see the list below) |
 | Data plane | real mmWave NR NTN cell under SGP4 mobility; all KPIs measured in-band |
 | Combined unit + integration tests | **100+**, all passing |

@@ -9,6 +9,7 @@
 #include "ns3/nr-mac-scheduler-ue-info.h"
 
 #include <algorithm>
+#include <set>
 #include <cmath>
 #include <numeric>
 
@@ -172,15 +173,27 @@ NtnSliceQuotaScheduler::AssignDLRBG(uint32_t symAvail, const ActiveUeMap& active
     for (const auto& el : activeDl)
     {
         const uint32_t beamSym = symPerBeam.at(GetBeamId(el));
-        const uint32_t rbgAssignable = beamSym;
         FTResources assigned(0, 0);
-        const std::vector<uint8_t> mask = GetDlNotchedRbgMask();
-        uint32_t resources = !mask.empty() ? std::count(mask.begin(), mask.end(), 1) : GetBandwidthInRbg();
+        // 5G-LENA v5.1: assignments are explicit RBG indices (m_dlRBG) and symbols (m_dlSym),
+        // one RBG at a time over the beam's symbols, as NrMacSchedulerOfdma does.
+        // 5G-LENA v5.2: new data may share the symbols of other UEs' HARQ retransmissions, on
+        // the RBGs those leave free (GetDlDataBitmask), as NrMacSchedulerOfdma does; the full
+        // band would double-book the retransmission RBGs.
+        std::vector<bool> availableRbgs = GetDlDataBitmask();
+        std::set<uint32_t> remainingRbgSet;
+        for (size_t i = 0; i < availableRbgs.size(); ++i)
+        {
+            if (availableRbgs.at(i))
+            {
+                remainingRbgSet.emplace(static_cast<uint32_t>(i));
+            }
+        }
+        uint32_t resources = static_cast<uint32_t>(remainingRbgSet.size());
         const uint32_t total = resources;
         std::vector<UePtrAndBufferReq> ueVector(GetUeVector(el).begin(), GetUeVector(el).end());
         for (auto& ue : ueVector)
         {
-            BeforeDlSched(ue, FTResources(rbgAssignable, beamSym));
+            BeforeDlSched(ue, FTResources(beamSym, beamSym));
         }
         const size_t nSlices = std::max<size_t>(m_quota.size(), 1);
         std::vector<uint32_t> limit(nSlices, total), used(nSlices, 0);
@@ -227,19 +240,26 @@ NtnSliceQuotaScheduler::AssignDLRBG(uint32_t symAvail, const ActiveUeMap& active
             const uint32_t s = sliceOf(*it);
             do
             {
-                GetUe(*it)->m_dlRBG += rbgAssignable;
-                assigned.m_rbg += rbgAssignable;
-                GetUe(*it)->m_dlSym = beamSym;
+                const uint32_t rbg = *remainingRbgSet.begin();
+                remainingRbgSet.erase(remainingRbgSet.begin());
+                auto& rbgs = GetUe(*it)->m_dlRBG;
+                rbgs.insert(rbgs.end(), beamSym, static_cast<uint16_t>(rbg));
+                auto& syms = GetUe(*it)->m_dlSym;
+                const size_t s0 = syms.size();
+                syms.resize(s0 + beamSym);
+                std::iota(syms.begin() + s0, syms.end(), 0);
+                availableRbgs.at(rbg) = false;
+                assigned.m_rbg += 1;
                 assigned.m_sym = beamSym;
                 resources -= 1;
                 used[s] += 1;
-                AssignedDlResources(*it, FTResources(rbgAssignable, beamSym), assigned);
+                AssignedDlResources(*it, FTResources(beamSym, beamSym), assigned);
             } while (GetUe(*it)->m_dlTbSize < 10 && resources > 0); // the minimum TB, as the base scheduler
             for (auto& ue : ueVector)
             {
                 if (GetUe(ue)->m_rnti != GetUe(*it)->m_rnti)
                 {
-                    NotAssignedDlResources(ue, FTResources(rbgAssignable, beamSym), assigned);
+                    NotAssignedDlResources(ue, FTResources(beamSym, beamSym), assigned);
                 }
             }
         }

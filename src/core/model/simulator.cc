@@ -7,9 +7,8 @@
  */
 #include "simulator.h"
 
-#include "assert.h"
-#include "des-metrics.h"
 #include "event-impl.h"
+#include "fatal-error.h"
 #include "global-value.h"
 #include "log.h"
 #include "map-scheduler.h"
@@ -19,18 +18,13 @@
 #include "simulator-impl.h"
 #include "string.h"
 
-#include "ns3/core-config.h"
-
-#include <cmath>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <list>
-#include <vector>
+#ifdef ENABLE_DES_METRICS
+#include "des-metrics.h"
+#endif
 
 /**
- * \file
- * \ingroup simulator
+ * @file
+ * @ingroup simulator
  * ns3::Simulator implementation, as well as implementation pointer,
  * global scheduler implementation.
  */
@@ -46,8 +40,8 @@ NS_LOG_COMPONENT_DEFINE("Simulator");
 EventId Simulator::m_stopEvent;
 
 /**
- * \ingroup simulator
- * \anchor GlobalValueSimulatorImplementationType
+ * @ingroup simulator
+ * @anchor GlobalValueSimulatorImplementationType
  * The specific simulator implementation to use.
  *
  * Must be derived from SimulatorImpl.
@@ -59,8 +53,8 @@ static GlobalValue g_simTypeImpl =
                 MakeStringChecker());
 
 /**
- * \ingroup scheduler
- * \anchor GlobalValueSchedulerType
+ * @ingroup scheduler
+ * @anchor GlobalValueSchedulerType
  * The specific event scheduler implementation to use.
  *
  * Must be derived from Scheduler.
@@ -72,9 +66,9 @@ static GlobalValue g_schedTypeImpl =
                 MakeTypeIdChecker());
 
 /**
- * \ingroup simulator
- * \brief Get the static SimulatorImpl instance.
- * \return The SimulatorImpl instance pointer.
+ * @ingroup simulator
+ * @brief Get the static SimulatorImpl instance.
+ * @return The SimulatorImpl instance pointer.
  */
 static SimulatorImpl**
 PeekImpl()
@@ -84,10 +78,10 @@ PeekImpl()
 }
 
 /**
- * \ingroup simulator
- * \brief Get the SimulatorImpl singleton.
- * \return The singleton pointer.
- * \see Simulator::GetImplementation()
+ * @ingroup simulator
+ * @brief Get the SimulatorImpl singleton.
+ * @return The singleton pointer.
+ * @see Simulator::GetImplementation()
  */
 static SimulatorImpl*
 GetImpl()

@@ -10,7 +10,7 @@
 
 #include "nr-rrc-sap.h"
 
-#include <ns3/ptr.h>
+#include "ns3/nr-export.h"
 
 #include <stdint.h>
 
@@ -25,7 +25,7 @@ class NrGnbNetDevice;
  * This is the PHY SAP Provider, i.e., the part of the SAP that contains
  * the PHY methods called by the MAC
  */
-class NrUeCphySapProvider
+class NR_EXPORT NrUeCphySapProvider
 {
   public:
     /**
@@ -39,24 +39,24 @@ class NrUeCphySapProvider
     virtual void Reset() = 0;
 
     /**
-     * \brief Tell the PHY entity to listen to PSS from surrounding cells and
+     * @brief Tell the PHY entity to listen to PSS from surrounding cells and
      *        measure the RSRP.
-     * \param dlEarfcn the downlink carrier frequency (EARFCN) to listen to
+     * @param arfcn the downlink carrier frequency (ARFCN) to listen to
      *
      * This function will instruct this PHY instance to listen to the DL channel
      * over the bandwidth of 6 RB at the frequency associated with the given
-     * EARFCN.
+     * ARFCN.
      *
      * After this, it will start receiving Primary Synchronization Signal (PSS)
      * and periodically returning measurement reports to RRC via
      * NrUeCphySapUser::ReportUeMeasurements function.
      */
-    virtual void StartCellSearch(uint32_t dlEarfcn) = 0;
+    virtual void StartCellSearch(uint32_t arfcn) = 0;
 
     /**
-     * \brief Tell the PHY entity to synchronize with a given eNodeB over the
-     *        currently active EARFCN for communication purposes.
-     * \param cellId the ID of the eNodeB to synchronize with
+     * @brief Tell the PHY entity to synchronize with a given eNodeB over the
+     *        currently active ARFCN for communication purposes.
+     * @param cellId the ID of the eNodeB to synchronize with
      *
      * By synchronizing, the PHY will start receiving various information
      * transmitted by the eNodeB. For instance, when receiving system information,
@@ -71,10 +71,10 @@ class NrUeCphySapProvider
     virtual void SynchronizeWithGnb(uint16_t cellId) = 0;
 
     /**
-     * \brief Tell the PHY entity to align to the given EARFCN and synchronize
+     * @brief Tell the PHY entity to align to the given ARFCN and synchronize
      *        with a given eNodeB for communication purposes.
-     * \param cellId the ID of the eNodeB to synchronize with
-     * \param dlEarfcn the downlink carrier frequency (EARFCN)
+     * @param cellId the ID of the eNodeB to synchronize with
+     * @param arfcn the downlink carrier frequency (ARFCN)
      *
      * By synchronizing, the PHY will start receiving various information
      * transmitted by the eNodeB. For instance, when receiving system information,
@@ -86,88 +86,95 @@ class NrUeCphySapProvider
      * NrUeCphySapProvider::SetDlBandwidth can be called afterwards to increase
      * the bandwidth.
      */
-    virtual void SynchronizeWithGnb(uint16_t cellId, uint32_t dlEarfcn) = 0;
+    virtual void SynchronizeWithGnb(uint16_t cellId, uint32_t arfcn) = 0;
 
     /**
-     * \brief Get PHY cell ID
-     * \return cell ID this PHY is synchronized to
+     * @brief Get PHY cell ID
+     * @return cell ID this PHY is synchronized to
      */
     virtual uint16_t GetCellId() = 0;
 
     /**
-     * \brief Get PHY DL EARFCN
-     * \return DL EARFCN this PHY is synchronized to
+     * @brief Get PHY DL ARFCN
+     * @return DL ARFCN this PHY is synchronized to
      */
-    virtual uint32_t GetDlEarfcn() = 0;
+    virtual uint32_t GetArfcn() = 0;
 
     /**
-     * \param dlBandwidth the DL bandwidth in number of PRBs
+     * Set numerology
+     *
+     * @param numerology the numerology to be used
+     */
+    virtual void SetNumerology(uint16_t numerology) = 0;
+
+    /**
+     * @param dlBandwidth the DL bandwidth in number of PRBs
      */
     virtual void SetDlBandwidth(uint16_t dlBandwidth) = 0;
 
     /**
-     * \brief Configure uplink (normally done after reception of SIB2)
+     * @brief Configure uplink (normally done after reception of SIB2)
      *
-     * \param ulEarfcn the uplink carrier frequency (EARFCN)
-     * \param ulBandwidth the UL bandwidth in number of PRBs
+     * @param arfcn the uplink carrier frequency (ARFCN)
+     * @param ulBandwidth the UL bandwidth in number of PRBs
      */
-    virtual void ConfigureUplink(uint32_t ulEarfcn, uint16_t ulBandwidth) = 0;
+    virtual void ConfigureUplink(uint32_t arfcn, uint16_t ulBandwidth) = 0;
 
     /**
-     * \brief Configure referenceSignalPower
+     * @brief Configure referenceSignalPower
      *
-     * \param referenceSignalPower received from gNB in SIB2
+     * @param referenceSignalPower received from gNB in SIB2
      */
     virtual void ConfigureReferenceSignalPower(int8_t referenceSignalPower) = 0;
 
     /**
-     * \brief Set Rnti function
+     * @brief Set Rnti function
      *
-     * \param rnti the cell-specific UE identifier
+     * @param rnti the cell-specific UE identifier
      */
     virtual void SetRnti(uint16_t rnti) = 0;
 
     /**
-     * \brief Set transmission mode
+     * @brief Set transmission mode
      *
-     * \param txMode the transmissionMode of the user
+     * @param txMode the transmissionMode of the user
      */
     virtual void SetTransmissionMode(uint8_t txMode) = 0;
 
     /**
-     * \brief Set SRS configuration index
+     * @brief Set SRS configuration index
      *
-     * \param srcCi the SRS configuration index
+     * @param srcCi the SRS configuration index
      */
     virtual void SetSrsConfigurationIndex(uint16_t srcCi) = 0;
 
     /**
-     * \brief Set P_A value for UE power control
+     * @brief Set P_A value for UE power control
      *
-     * \param pa the P_A value
+     * @param pa the P_A value
      */
     virtual void SetPa(double pa) = 0;
 
     /**
-     * \brief Set RSRP filter coefficient.
+     * @brief Set RSRP filter coefficient.
      *
      * Determines the strength of smoothing effect induced by layer 3
      * filtering of RSRP used for uplink power control in all attached UE.
      * If equals to 0, no layer 3 filtering is applicable.
      *
-     * \param rsrpFilterCoefficient value.
+     * @param rsrpFilterCoefficient value.
      */
     virtual void SetRsrpFilterCoefficient(uint8_t rsrpFilterCoefficient) = 0;
 
     /**
-     * \brief Reset the PHY after radio link failure function
+     * @brief Reset the PHY after radio link failure function
      * It resets the physical layer parameters of the
      * UE after RLF.
      */
     virtual void ResetPhyAfterRlf() = 0;
 
     /**
-     * \brief Reset radio link failure parameters
+     * @brief Reset radio link failure parameters
      *
      * Upon receiving N311 in-sync indications from the UE
      * PHY the UE RRC instructs the UE PHY to reset the
@@ -176,7 +183,7 @@ class NrUeCphySapProvider
     virtual void ResetRlfParams() = 0;
 
     /**
-     * \brief Start in-sync detection function
+     * @brief Start in-sync detection function
      * When T310 timer is started, it indicates that physical layer
      * problems are detected at the UE and the recovery process is
      * started by checking if the radio frames are in-sync for N311
@@ -185,10 +192,15 @@ class NrUeCphySapProvider
     virtual void StartInSyncDetection() = 0;
 
     /**
-     * \brief A method call by UE RRC to communicate the IMSI to the UE PHY
-     * \param imsi the IMSI of the UE
+     * @brief A method call by UE RRC to communicate the IMSI to the UE PHY
+     * @param imsi the IMSI of the UE
      */
     virtual void SetImsi(uint64_t imsi) = 0;
+    virtual void SetSymbolsPerSlot(uint32_t symbolsPerSlot) = 0;
+    virtual void SetPattern(std::string tddPattern) = 0;
+    virtual void SetDlCtrlSyms(uint8_t numDlCtrlSyms) = 0;
+    virtual void SetUlCtrlSyms(uint8_t numUlCtrlSyms) = 0;
+    virtual void SetNumRbPerRbg(uint32_t numRbPerRbg) = 0;
 };
 
 /**
@@ -197,7 +209,7 @@ class NrUeCphySapProvider
  * This is the CPHY SAP User, i.e., the part of the SAP that contains the RRC
  * methods called by the PHY
  */
-class NrUeCphySapUser
+class NR_EXPORT NrUeCphySapUser
 {
   public:
     /**
@@ -209,7 +221,7 @@ class NrUeCphySapUser
      * Parameters of the ReportUeMeasurements primitive: RSRP [dBm] and RSRQ [dB]
      * See section 5.1.1 and 5.1.3 of TS 36.214
      */
-    struct UeMeasurementsElement
+    struct NR_EXPORT UeMeasurementsElement
     {
         uint16_t m_cellId; ///< cell ID
         double m_rsrp;     ///< [dBm]
@@ -217,46 +229,49 @@ class NrUeCphySapUser
     };
 
     /// UeMeasurementsParameters structure
-    struct UeMeasurementsParameters
+    struct NR_EXPORT UeMeasurementsParameters
     {
         std::vector<UeMeasurementsElement> m_ueMeasurementsList; ///< UE measurement list
         uint8_t m_componentCarrierId;                            ///< component carrier ID
     };
 
     /**
-     * \brief Relay an MIB message from the PHY entity to the RRC layer.
+     * @brief Relay an MIB message from the PHY entity to the RRC layer.
      *
      * This function is typically called after PHY receives an MIB message over
      * the BCH.
      *
-     * \param cellId the ID of the eNodeB where the message originates from
-     * \param mib the Master Information Block message.
+     * @param cellId the ID of the eNodeB where the message originates from
+     * @param arfcn the ARFCN of the carrier (BWP) on which the MIB was received
+     * @param mib the Master Information Block message.
      */
     virtual void RecvMasterInformationBlock(uint16_t cellId,
+                                            uint32_t arfcn,
                                             NrRrcSap::MasterInformationBlock mib) = 0;
 
     /**
-     * \brief Relay an SIB1 message from the PHY entity to the RRC layer.
+     * @brief Relay an SIB1 message from the PHY entity to the RRC layer.
      *
      * This function is typically called after PHY receives an SIB1 message over
      * the BCH.
      *
-     * \param cellId the ID of the eNodeB where the message originates from
-     * \param sib1 the System Information Block Type 1 message
+     * @param cellId the ID of the eNodeB where the message originates from
+     * @param sib1 the System Information Block Type 1 message
      */
     virtual void RecvSystemInformationBlockType1(uint16_t cellId,
+                                                 uint32_t arfcn,
                                                  NrRrcSap::SystemInformationBlockType1 sib1) = 0;
 
     /**
-     * \brief Send a report of RSRP and RSRQ values perceived from PSS by the PHY
+     * @brief Send a report of RSRP and RSRQ values perceived from PSS by the PHY
      *        entity (after applying layer-1 filtering) to the RRC layer.
      *
-     * \param params the structure containing a vector of cellId, RSRP and RSRQ
+     * @param params the structure containing a vector of cellId, RSRP and RSRQ
      */
     virtual void ReportUeMeasurements(UeMeasurementsParameters params) = 0;
 
     /**
-     * \brief Send an out of sync indication to UE RRC.
+     * @brief Send an out of sync indication to UE RRC.
      *
      * When the number of out-of-sync indications
      * are equal to N310, RRC starts the T310 timer.
@@ -264,7 +279,7 @@ class NrUeCphySapUser
     virtual void NotifyOutOfSync() = 0;
 
     /**
-     * \brief Send an in sync indication to UE RRC.
+     * @brief Send an in sync indication to UE RRC.
      *
      * When the number of in-sync indications
      * are equal to N311, RRC stops the T310 timer.
@@ -272,7 +287,7 @@ class NrUeCphySapUser
     virtual void NotifyInSync() = 0;
 
     /**
-     * \brief Reset the sync indication counter.
+     * @brief Reset the sync indication counter.
      *
      * Resets the sync indication counter of RRC if the Qin or Qout condition
      * is not fulfilled for the number of consecutive frames.
@@ -291,7 +306,7 @@ class MemberNrUeCphySapProvider : public NrUeCphySapProvider
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrUeCphySapProvider(C* owner);
 
@@ -299,14 +314,15 @@ class MemberNrUeCphySapProvider : public NrUeCphySapProvider
     MemberNrUeCphySapProvider() = delete;
 
     // inherited from NrUeCphySapProvider
+    void SetNumerology(uint16_t numerology) override;
     void Reset() override;
-    void StartCellSearch(uint32_t dlEarfcn) override;
+    void StartCellSearch(uint32_t arfcn) override;
     void SynchronizeWithGnb(uint16_t cellId) override;
-    void SynchronizeWithGnb(uint16_t cellId, uint32_t dlEarfcn) override;
+    void SynchronizeWithGnb(uint16_t cellId, uint32_t arfcn) override;
     uint16_t GetCellId() override;
-    uint32_t GetDlEarfcn() override;
+    uint32_t GetArfcn() override;
     void SetDlBandwidth(uint16_t dlBandwidth) override;
-    void ConfigureUplink(uint32_t ulEarfcn, uint16_t ulBandwidth) override;
+    void ConfigureUplink(uint32_t arfcn, uint16_t ulBandwidth) override;
     void ConfigureReferenceSignalPower(int8_t referenceSignalPower) override;
     void SetRnti(uint16_t rnti) override;
     void SetTransmissionMode(uint8_t txMode) override;
@@ -317,6 +333,11 @@ class MemberNrUeCphySapProvider : public NrUeCphySapProvider
     void ResetRlfParams() override;
     void StartInSyncDetection() override;
     void SetImsi(uint64_t imsi) override;
+    void SetSymbolsPerSlot(uint32_t symbolsPerSlot) override;
+    void SetPattern(std::string tddPattern) override;
+    void SetDlCtrlSyms(uint8_t numDlCtrlSyms) override;
+    void SetUlCtrlSyms(uint8_t numUlCtrlSyms) override;
+    void SetNumRbPerRbg(uint32_t numRbPerRbg) override;
 
   private:
     C* m_owner; ///< the owner class
@@ -337,9 +358,9 @@ MemberNrUeCphySapProvider<C>::Reset()
 
 template <class C>
 void
-MemberNrUeCphySapProvider<C>::StartCellSearch(uint32_t dlEarfcn)
+MemberNrUeCphySapProvider<C>::StartCellSearch(uint32_t arfcn)
 {
-    m_owner->DoStartCellSearch(dlEarfcn);
+    m_owner->DoStartCellSearch(arfcn);
 }
 
 template <class C>
@@ -351,9 +372,9 @@ MemberNrUeCphySapProvider<C>::SynchronizeWithGnb(uint16_t cellId)
 
 template <class C>
 void
-MemberNrUeCphySapProvider<C>::SynchronizeWithGnb(uint16_t cellId, uint32_t dlEarfcn)
+MemberNrUeCphySapProvider<C>::SynchronizeWithGnb(uint16_t cellId, uint32_t arfcn)
 {
-    m_owner->DoSynchronizeWithGnb(cellId, dlEarfcn);
+    m_owner->DoSynchronizeWithGnb(cellId, arfcn);
 }
 
 template <class C>
@@ -365,9 +386,16 @@ MemberNrUeCphySapProvider<C>::GetCellId()
 
 template <class C>
 uint32_t
-MemberNrUeCphySapProvider<C>::GetDlEarfcn()
+MemberNrUeCphySapProvider<C>::GetArfcn()
 {
-    return m_owner->DoGetDlEarfcn();
+    return m_owner->DoGetArfcn();
+}
+
+template <class C>
+void
+MemberNrUeCphySapProvider<C>::SetNumerology(uint16_t numerology)
+{
+    m_owner->SetNumerology(numerology);
 }
 
 template <class C>
@@ -379,9 +407,9 @@ MemberNrUeCphySapProvider<C>::SetDlBandwidth(uint16_t dlBandwidth)
 
 template <class C>
 void
-MemberNrUeCphySapProvider<C>::ConfigureUplink(uint32_t ulEarfcn, uint16_t ulBandwidth)
+MemberNrUeCphySapProvider<C>::ConfigureUplink(uint32_t arfcn, uint16_t ulBandwidth)
 {
-    m_owner->DoConfigureUplink(ulEarfcn, ulBandwidth);
+    m_owner->DoConfigureUplink(arfcn, ulBandwidth);
 }
 
 template <class C>
@@ -454,6 +482,41 @@ MemberNrUeCphySapProvider<C>::SetImsi(uint64_t imsi)
     m_owner->DoSetImsi(imsi);
 }
 
+template <class C>
+void
+MemberNrUeCphySapProvider<C>::SetSymbolsPerSlot(uint32_t symbolsPerSlot)
+{
+    m_owner->SetSymbolsPerSlot(symbolsPerSlot);
+}
+
+template <class C>
+void
+MemberNrUeCphySapProvider<C>::SetPattern(std::string tddPattern)
+{
+    m_owner->SetPattern(tddPattern);
+}
+
+template <class C>
+void
+MemberNrUeCphySapProvider<C>::SetDlCtrlSyms(uint8_t numDlCtrlSyms)
+{
+    m_owner->SetDlCtrlSyms(numDlCtrlSyms);
+}
+
+template <class C>
+void
+MemberNrUeCphySapProvider<C>::SetUlCtrlSyms(uint8_t numUlCtrlSyms)
+{
+    m_owner->SetUlCtrlSyms(numUlCtrlSyms);
+}
+
+template <class C>
+void
+MemberNrUeCphySapProvider<C>::SetNumRbPerRbg(uint32_t numRbPerRbg)
+{
+    m_owner->SetNumRbPerRbg(numRbPerRbg);
+}
+
 /**
  * Template for the implementation of the NrUeCphySapUser as a member
  * of an owner class of type C to which all methods are forwarded
@@ -465,7 +528,7 @@ class MemberNrUeCphySapUser : public NrUeCphySapUser
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrUeCphySapUser(C* owner);
 
@@ -473,8 +536,11 @@ class MemberNrUeCphySapUser : public NrUeCphySapUser
     MemberNrUeCphySapUser() = delete;
 
     // methods inherited from NrUeCphySapUser go here
-    void RecvMasterInformationBlock(uint16_t cellId, NrRrcSap::MasterInformationBlock mib) override;
+    void RecvMasterInformationBlock(uint16_t cellId,
+                                    uint32_t arfcn,
+                                    NrRrcSap::MasterInformationBlock mib) override;
     void RecvSystemInformationBlockType1(uint16_t cellId,
+                                         uint32_t arfcn,
                                          NrRrcSap::SystemInformationBlockType1 sib1) override;
     void ReportUeMeasurements(NrUeCphySapUser::UeMeasurementsParameters params) override;
     void NotifyOutOfSync() override;
@@ -494,18 +560,20 @@ MemberNrUeCphySapUser<C>::MemberNrUeCphySapUser(C* owner)
 template <class C>
 void
 MemberNrUeCphySapUser<C>::RecvMasterInformationBlock(uint16_t cellId,
+                                                     uint32_t arfcn,
                                                      NrRrcSap::MasterInformationBlock mib)
 {
-    m_owner->DoRecvMasterInformationBlock(cellId, mib);
+    m_owner->DoRecvMasterInformationBlock(cellId, arfcn, mib);
 }
 
 template <class C>
 void
 MemberNrUeCphySapUser<C>::RecvSystemInformationBlockType1(
     uint16_t cellId,
+    uint32_t arfcn,
     NrRrcSap::SystemInformationBlockType1 sib1)
 {
-    m_owner->DoRecvSystemInformationBlockType1(cellId, sib1);
+    m_owner->DoRecvSystemInformationBlockType1(cellId, arfcn, sib1);
 }
 
 template <class C>

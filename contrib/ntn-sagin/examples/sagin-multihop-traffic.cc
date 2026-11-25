@@ -41,6 +41,7 @@
  *
  * Quick test:  --simSeconds=60          (a route flip occurs mid-run)
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
@@ -503,6 +504,8 @@ main(int argc, char* argv[])
 
     Simulator::Schedule(Seconds(1.0), &SaginProbe, simSeconds);
     Simulator::Stop(Seconds(simSeconds + 0.1));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 
     const uint64_t txP = client->GetTxPackets();
@@ -516,6 +519,9 @@ main(int argc, char* argv[])
     std::printf("#   carried at GW:  via LEO-A=%lu bytes   via LEO-B=%lu bytes "
                 "(sum should track the route history)\n",
                 (unsigned long)g_carried[0], (unsigned long)g_carried[1]);
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "sagin-multihop-traffic", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

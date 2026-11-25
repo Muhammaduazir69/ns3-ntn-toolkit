@@ -12,10 +12,12 @@
 #include "frame-capture-model.h"
 #include "wifi-units.h"
 
+#include "ns3/wifi-export.h"
+
 namespace ns3
 {
 /**
- * \ingroup wifi
+ * @ingroup wifi
  *
  * A simple threshold-based model for frame capture effect.
  * If the new incoming frame arrives while the receiver is
@@ -24,12 +26,12 @@ namespace ns3
  * the current frame is dropped and the receiver locks
  * onto the new incoming frame.
  */
-class SimpleFrameCaptureModel : public FrameCaptureModel
+class WIFI_EXPORT SimpleFrameCaptureModel : public FrameCaptureModel
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -39,13 +41,13 @@ class SimpleFrameCaptureModel : public FrameCaptureModel
     /**
      * Sets the frame capture margin.
      *
-     * \param margin the frame capture margin
+     * @param margin the frame capture margin
      */
     void SetMargin(dB_u margin);
     /**
      * Return the frame capture margin.
      *
-     * \return the frame capture margin
+     * @return the frame capture margin
      */
     dB_u GetMargin() const;
 
@@ -53,10 +55,10 @@ class SimpleFrameCaptureModel : public FrameCaptureModel
      * This method returns whether the reception should be switched to a
      * new incoming frame.
      *
-     * \param currentEvent the event of the current frame
-     * \param newEvent the event of the new incoming frame
+     * @param currentEvent the event of the current frame
+     * @param newEvent the event of the new incoming frame
      *
-     * \return true if the reception should be switched to a new incoming frame,
+     * @return true if the reception should be switched to a new incoming frame,
      *         false otherwise
      */
     bool CaptureNewFrame(Ptr<Event> currentEvent, Ptr<Event> newEvent) const override;

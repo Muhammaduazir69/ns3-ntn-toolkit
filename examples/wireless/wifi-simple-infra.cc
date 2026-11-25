@@ -89,7 +89,7 @@ NS_LOG_COMPONENT_DEFINE("WifiSimpleInfra");
 /**
  * Function called when a packet is received.
  *
- * \param socket The receiving socket.
+ * @param socket The receiving socket.
  */
 void
 ReceivePacket(Ptr<Socket> socket)
@@ -103,10 +103,10 @@ ReceivePacket(Ptr<Socket> socket)
 /**
  * Generate traffic.
  *
- * \param socket The sending socket.
- * \param pktSize The packet size.
- * \param pktCount The packet count.
- * \param pktInterval The interval between two packets.
+ * @param socket The sending socket.
+ * @param pktSize The packet size.
+ * @param pktCount The packet count.
+ * @param pktInterval The interval between two packets.
  */
 static void
 GenerateTraffic(Ptr<Socket> socket, uint32_t pktSize, uint32_t pktCount, Time pktInterval)
@@ -229,14 +229,14 @@ main(int argc, char* argv[])
     std::cout << "Testing " << numPackets << " packets sent with receiver rss " << rss << std::endl;
 
     Simulator::ScheduleWithContext(source->GetNode()->GetId(),
-                                   Seconds(1.0),
+                                   Seconds(1),
                                    &GenerateTraffic,
                                    source,
                                    packetSize,
                                    numPackets,
                                    interval);
 
-    Simulator::Stop(Seconds(30.0));
+    Simulator::Stop(Seconds(30));
     Simulator::Run();
     Simulator::Destroy();
 

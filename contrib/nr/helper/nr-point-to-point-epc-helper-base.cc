@@ -26,14 +26,20 @@ NrPointToPointEpcHelperBase::NrPointToPointEpcHelperBase()
     : NrNoBackhaulEpcHelper()
 {
     NS_LOG_FUNCTION(this);
-    // To access the attribute value within the constructor
-    ObjectBase::ConstructSelf(AttributeConstructionList());
+}
+
+void
+NrPointToPointEpcHelperBase::NotifyConstructionCompleted()
+{
+    NrNoBackhaulEpcHelper::NotifyConstructionCompleted();
+
+    NS_LOG_FUNCTION(this);
 
     // since we use point-to-point links for the backhaul links,
     // we use a /30 subnet which can hold exactly two addresses
     // (remember that net broadcast and null address are not valid)
-    m_s1uIpv4AddressHelper.SetBase("10.0.0.0", "255.255.255.252");
-    m_s1apIpv4AddressHelper.SetBase("11.0.0.0", "255.255.255.252");
+    m_s1uIpv4AddressHelper.SetBase(GetCoreSubnet(10), "255.255.255.252");
+    m_s1apIpv4AddressHelper.SetBase(GetCoreSubnet(11), "255.255.255.252");
 }
 
 NrPointToPointEpcHelperBase::~NrPointToPointEpcHelperBase()
@@ -80,12 +86,6 @@ NrPointToPointEpcHelperBase::GetTypeId()
     return tid;
 }
 
-TypeId
-NrPointToPointEpcHelperBase::GetInstanceTypeId() const
-{
-    return GetTypeId();
-}
-
 void
 NrPointToPointEpcHelperBase::DoDispose()
 {
@@ -94,13 +94,11 @@ NrPointToPointEpcHelperBase::DoDispose()
 }
 
 void
-NrPointToPointEpcHelperBase::AddGnb(Ptr<Node> gnb,
-                                    Ptr<NetDevice> nrGnbNetDevice,
-                                    std::vector<uint16_t> cellIds)
+NrPointToPointEpcHelperBase::AddGnb(Ptr<Node> gnb, Ptr<NetDevice> nrGnbNetDevice, uint16_t cellId)
 {
-    NS_LOG_FUNCTION(this << gnb << nrGnbNetDevice << cellIds.size());
+    NS_LOG_FUNCTION(this << gnb << nrGnbNetDevice << cellId);
 
-    NrNoBackhaulEpcHelper::AddGnb(gnb, nrGnbNetDevice, cellIds);
+    NrNoBackhaulEpcHelper::AddGnb(gnb, nrGnbNetDevice, cellId);
 
     // create a point to point link between the gNB and the SGW with
     // the corresponding new NetDevices on each side
@@ -127,7 +125,7 @@ NrPointToPointEpcHelperBase::AddGnb(Ptr<Node> gnb,
     Ipv4Address gnbS1uAddress = gnbSgwIpIfaces.GetAddress(0);
     Ipv4Address sgwS1uAddress = gnbSgwIpIfaces.GetAddress(1);
 
-    NrNoBackhaulEpcHelper::AddS1Interface(gnb, gnbS1uAddress, sgwS1uAddress, cellIds);
+    NrNoBackhaulEpcHelper::AddS1Interface(gnb, gnbS1uAddress, sgwS1uAddress, cellId);
 }
 
 } // namespace ns3

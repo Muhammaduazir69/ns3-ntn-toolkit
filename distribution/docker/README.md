@@ -1,6 +1,6 @@
 # Docker distribution
 
-Pre-built ns-3.43 + 14 bundled modules + Python utilities, published as
+Pre-built ns-3.49 + 5G-LENA v5.2 + 14 bundled modules + Python utilities, published as
 [`uzairdocker69/ns3-ntn-toolkit`](https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit).
 
 ## Build the image

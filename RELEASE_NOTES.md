@@ -1,5 +1,4 @@
-ns-3 RELEASE NOTES
-==================
+# ns-3 Release Notes
 
 This file contains ns-3 release notes (most recent releases first).
 
@@ -13,8 +12,463 @@ a [GitLab.com issue tracker](https://gitlab.com/nsnam/ns-3-dev/-/issues) number,
 and references prefixed by '!' refer to a
 [GitLab.com merge request](https://gitlab.com/nsnam/ns-3-dev/-/merge_requests) number.
 
-Release 3.43
-------------
+## Release 3.49
+
+## Availability
+
+This release is available from:
+<https://www.nsnam.org/release/ns-3.49.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
+- g++-11.1 or later, or LLVM/clang++-17 or later
+- Python 3.10 or later
+- CMake 3.25 or later
+- (macOS only) Xcode 16.3 or later
+- (Windows only) Msys2/MinGW64, Msys2/UCRT64 and ClangCL/MSVC toolchains, or WSL2
+
+This release raised the minimum AppleClang version from 15 to 17. Continuous integration
+now tests macOS 15 instead of macOS 14.
+
+Continuous integration now tests the Msys2/UCRT64 toolchain instead of Msys2/MinGW64.
+Msys2/MinGW64 should still work, but is no longer tested.
+
+The versions of clang-format enforced by the check-style-clang-format.py script for
+this release are 20 to 22.
+
+Version 22 of the clang-tidy linter is now supported and recommended, although
+versions 17 to 21 are still compatible.
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.5.0.
+
+This release raised the minimum Python version for the Python bindings from 3.8 to 3.10
+and the required cppyy version from 3.1.2 to 3.5.0. Pip wheels are now built for
+Python 3.10 to 3.14.
+
+The required Doxygen version for documentation generation is now version 1.16,
+but other contemporaneous versions may also work.
+
+### New user-visible features
+
+- Added support for `nlohmann/json`, a header-only C++ third-party library for JSON parsing and serialization.
+- (applications) !2968 Added `FlentApplication` and `FlentHelper` to model the Flent network benchmarking tool (`ping`, `tcp_upload`, `tcp_download`, and `rrul` tests) and generate `.flent` JSON output files, as the outcome of the GSoC 2026 project titled "Flent Application API in ns-3"
+- (core) Added a `TimeSpan` class (and `TimeSpanValue`) to represent a time interval, and a `StructValue` attribute value to expose a struct through the attribute system.
+- (network) IANA protocol and link types are now centralized in network module headers.
+- (propagation) New `SpatialGaussianField` class provides the stateless, position-keyed spatially-correlated Gaussian random field shared by the drop-based spatial consistency of the 3GPP propagation, channel condition and channel models.
+- (propagation) The 3GPP NTN propagation loss models now share a `ThreeGppNTNPropagationLossModel` base class whose `IonosphericScintillationLossEnabled` and `TroposphericScintillationLossEnabled` attributes allow the scintillation losses to be disabled.
+- (propagation) A new `InterUeSpatialConsistency` attribute of `ChannelConditionModel` enables inter-UE (drop-based) spatially consistent LOS/NLOS state, indoor state, building type, shadow fading and O2I penetration loss per 3GPP TR 38.901 Sec. 7.6.3.
+- (sixlowpan) !2873 The mesh-under forwarding decision is now delegated to a pluggable policy (`SixLowPanMeshUnderRouting`); the default `SixLowPanSimpleFlooding` preserves the historical flooding behavior. The `MeshUnderJitter` and `MeshCacheLength` attributes moved from `SixLowPanNetDevice` to the policy. Mesh-under membership and relaying are now controlled separately by the `UseMeshUnder` and `ForwardMesh` attributes.
+- (sixlowpan) Added support for RFC 7400 Generic Header Compression (GHC), selected with the `GHC` value of the `SixLowPanNetDevice` `CompressionType` attribute.
+- (spectrum) `ThreeGppChannelModel` extends the drop-based spatial consistency to the large-scale parameters and the cluster and ray specific variables of the fast fading when the `InterUeSpatialConsistency` attribute of its channel condition model is enabled.
+- (spectrum) New `LosRayOnly` attribute of `ThreeGppChannelModel` suppresses the stochastic clusters and keeps only the deterministic LOS ray.
+- (spectrum) `ThreeGppChannelModel` and `ThreeGppSpectrumPropagationLossModel` are about 8-11x faster per link, with unchanged results; NS_LOG output is also several times faster.
+- (spectrum) New `LargeBandwidthArrayModeling`, `ChannelBandwidth` and `MaxRaysPerCluster` attributes of `ThreeGppChannelModel` implement the large bandwidth and large antenna array modeling of 3GPP TR 38.901 Sec. 7.6.2.2.
+- (wifi) Added support for Beacon generation in an IBSS
+- (wifi) Added the building blocks for layer-2 roaming: APs and non-AP STAs now handle disassociation and reassociation, a non-AP STA can be forced to disassociate, and the association manager can reuse AP information instead of scanning again. No roaming manager is provided yet; a `wifi-roaming` example demonstrates the building blocks.
+- (zigbee) APS data can now be sent using the 64-bit extended destination address mode, resolved through the NWK address map.
+- (zigbee) !2964 Added basic support for Zigbee Device Object (ZDO)
+
+### Bugs fixed
+
+- (applications) #1368 Source applications now bind their socket to the address configured in the `Local` attribute.
+- (core) #147 `Config::SetDefault` can now set an attribute declared by a parent TypeId through the name of a derived TypeId.
+- (core) #781 `SystemPath::Exists` now handles bare filenames and directory paths.
+- (core) #1116 The normal random variable no longer accepts the degenerate pairs of the polar method.
+- (core) #1181 `CommandLine` now captures string values containing spaces.
+- (core) !3006 DesMetrics now writes the command line arguments into the JSON trace header when available, instead of the empty-arguments placeholder.
+- (core) Fixed serialization of nested attribute values.
+- (core) Fixed undefined behavior (signed overflow) when converting an integer to `Time` with a unit.
+- (core) The wall-clock synchronizer of the realtime scheduler now uses a monotonic clock and is free of a data race.
+- (csma) #234 Detaching a `CsmaNetDevice` from its channel now sets the link down and fires the link-change callbacks.
+- (dsr) !2762 Fixes header format to comply with RFC4728. Also other minor bug fixes and modernization.
+- (internet) #825 A router with no route to a destination now returns an ICMP Destination Unreachable (net unreachable) to the source.
+- (internet) #1036 ICMPv4 and ICMPv6 messages with an invalid checksum are now discarded when checksums are enabled.
+- (internet) #1039 An IPv6 raw socket bound to a multicast address now joins the group and receives packets sent to it.
+- (internet-apps) `V4TraceRoute` no longer leaks stale route text into the output of a subsequent hop.
+- (lr-wpan) !2916 Pcap files are now correctly generated with and without FCS cases.
+- (lte) #447 Fixed a crash in the UE mixed CQI report when a control reception completes after the PHY was reconfigured during handover.
+- (lte) #1096 A UE receiving an RRC Connection Reestablishment (or Reject) now declares radio link failure instead of aborting the simulation.
+- (mesh) #1341 Fixed dot11s regression that ignored the link rate, degrading the HWMP routing metric to hop count.
+- (mobility) #1308 `GeocentricConstantPositionMobilityModel` now computes the elevation angle correctly for all geometries and returns a negative value for a terminal below the horizon.
+- (network) #370 Many net devices now fire their `MacRxDrop` trace for a received frame that no protocol handler consumes, instead of dropping it silently.
+- (network) #1150 Enabling pcap on several devices with the same explicit filename now shares one open file, instead of reopening and truncating it and corrupting the earlier records.
+- (network) #1340 Fixed PacketBB address block tail compression corrupting addresses.
+- (network) Fixed `NixVector` deserialization and `Packet::Deserialize` size accounting.
+- (propagation) #1092 The breakpoint distance of the 3GPP RMa/UMa/UMi models now uses the exact speed of light.
+- (propagation) #1164 Fixed three coefficients of the ITU-R P.1411 NLOS-over-rooftop model (street orientation above 55 degrees, base station below rooftop, and the metropolitan/medium-city kf coefficients).
+- (propagation) #1354 The 3GPP NTN propagation loss models now return a defined large loss, instead of an undefined value, for links outside the model domain (non-positive elevation angle, or coincident nodes).
+- (sixlowpan) #1342 Fixed a deserialization error in the MESH header.
+- (sixlowpan) #1344 The DAC flag is now honored for IPHC stateful multicast address compression.
+- (sixlowpan) #1361 Small packets are sent uncompressed on links that pad short frames (e.g., CSMA), where padding would otherwise be delivered as data.
+- (spectrum) #1369 The phased-array beamforming gain of a signal is now computed with the transmitter's beamforming vector at transmission time rather than at arrival time, which differed whenever the array was re-steered while the signal was propagating.
+- (spectrum) The fixed ray-to-subcluster mapping of the two strongest clusters of the 3GPP TR 38.901 fast-fading model now follows Table 7.5-5; the previous mapping was shifted by one ray.
+- (spectrum) The cross-polarization power ratios of the 3GPP TR 38.901 fast-fading model are now drawn in dB from the Table 7.5-6 mean and standard deviation; the parameters were previously converted to linear scale before the dB draw, giving under-dispersed and under-powered ratios.
+- (spectrum) A blockage attenuation of A dB now scales the LOS ray amplitude of the 3GPP TR 38.901 fast-fading model by `10^(-A/20)`; it was previously applied as `10^(-A/10)`, doubling the attenuation.
+- (spectrum) The large-scale parameters of indoor (O2I) LOS links of the 3GPP TR 38.901 fast-fading model are now drawn with the O2I ordering of Table 7.5-6, which has no K-factor; the LOS ordering was previously applied against the O2I correlation matrix, giving wrong correlations and a constant zenith spread of arrival on every such link.
+- (spectrum) The cached delay phasors of `ThreeGppSpectrumPropagationLossModel` are now refreshed whenever the cluster delays change; they were previously kept as long as the number of clusters did not change, so an in-place channel update with the same cluster count reused the previous realization's phasors.
+- (spectrum) `ThreeGppChannelModel::WrapAngles` now mirrors an inclination outside [0, pi] through the pole; it previously subtracted pi, sending a ray just past the nadir to just below the zenith (the wrong hemisphere).
+- (spectrum) The antenna element field pattern of `ThreeGppChannelModel` is now evaluated with the direction-corrected ray angles on reversed-direction links; with directional elements, NLOS clusters on such links were previously attenuated by the back lobe (about 30 dB).
+- (tcp) #125 A receiver now sends a window update when an application read reopens a previously closed receive window, instead of waiting for the sender's persist timer.
+- (tcp) #1012 DCTCP now backs off on inferred packet loss as RFC 8257 requires.
+- (tcp) #1190 A retransmitted segment that is SACKed is no longer counted as retransmitted, which inflated the bytes in flight and stalled transmission during recovery.
+- (tcp) #1282 Fixed an integer wraparound in the PRR recovery algorithm.
+- (tcp) #1326 Fixes a crash in the persist timer when the receiver's window is zero and the sender has no unsent data.
+- (tcp) #1107 With SACK disabled, a cumulative ACK no longer turns a guess made from duplicate ACK counting into an inferred loss, which caused repeated spurious fast retransmits and kept the congestion window near its minimum.
+- (tcp) #1349 Lost retransmissions are now detected when later-sent data is SACKed.
+- (tcp) #1350 PRR no longer double-counts delivered data when SACK is enabled.
+- (tcp) #1351 PRR RecoverFS is now initialized from the FlightSize with the RFC 9937 SACK terms, instead of from the pipe.
+- (wifi) !2938 A DL MU PPDU transmitted in a non-initial frame exchange of a TXOP is now protected by an MU-RTS if any of its receivers is unprotected; previously the decision was made per MPDU and such a PPDU could be sent without the configured protection (debug builds failed an assert).
+- (wifi) !2944 An EMLSR client starting an UL TXOP while the AP was still tracking the end of a previous TXOP is now recognized as the new TXOP holder; previously the frame was treated as a continuation of the old TXOP and the blocking of the client's other links was skipped (debug builds failed an assert).
+- (wifi) !2945 CTS-to-self frames are now transmitted over the bandwidth of the frame they protect, so that transmissions in the rest of the TXOP are no longer limited to 20 MHz.
+- (wifi) Fix Duration/ID for group addressed frames sent under multiple protection setting
+- (wifi) The TXOP Limit cannot be exceeded to transmit a DL MU PPDU
+- (wifi) TXOP limit can also be exceeded when sending a BlockAckReq
+- (wifi) A BlockAckReq shall not be transmitted on a link if its TID is not mapped to the link
+- (wifi) When a link is disabled as per the negotiated TID-to-Link Mapping, no frame shall be sent on it
+- (wifi) `IdealWifiManager` now records a 20 MHz width after a successful RTS on a 40 MHz channel (a typo compared against 42 MHz).
+- (wifi) `EhtFrameExchangeManager` now resets the channel access state when releasing the channel without transmitting on an EMLSR link.
+- (wifi) The CCFS0 and CCFS1 subfields of the EHT Operation Information field are now filled in.
+- (wifi) Fixed a segfault when `SpectrumWifiPhy` logging is enabled.
+- (wifi) Fixed spurious asserts for DL MU TXVECTORs without user info, for puncturing info with narrow channels, and for 80+80 MHz transmit spectra.
+- (wifi) The starting sequence number of an ADDBA Request is now correct when a BlockAckReq is pending after a missed BlockAck.
+- (zigbee) In the NWK, broadcast initiator devices are now registered in the BTT to avoid receiving retransmissions.
+
+## Release 3.48
+
+This release is available from:
+<https://www.nsnam.org/release/ns-3.48.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
+- g++-11.1 or later, or LLVM/clang++-17 or later
+- Python 3.10 or later
+- CMake 3.25 or later
+- (macOS only) Xcode 16.2 or later
+- (Windows only) Msys2/MinGW64, Msys2/UCRT64 and ClangCL/MSVC toolchains, or WSL2
+
+This release raised the minimum CMake version from 3.20 to 3.25.
+
+The version of clang-format enforced by the check-style-clang-format.py script for
+this release is version 20 only.
+
+Version 22 of the clang-tidy linter is now supported and recommended, although
+versions 17 to 21 are still compatible.
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.5.0.
+
+### New user-visible features
+
+- (network) The `SequenceNumber` template class has been changed to allow sequence numbers with an arbitrary number of bits (e.g., 10 bits).
+- (mobility) Added the `LeoCircularOrbitMobilityModel` for satellite-based mobility. Orbital shells can be defined via `LeoOrbitalShell`, loaded from files via `LeoOrbitNodeHelper`.
+- (sixlowpan) Added support for 6LoWPAN Neighbor Discovery (RFC 6775), including address registration (NS/NA with EARO), multicast Router Solicitation with binary backoff, the 6CIO option, ROVR generation and validation, and a binding table. Border routers and nodes can be installed via `SixLowPanHelper::InstallSixLowPanNdBorderRouter()` and `InstallSixLowPanNdNode()`.
+- (spectrum) Added the Sionna RT channel model, including `SionnaRtChannelModel` and `SionnaRtSpectrumPropagationLossModel`, enabling ray-traced phased-array spectrum propagation via `sionna.rt` scenes and solver integration.
+- (wifi) Added a round-robin MAC queue scheduler (`RrWifiQueueScheduler`).
+- (wifi) Added support for Power Save mode.
+
+### Bugs fixed
+
+- (internet) !2863 Fixes missing `ECN_DISABLED` check in IPv6 `ForwardUp6()` ECN handling
+- (internet) !2792 Prevents Ipv[4,6]ListRouting from using wrong output interface and add test.
+- (internet) Fixes an off-by-one error in the `Print()` output of `Icmpv4DestinationUnreachable` and `Icmpv4TimeExceeded`.
+- (internet) Exports the `ArpL3Protocol` class so that its protocol number is found on Windows.
+- (internet-apps) Fixes duplicate "Trace Complete" output in `V4TraceRoute`.
+- (lr-wpan) !2860 Fixes packet drop when CheckSumEnabled and correct.
+- (network) #1239 Adds checks for impossible values in `Ipv4Mask`.
+- (network) #1300 Fixes an integer overflow in SequenceNumbers, so that the sign of the difference and the direct comparison would not match.
+- (spectrum) !2774 `MultiModelSpectrumChannel` will now omit an existing precoding matrix if its dimensions do not match those of the receiver. This is necessary because we do not convert it in the same way as the PSD.
+- (tcp) #1319 TCP CongestionStateSet() was not being called upon entering or leaving CA_CWR state
+- (wifi) APs unblock transmissions to stations that are in power save mode when they disassociate, otherwise they will not be able to associate again
+- (wifi) APs record disassociation on all links setup with a non-AP MLD
+- (wifi) Prevents AP's counter of STAs in PS mode from being updated incorrectly
+- (wifi) #1244 #1324 Fixes a PHY state machine race in `WifiPhy`.
+- (wifi) #1318 Fixes an incorrect `InterferenceHelper` lookup caused by a change to `std::find` behavior in libc++ 22.
+
+## Release 3.47
+
+This release is available from:
+<https://www.nsnam.org/release/ns-3.47.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
+- g++-11.1 or later, or LLVM/clang++-17 or later
+- Python 3.10 or later
+- CMake 3.25 or later
+- (macOS only) Xcode 16.2 or later
+- (Windows only) Msys2/MinGW64, Msys2/UCRT64 and ClangCL/MSVC toolchains, or WSL2
+
+This release of ns-3 updated the minimum supported version of Python from 3.8 to 3.10, and the minimum supported version of CMake from 3.20 to 3.25.
+
+Contributors or maintainers who require the use of cmake-format (CMake formatting utility) to pass
+the ns-3 CI checks should note that only Python 3.12 is currently supported for cmake-format.
+Outside of this utility, Python 3.10 through 3.14 should work with this release.
+
+The version of clang-format enforced by the check-style-clang-format.py script for
+this release is version 20 only.
+
+Version 21 of the clang-tidy linter is now supported and recommended, although
+versions 17 to 20 are still compatible.
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.5.0.
+
+### New user-visible features
+
+Numbers preceded by '!' reference GitLab.com Merge Request numbers (for more information)
+Numbers preceded by '#' reference GitLab.com Issue numbers (for more information)
+
+- (applications) !2611 New IEEE 802.11ax evaluation methodology traffic generators for video, VoIP, virtual desktop, and real-time mobile gaming
+- (core) !2633 Added `SystemPath::FindSelf()` to retrieve the full path to the running executable.
+- (examples) !2686 New TCP BBR Python example program.
+- (internet) !2405 Added support for TCP FACK (Forward Acknowledgement).
+- (internet) !2530 Added IPv6 support to Global Routing.
+- (internet) !2434 Added `PrintRouting` functionality to `GlobalRouting` similar to `TraceRoute`.
+- (lr-wpan) !2592 Added PHY preamble and RSSI support.
+- (propagation) !2626 Added 3GPP outdoor-to-indoor (O2I) penetration losses for sub-6 GHz frequencies according to TS 38.901 Table 7.4.3-3, including vehicular O2I losses.
+- (spectrum) !2490 The ns-3 3GPP channel model now supports a spatial-consistency update technique
+  aligned with TR 38.901 Procedure A (Sec. 7.6.3.2).
+- (visualizer) !2663 Add Lr-Wpan NetDevices support to the Pyviz visualizer.
+
+### Bugs fixed
+
+- (core) #1252 - Handle >1023 character paths to self on Linux
+- (internet) !2624 - Fix TCP LEDBAT congestion window growth calculation
+- (network) #1226 - Fix Ipv6Prefix and Ipv4Mask default constructors
+- (network) !2728 Fix deserialization, TLV field alignment, and MCS padding issues in Radiotap header
+- (propagation) !2593 Fix 3GPP O2I loss distributions that used standard deviation instead of variance from TS 38.901 Table 7.4.3-2
+- (spectrum) #1314 - Fix missing complex conjugation of RX beamforming vector in 3GPP long-term channel component calculation.
+- (wifi) !2613 Fix incorrect aPSDUMaxLength value for 802.11be.
+- (wifi) !2614 Fix hardcoded threshold value in EHT PHY to determine per-20MHz CCA indication.
+- (wifi) !2614 Fix spurious CCA-BUSY notification after channel width has changed
+- (wifi) #1295 - Avoid floating point precision issues in wifi-error-rate-models-test.cc
+- (wifi) #1284 - Fix radiotap for received packets
+- (wifi) !2599 Fix misuse of TX power and power level in remote station manager
+- (visualizer) !2636 - Fix overlapping labels and simulation stop time in PyViz visualizer.
+
+## Release 3.46.1
+
+ns-3.46.1 is a small update to ns-3.46 to fix build issues discovered after release.
+There should be no model behavior or API changes compared with ns-3.46.
+
+This release is available from:
+<https://www.nsnam.org/release/ns-3.46.1.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
+- g++-11.1 or later, or LLVM/clang++-17 or later
+- Python 3.8 or later
+- CMake 3.20 or later
+- (macOS only) Xcode 16.2 or later
+- (Windows only) Msys2/MinGW64, Msys2/UCRT64 and ClangCL/MSVC toolchains, or WSL2
+
+The version of clang-format enforced by the check-style-clang-format.py script for
+this release is version 20 only.
+
+Version 20 of the clang-tidy linter is now supported and recommended, although versions 15-19
+are still compatible.
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.5.0.
+
+### New user-visible features
+
+- (doc) New module documentation for mobility and propagation modules
+
+### Bugs fixed
+
+- (build) The ns3 script was not compatible with Python 3.14
+- (build) A missing header include in test.cc was breaking the g++-12 build
+- (build) Fixed OpenMPI-based build on Alpine Linux
+
+## Release 3.46
+
+This release is available from:
+<https://www.nsnam.org/release/ns-3.46.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
+- g++-11.1 or later, or LLVM/clang++-17 or later
+- Python 3.8 or later
+- CMake 3.20 or later
+- (macOS only) Xcode 16.2 or later
+- (Windows only) Msys2/MinGW64, Msys2/UCRT64 and ClangCL/MSVC toolchains, or WSL2
+
+Note that the minimum C++ compiler versions have increased since the last release.
+
+The version of clang-format enforced by the check-style-clang-format.py script for
+this release is version 20 only; the previous ns-3 release was compatible with versions 15-19.
+
+Version 20 of the clang-tidy linter is now supported and recommended, although versions 15-19
+are still compatible.
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.5.0.
+
+### New user-visible features
+
+ns-3 has switched to the C++23 standard by default.
+
+The wimax module was removed and moved to the ns-3 App Store.
+
+- (antenna) !2516 - Reformatted documentation
+- (documentation) !2519 - Improve models documentation look and feel
+- (core) A stacktrace will now be printed on fatal errors in supported platforms.
+- (zigbee) !2512 - Added Groupcast (Multicast) support
+- (zigbee) Added basic APS layer support
+- (spectrum) !2452 - Added new wraparound model support for spectrum channels, and the hexagonal wraparound model, typical of cellular deployments
+
+### Bugs fixed
+
+- (examples) #1146 - Fixed three-gpp-v2v-channel-example to prevent pathloss from being incorrectly accumulated over time
+- (internet) #851 - NeighborCacheHelper entries are no longer removed due to LinkUp events
+- (internet) #809 - Fixed IPv4,6 Raw Socket fragmentation issue
+- (internet) #1251 - Added check for longest prefix match in GlobalRouting
+- (stats) #295 - Added 100 ms timeout for sqlite3 operations to prevent hangs
+- (wifi) !2524 - Fix corrupted radiotap header when EHT is used.
+- (wifi) Block transmission on other EMLSR links as soon as it is detected that the main PHY is receiving an A-MPDU, to prevent that the EMLSR client starts an UL TXOP before the end of the A-MPDU
+- (wifi) EMLSR clients can switch to listening operations when receiving the MAC header of a broadcast frame that is not a Trigger Frame nor a Multi-STA BA
+- (wifi) Immediate channel access should not be postponed by a backoff slot if channel access is requested at a slot boundary
+- (wifi) Reset backoffs only if PHY went to sleep or off for more than a threshold
+
+## Release 3.45
+
+This release is available from:
+<https://www.nsnam.org/release/ns-3.45.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
+- g++-10.1 or later, or LLVM/clang++-11 or later
+- Python 3.8 or later
+- CMake 3.13 or later
+- (macOS only) Xcode 13.1.6 or later
+- (Windows only) Msys2/MinGW64 and Msys2/UCRT64 toolchains or WSL2
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.5.0.
+
+The required Doxygen version for documentation generation is now version 1.13.
+
+Note that the ns-3 allinone archive has been redesigned for this release; the
+allinone release no longer contains the `netanim` animator or the `bake` build tools
+but instead contains ns-3 plus additional contributed ns-3 modules that are known
+to work with the release.
+
+### New user-visible features
+
+- (dsr) !2403 - Reformatted documentation and added a new concept figure.
+- (flow-monitor) !2387 - Reformatted documentation and added a new concept figure.
+- (internet-apps) !2084 - GSoC 2024 DHCPV6 application added.
+- (lr-wpan) - !2429 - Renamed example lr-wpan-mlme to lr-wpan-beacon-mode.
+- (lr-wpan) - !2429 - Documentation update and small reformat fixes.
+- (wifi) 320 MHz channel support was added to the 802.11be model
+- (wifi) Added the `ProtectSingleExchange` attribute to the `QosFrameExchangeManager` to choose whether the NAV protection should cover the entire TXOP or only the current frame exchange when the TXOP limit is non-zero. In that case, the Duration/ID field in frames establishing the protection is set to the time remaining until the end of the current frame exchange. It is also possible to select whether the NAV duration should be extended by an additional time to protect beyond end of the immediate frame exchange via the `SingleExchangeProtectionSurplus` attribute of the `QosFrameExchangeManager`.
+- (tcp) !2410 - Added support for ABE (Alternative Backoff with ECN)
+
+### Bugs fixed
+
+- (bindings) #1187 - Fix library filtering to skip non-ns-3 libraries with "ns3" in their names.
+- (flow-monitor) #1202 - Create XML file in text mode
+- (internet) !2486 - Fix #809 - Ping for v4,v6 works now if fragmentation occurs.
+- (mobility) !2397 - Fix Rectangle::GetClosestSideOrCorner. It could assign the incorrect side when the checked position was outside the rectangle.
+- (wifi) #2368 - Fix various issues related to Content Channels and RU allocation. Fixes mostly covers cases where OFDMA is used with central 26 tones, where a single user is being assigned the whole PPDU bandwidth or where a RU is larger than 20 MHz.
+- (wifi) Various fixes to the EMLSR model have been made
+- (wifi) Fix the time the `NSlotsLeftAlert` trace source of `ChannelAccessManager` is fired (it cannot be earlier than the access grant start time)
+- (wifi) Fix the EIFS computation, which depends on the modulation class of the PPDU whose reception failed rather than on the latest standard supported by a device
+- (wifi) #1158 - Reintroduce WifiPpdu's destructor due to PIMPL
+- (zigbee) !2383 - Fix malformed RREP command with missing command options field.
+
+## Release 3.44
+
+This release adds the zigbee module and otherwise contains maintenance and small feature updates
+to the existing models and build system.
+
+### Availability
+
+This release is available from:
+<https://www.nsnam.org/release/ns-allinone-3.44.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
+- g++-10.1 or later, or LLVM/clang++-11 or later
+- Python 3.8 or later
+- CMake 3.13 or later
+- (macOS only) Xcode 13.1.6 or later
+- (Windows only) Msys2/MinGW64 and Msys2/UCRT64 toolchains or WSL2
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.1.2.
+
+The required Doxygen version for documentation generation is now version 1.11.
+
+Doxygen tags are now required to use the '@' rather than the '\' character.
+
+The minimum clang-format version is version 15.
+
+### New user-visible features
+
+- (applications) - Attributes `RemoteAddress` and `RemotePort` in UdpClient, UdpTraceClient and UdpEchoClient have been combined into a single `Remote` attribute. Similarly, the `ThreeGppHttpClient::RemoteServerAddress` and `ThreeGppHttpClient::RemoteServerPort` attributes have been combined into a single `ThreeGppHttpClient::Remote` attribute. The constructors of corresponding helper classes have been changed to make use of these new attributes.
+- (applications) - The `ThreeGppHttpServer::LocalAddress` and `ThreeGppHttpServer::LocalPort` attributes have been renamed to `ThreeGppHttpServer::Remote` and `ThreeGppHttpServer::Port`, respectively.
+- (applications) - It is now possible to specify the address on which to bind the listening socket for UdpServer via the `Local` attribute.
+- (applications) - It is now possible to specify a port only for PacketSink to listen to any address (both IPv4 and IPv6).
+- (build) Scan for contrib modules in `ns-3-external-contrib` directory, at the same level of the ns-3 directory (e.g. `./ns-3-dev/../ns-3-external-contrib/`).
+- (energy) Added new information and reformatted energy module documentation.
+- (wifi) - Added a `WifiDefaultProtectionManager::SkipMuRtsBeforeBsrp` attribute to avoid using MU-RTS to protect the transmission of a BSRP Trigger Frame. If this attribute is set to true (which is the default value), BSRP Trigger Frames can be used as Initial Control Frames for EMLSR clients
+- (wifi) Each MSDU, A-MSDU or management MPDU now has its individual frame retry count and each Txop/QosTxop has its own SRC (Station Retry Count) to match the standard specifications.
+- (wifi) The `MaxSsrc` and `MaxSlrc` attributes of the `WifiRemoteStationManager` have been obsoleted and replaced by the `FrameRetryLimit` attribute of the `WifiMac`.
+- (wifi) Added the `IncrementRetryCountUnderBa` attribute to the  `WifiRemoteStationManager` to choose whether or not to increase the retry count of frames that are part of a block ack agreement; this attribute defaults to false to match the standard specifications.
+- (wifi) Added a new `BaEstablished` trace source to `QosTxop` to notify that a block ack agreement has been established with a given recipient for a given TID.
+- (wifi) Added a new `MainPhySwitch` trace source to EmlsrManager, which is fired when the main PHY switches channel to operate on another link and provides information about the reason for starting the switch.
+- (wifi) Add support for exchanging 802.11be Multi-Link Probe Request frames. Currently, the default association manager does not instruct the MAC to transmit a Multi-Link Probe Request frame, though.
+- (wifi) 2004! - Add Wi-Fi channel occupancy statistics helper
+- (wifi) 2009! - Added WifiTxStatsHelper for Wi-Fi MAC-level tracing.
+- (wifi) - Added support for 802.11aa groupcast with retries (GCR). Both unsolicited retries (GCR-UR) and Block Ack (GCR-BA) mechanisms are implemented.
+- (zigbee) Added a new Zigbee module.
+- (wifi) Trigger frames have been extended to support Special User Info field
+- (wifi) Added support for 802.11be STAs to operate on 320 MHz in 6 GHz band.
+
+### Bugs fixed
+
+- (core) - Fix the command-line handling of default values containing a space
+- (examples) - Fix incorrect energy calculation in wifi power adaptation examples
+- (internet) #1109 - Add support for multiple hardware types in ArpHeader
+- (internet) #1177 - check for 0-TTL before trying to decrement
+- (lr-wpan) !2334 - Fix the MAC reaction to an association issue in which association response commands might be received before data request command acks.
+- (propagation) Scale the NTN LOS probabilities from percentages [0, 100] to probabilities [0, 1]
+- (propagation) !2352 - Fix Okumura Hata propagation loss model for open areas environment
+- (spectrum) Calculate PSD by combining received power on ports, even when no precoding matrix is set
+- (spectrum) Scale the CDS parameter of V2V models to nanoseconds
+- (spectrum) Add missing K-factor fields (uk, sigK) for NTN NLOS 3GPP channel model
+- (spectrum) Trigger 3GPP channel updates after changes to antenna attributes
+- (wifi) Retransmit procedures have been aligned with the standard specifications.
+- (wifi) Clear PSDU map if no immediate response expected with BAR-BA ack sequence
+- (wifi) Fix S-MPDU TX duration computation with BlockAck ack policy
+- (wifi) Fix missing DSSS Param Set in Probe Request sent over 2.4 GHz links
+- (wifi) #1104 - Fix wrong calculation of start sequence number
+- (wifi) Ensure AckedMpdu trace is fired before the MPDU is dequeued
+
+## Release 3.43
 
 This release is mainly a maintenance release and the API is generally
 consistent with the previous ns-3.42 release.  See the file CHANGES.md
@@ -54,11 +508,9 @@ The required Doxygen version for documentation generation is version 1.11.
 - (lr-wpan) !2163 - Lr-wpan module now uses the `ns3::lrwpan` namespace in its TypeId.
 - (tcp) !2027 - TcpSocketBase: Added TCP retransmission trace
 - (tcp) !2059 - Aligns PRR implementation with RFC 6937 bis-08. Added a new param `isDupAck` to `DoRecovery` method, removed `ReductionBound` attribute from `TcpPrrRecovery`.
-- (wifi) !2068 - Introduce use of weak type aliases for quantities representing SI units,
-in preparation for future conversion to strongly typed units and quantities
+- (wifi) !2068 - Introduce use of weak type aliases for quantities representing SI units, in preparation for future conversion to strongly typed units and quantities
 - (wifi) - Added support for 80+80 MHz channel configuration
-- (wifi) - It is now possible to control how PCAPs are generated for MLD: either a single PCAP
-per device, or a PCAP file per PHY, or a PCAP file per link. By default, a single PCAP is generated per PHY for MLD. The configuration of this parameter has no impact for SLD.
+- (wifi) - It is now possible to control how PCAPs are generated for MLD: either a single PCAP per device, or a PCAP file per PHY, or a PCAP file per link. By default, a single PCAP is generated per PHY for MLD. The configuration of this parameter has no impact for SLD.
 
 ### Bugs fixed
 
@@ -94,8 +546,7 @@ per device, or a PCAP file per PHY, or a PCAP file per link. By default, a singl
 - (wifi) Fix incorrect configuration of wifi-spectrum-saturation-example.cc
 - (wifi) Fix output formatting for wifi-spectrum-per-example.cc
 
-Release 3.42
-------------
+## Release 3.42
 
 In this release, we have introduced pedantic compiler warnings to enhance C++ standard conformance and improve portability.  Also, model library code in the lr-wpan and energy modules has been moved into a nested C++ namespace.
 
@@ -155,8 +606,7 @@ been tested on Linux. As of this release, the latest known version to work with 
 - (wifi) - Fix operation in 6 GHz band (added support for FILS Discovery frames and HE 6GHz Band Capabilities information element, fixed HE Operation information element, fixed NSS selection, fixed HT and VHT not supported on 6GHz links).
 - (wifi, spectrum) - Fix negative power when channel is switched during the propagation delay period (after TX started but before the signal reached RX).
 
-Release 3.41
-------------
+## Release 3.41
 
 ### Availability
 
@@ -209,8 +659,7 @@ Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.
 - (wifi) - ReportAmpduTxStatus called twice when sending explicit BAR upon missed BlockAck
 - (wifi) - Fix regression causing BlockAckReq frames to be sent with data rates instead of control rates
 
-Release 3.40
-------------
+## Release 3.40
 
 ### Availability
 
@@ -258,8 +707,7 @@ Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.
 - (wifi) #942 - Trace expired MPDUs before removing them from the queue to avoid blocking the recipient buffer
 - (wifi) - Fix wrong condition preventing PHY from aborting RX when starting TX
 
-Release 3.39
-------------
+## Release 3.39
 
 ### Availability
 
@@ -318,8 +766,7 @@ release but should also be aware of a number of issues that arose and can be fou
 - (wifi) #917 - Add missing STA-ID in GetMode() call from YansErrorRateModel
 - (wifi) - Fix wifi-rate-adaptation-distance.cc example issues with CCA threshold
 
-Release 3.38
-------------
+## Release 3.38
 
 ### Availability
 
@@ -356,7 +803,6 @@ This release has discontinued support for g++-8 compilers.
 - (network) !1163 - Initializing an Ipv[4,6]Address from an invalid string do not raise an exception anymore. Instead the address is marked as not initialized.
 - (spectrum) !1046 - Added the TwoRaySpectrumPropagationLossModel fast-fading class, as the outcome of the related GSoC 2022 project titled "A simplified channel and beamforming model for ns-3"
 - (spectrum) !1119 - Added a capability to filter signals (with a new SpectrumTransmitFilter) sent on the SpectrumChannel before they are forwarded to receivers on the channel.  This is motivated by scalability (reducing inconsequential simulation events).
-the TwoRaySpectrumPropagationLossModel fast-fading class, as the outcome of the related GSoC 2022 project titled "A simplified channel and beamforming model for ns-3"
 - (wifi) Added support for 802.11be Multi-Link Operations (MLO), STR mode only
 - (wifi) Added more fields to the EHT Capabilities information element
 - (wifi) Added an initial 802.11be-based example program
@@ -384,8 +830,7 @@ the TwoRaySpectrumPropagationLossModel fast-fading class, as the outcome of the 
 - (wifi) Prevent extraction of in-flight MPDUs due to lifetime expired
 - (wifi) Fixed getting the primary 80 MHz channel number in the 6 GHz band
 
-Release 3.37
-------------
+## Release 3.37
 
 ### Availability
 
@@ -457,8 +902,7 @@ Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.
 - (wifi) Fix acknowledgment in SU format for DL MU PPDUs including PSDUs of different TIDs
 - (wifi) Fix the TID of QoS Null frames in response to BSRP TF
 
-Release 3.36.1
---------------
+## Release 3.36.1
 
 ### Availability
 
@@ -497,8 +941,7 @@ has not been completely tested.
 - (wifi) - Do not change protection when aggregating MSDU to DL MU PPDU
 - (wifi) - IdealWifiManager was not using the appropriate default mode
 
-Release 3.36
-------------
+## Release 3.36
 
 ### Availability
 
@@ -587,8 +1030,7 @@ This release has discontinued support for g++-7 compilers.
 - (wifi) #609 - STA checks that a Multi-STA BA is sent by the AP it is associated with
 - (lr-wpan) #742 - Add default values to non-initialized structs with primitive variables in ``LrWpanPhy``
 
-Release 3.35
-------------
+## Release 3.35
 
 ### Availability
 
@@ -659,8 +1101,7 @@ to stay compatible with the Python API scanning framework.
 - (traffic-control) !706 - Fix FqPIE qdisc not using attributes
 - (wifi) - Always track interference when not locking on PPDU
 
-Release 3.34
--------------
+## Release 3.34
 
 ### Availability
 
@@ -741,8 +1182,7 @@ This release has been tested on the following systems:
 - (wifi) #418 - Fix HE A-MPDU Max Size Upper Bound
 - (wifi) - Compare received power per MHz to normalized RX sensitivity
 
-Release 3.33
-------------
+## Release 3.33
 
 ### Availability
 
@@ -809,8 +1249,7 @@ This release has been tested on the following systems:
 - (wifi) Report reception of BAR to WifiRemoteStationManager
 - (wifi) TXOP durations were not always being traced
 
-Release 3.32
-------------
+## Release 3.32
 
 ### Availability
 
@@ -887,8 +1326,7 @@ This release has been tested on the following systems:
 - (wifi) - Do not send VHT capabilities when operating in 2.4 GHz band
 - (wifi) #252 - Correctly handle multicast frames
 
-Release 3.31
-------------
+## Release 3.31
 
 ### Availability
 
@@ -991,8 +1429,7 @@ issue number (prefixed by '#'), or GitLab merge request number (prefixed by '!')
 In general, known issues are tracked on the project tracker available
 at <https://gitlab.com/nsnam/ns-3-dev/issues>
 
-Release 3.30.1
---------------
+## Release 3.30.1
 
 Release 3.30.1 is a maintenance release that fixes the following issues from
 the ns-3.30 release:
@@ -1027,8 +1464,7 @@ Features are identical to release 3.30.
 - Example program tap-wifi-virtual-machine.py had a syntax error
 - Issue #80 - Indoor/outdoor status is not updated when the node moves
 
-Release 3.30
-------------
+## Release 3.30
 
 ### Availability
 
@@ -1153,8 +1589,7 @@ Other issues fixed:
 In general, known issues are tracked on the project tracker available
 at <https://gitlab.com/nsnam/ns-3-dev/issues>
 
-Release 3.29
-------------
+## Release 3.29
 
 This release is dedicated to the memory of project co-founder George Riley.
 
@@ -1239,8 +1674,7 @@ This release has been tested on the following platforms:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.28
-------------
+## Release 3.28
 
 ### Availability
 
@@ -1255,6 +1689,7 @@ compiler requirements (other compilers supporting C++11 may also work):
 - g++-4.9 or later
 - Apple LLVM version 7.0.2 or later
 - clang-3.3 or later
+
 In addition, a Python 2.7 (Python 2 series) or Python 3.4 (Python 3 series)
 or later is required.
 
@@ -1341,8 +1776,7 @@ This release has been tested on the following platforms:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.27
-------------
+## Release 3.27
 
 ### Availability
 
@@ -1522,8 +1956,7 @@ This release has been tested on the following platforms:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.26
-------------
+## Release 3.26
 
 ### Availability
 
@@ -1659,8 +2092,7 @@ This release has been tested on the following platforms:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.25
-------------
+## Release 3.25
 
 ### Availability
 
@@ -1849,8 +2281,7 @@ This release has been tested on the following platforms:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.24.1
---------------
+## Release 3.24.1
 
 Release 3.24.1 is a maintenance release that fixes three issues:
 
@@ -1891,8 +2322,7 @@ Features are identical to release 3.24.
 - Bug 2182 - pybindgen required version is now a string literal
 - Bug 2184 - integer overflow in MacLow
 
-Release 3.24
-------------
+## Release 3.24
 
 ### Availability
 
@@ -1970,8 +2400,7 @@ This release has been tested on the following platforms:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.23
-------------
+## Release 3.23
 
 ### Availability
 
@@ -2037,8 +2466,7 @@ This release has been tested on the following platforms:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.22
-------------
+## Release 3.22
 
 ### Availability
 
@@ -2146,8 +2574,7 @@ This release has been tested on the following platforms:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.21
-------------
+## Release 3.21
 
 ### Availability
 
@@ -2229,11 +2656,10 @@ This release is available from:
 ### Known issues
 
 - Bug 1770 - The mesh module will crash if used for g++ version >= 4.8.1
-in optimized mode, on a 32-bit Linux machine.  Lowering the optimization
-level to -O1 in this case can be used as a workaround.
+  in optimized mode, on a 32-bit Linux machine.  Lowering the optimization
+  level to -O1 in this case can be used as a workaround.
 
-Release 3.20
-------------
+## Release 3.20
 
 ### Availability
 
@@ -2303,7 +2729,7 @@ This release is available from:
 - Bug 1853 - NS_LOG_FUNCTION broken on OSX 10.9
 - Bug 1855 - SixLowPanNetDevice is not correctly indexed
 - Bug 1857 - Detect location of installed boost libraries
-- Bug 1862 - NS_LOG="Time=*|prefix_time" causes stack overflow
+- Bug 1862 - `NS_LOG="Time=*|prefix_time"` causes stack overflow
 - Bug 1868 - Optimized builds are sensitive to -fstrict-overflow
 - Bug 1870 - Remove unnecessary AsInt functions
 - Bug 1872 - Inside RREQ processing, in case of IP duplication, packet dropped instead of being forwarded
@@ -2337,11 +2763,10 @@ This release is available from:
 ### Known issues
 
 - Bug 1770 - The mesh module will crash if used for g++ version >= 4.8.1
-in optimized mode, on a 32-bit Linux machine.  Lowering the optimization
-level to -O1 in this case can be used as a workaround.
+  in optimized mode, on a 32-bit Linux machine.  Lowering the optimization
+  level to -O1 in this case can be used as a workaround.
 
-Release 3.19
-------------
+## Release 3.19
 
 ### Availability
 
@@ -2449,15 +2874,13 @@ These platforms have been tested; others may work also:
 - Bug 1816 - IPv4 fragmentation loses Packet tags
 - Bug 1877 - constructor missing for `<something>PropagationLossModels`
 
-Release 3.18.2
---------------
+## Release 3.18.2
 
 ns-allinone-3.18.2 was released to include a bake configuration file update
 for Direct Code Execution.  The ns-3 code in this release was unchanged
 from that of ns-3.18.1.
 
-Release 3.18.1
---------------
+## Release 3.18.1
 
 This release is mainly to provide updated compiler support (clang/LLVM)
 and fix the Python API scanning facility.  A few additional bug fixes
@@ -2509,8 +2932,7 @@ These platforms have been tested; others may work also:
 - Fix compilation with Clang 3.2 and newer versions, including Apple Xcode 5
 - Miscellaneous NetAnim fixes
 
-Release 3.18
-------------
+## Release 3.18
 
 ### Availability
 
@@ -2603,8 +3025,7 @@ These platforms have been tested; others may work also:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.17
-------------
+## Release 3.17
 
 ### Availability
 
@@ -2704,8 +3125,7 @@ These platforms have been tested; others may work also:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.16
-------------
+## Release 3.16
 
 ### Availability
 
@@ -2776,8 +3196,7 @@ This release is available from:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.15
-------------
+## Release 3.15
 
 ### Availability
 
@@ -2834,8 +3253,7 @@ This release is available from:
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.14.1
---------------
+## Release 3.14.1
 
 ### Availability
 
@@ -2848,8 +3266,7 @@ This hotfix release contains a fix for the PyViz visualizer and makes it
 easier to add PyViz support to examples; otherwise it is the same as the
 ns-3.14 release.
 
-Release 3.14
-------------
+## Release 3.14
 
 ### Availability
 
@@ -2956,8 +3373,7 @@ available on all platforms; check the Installation page on the project wiki.
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.13
-------------
+## Release 3.13
 
 ### Availability
 
@@ -3031,8 +3447,7 @@ available on all platforms; check the Installation page on the project wiki.
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.12.1
---------------
+## Release 3.12.1
 
 ### Availability
 
@@ -3044,8 +3459,7 @@ This release is available from:
 This release fixes PyViz visualizer's python bindings; otherwise, it
 is the same as the ns-3.12 release.
 
-Release 3.12
-------------
+## Release 3.12
 
 ### Availability
 
@@ -3128,8 +3542,7 @@ available on all platforms; check the Installation page on the project wiki.
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.11
-------------
+## Release 3.11
 
 ### Availability
 
@@ -3268,8 +3681,7 @@ since ns-3.10, in many cases referencing the Bugzilla bug number.
 In general, known issues are tracked on the project tracker available
 at <http://www.nsnam.org/bugzilla/>
 
-Release 3.10
-------------
+## Release 3.10
 
 ### Availability
 
@@ -3432,8 +3844,7 @@ at <http://www.nsnam.org/bugzilla/>
 Windows XP 32 bit Cygwin 1.7.7 does not seem to work because of a
 problem (reported elsewhere) in linking large libraries.
 
-Release 3.9
------------
+## Release 3.9
 
 ### Availability
 
@@ -3591,8 +4002,7 @@ since ns-3.8, in many cases referencing the Bugzilla bug number
 
 ### Known issues
 
-Release 3.8
------------
+## Release 3.8
 
 ### Availability
 
@@ -3732,8 +4142,7 @@ ns-3 builds have been known to fail on the following platforms:
 - optimized builds on gcc 3.4.4 and 3.4.5
 - optimized builds on linux x86 gcc 4.0.x
 
-Release 3.7
------------
+## Release 3.7
 
 ### Availability
 
@@ -3844,8 +4253,7 @@ ns-3 builds have been known to fail on the following platforms:
 - optimized builds on gcc 3.4.4 and 3.4.5
 - optimized builds on linux x86 gcc 4.0.x
 
-Release 3.6
------------
+## Release 3.6
 
 ### Availability
 
@@ -3921,8 +4329,7 @@ ns-3.6 build is known to fail on the following platforms:
 - optimized builds on gcc 3.4.4 and 3.4.5
 - optimized builds on linux x86 gcc 4.0.x
 
-Release 3.5
------------
+## Release 3.5
 
 ### Availability
 
@@ -3981,8 +4388,7 @@ feature the merging of some of our projects currently in development including
 fuller IPv6 support, some smaller features such as a new Global ARP
 package, and possibly a new Testing and Validation suite.
 
-Release 3.4
------------
+## Release 3.4
 
 ### Availability
 
@@ -4042,8 +4448,7 @@ fuller IPv6 support, and IPv4 and routing protocol refactoring, and some smaller
 features such as a new Global ARP package and possibly a new Testing and Validation
 suite,
 
-Release 3.3
------------
+## Release 3.3
 
 ### Availability
 
@@ -4105,8 +4510,7 @@ feature the merging of some of our projects currently in development including
 fuller IPv6 support, and IPv4 and routing protocol refactoring, and some smaller
 features such as an object naming facility and a new Global ARP package.
 
-Release 3.2
------------
+## Release 3.2
 
 ### Availability
 
@@ -4177,8 +4581,7 @@ Our next release, which is expected to happen in 2 to 4 months from now, will
 feature the merging of some of our projects currently in development: IPv6,
 emulation, and synchronous posix sockets.
 
-Release 3.1 (2008/06/30)
-------------------------
+## Release 3.1 (2008/06/30)
 
 ### The first ns-3 stable release
 
@@ -4188,7 +4591,7 @@ This release is immediately available from:
 We dedicate this initial ns-3 release to our late contributor and friend,
 Federico Maguolo.
 
-### What is ns-3 ?
+### What is ns-3?
 
 ns-3 is a new discrete-event network simulator designed for supporting network
 research and education. ns-3 features a solid, well documented C++ core and
@@ -4235,8 +4638,7 @@ feature the merging of some of our projects currently in development: python
 scripting, IPv6, emulation, a statistics framework and synchronous posix
 sockets.
 
-Release 3.0.13 (2008/06/02)
----------------------------
+## Release 3.0.13 (2008/06/02)
 
 - point to point links generate ppp pcap traces
 - point to point links support asymmetrical data rates.
@@ -4256,8 +4658,7 @@ The API of Simulator::StopAt (time) has also changed.  Now it is
 called Simulator::Stop (time), and takes a relative time, instead of
 absolute.
 
-Release 3.0.12 (2008/04/07)
----------------------------
+## Release 3.0.12 (2008/04/07)
 
 - Add Attribute support to the TypeId metadata system and add
   attribute support to all in-tree models
@@ -4270,8 +4671,7 @@ Release 3.0.12 (2008/04/07)
 - regression test framework added
 - TCP delayed acknowledgements and multitasking server
 
-Release 3.0.11 (2008/02/15)
----------------------------
+## Release 3.0.11 (2008/02/15)
 
 - Initial port of GTNetS TCP implementation (initial version
   that does not support multitasking or delayed acknowledgments yet,
@@ -4281,15 +4681,13 @@ Release 3.0.11 (2008/02/15)
 - lots of bug fixes throughout the system
 - tutorial updates
 
-Release 3.0.10 (2008/01/15)
----------------------------
+## Release 3.0.10 (2008/01/15)
 
 - Add tutorial document content;
 - Valgrind option for "waf" tool;
 - Doxygen organization changes.
 
-Release 3.0.9 (2007/12/15)
---------------------------
+## Release 3.0.9 (2007/12/15)
 
 - A 802.11 model ported from Yans. This model supports:
   - a rather extensive PHY model
@@ -4303,30 +4701,26 @@ Release 3.0.9 (2007/12/15)
 - Tracing support for Applications
 - many bugs fixed
 
-Release 3.0.8 (2007/11/15)
---------------------------
+## Release 3.0.8 (2007/11/15)
 
 - A simple error model
 - Source files for ns-3 tutorial
 
-Release 3.0.7 (2007/10/15)
---------------------------
+## Release 3.0.7 (2007/10/15)
 
 - OLSR routing protocol
 - A timer class
 - Additional mobility models (random waypoint, random 2D walk)
 - A mobility visualization tool
 
-Release 3.0.6 (2007/09/15)
---------------------------
+## Release 3.0.6 (2007/09/15)
 
 - Static multicast IPv4 routing
 - Logging overhaul (NS_LOG macros)
 - Refactoring of tracing subsystem
 - Tutorial document started
 
-Release 3.0.5 (2007/08/15)
---------------------------
+## Release 3.0.5 (2007/08/15)
 
 - Refactoring to support win32-based unix environments (Cygwin, mingw)
 - "Packet socket" for allowing applications to access NetDevices directly
@@ -4336,16 +4730,14 @@ Release 3.0.5 (2007/08/15)
 - Add mobility framework and basic mobility models
 - Global unicast centralized routing
 
-Release 3.0.4 (2007/07/15)
---------------------------
+## Release 3.0.4 (2007/07/15)
 
 - Enable waf as the default build system.
 - Per-packet metadata:  a system to track which headers and trailers
   are added to a packet
 - Simplifications to point-to-point devices and channel
 
-Release 3.0.3 (2007/06/15)
---------------------------
+## Release 3.0.3 (2007/06/15)
 
 - Enable Waf for release tarballs: users can now build ns-3
   with the "waf" tool. See doc/build-waf.txt.
@@ -4357,8 +4749,7 @@ Release 3.0.3 (2007/06/15)
   manager
 - Many small API cleanups
 
-Release 3.0.2 (2007/05/18)
---------------------------
+## Release 3.0.2 (2007/05/18)
 
 - Implement a new memory management infrastructure based
   on reference counting and smart pointers (the latter being
@@ -4367,8 +4758,7 @@ Release 3.0.2 (2007/05/18)
   to provide object extensibility
 - Add support for a BSD-style socket API for user applications
 
-Release 3.0.1 (2007/03/31)
---------------------------
+## Release 3.0.1 (2007/03/31)
 
 - First public release; not yet pre-alpha.
 - Simple UDP-based simulation script (examples/simple-p2p.cc)

@@ -55,6 +55,7 @@ NrRadioBearerTag::NrRadioBearerTag()
 NrRadioBearerTag::NrRadioBearerTag(uint16_t rnti, uint8_t lcid, uint32_t size)
     : m_rnti(rnti),
       m_lcid(lcid),
+      m_layer(0),
       m_size(size)
 {
 }

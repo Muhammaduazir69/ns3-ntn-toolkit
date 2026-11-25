@@ -6,6 +6,9 @@
  * Authors: Kirill Andreev  <andreev@iitp.ru>
  */
 
+#ifndef HWMP_TARGET_FLAGS_REGRESSION_H
+#define HWMP_TARGET_FLAGS_REGRESSION_H
+
 #include "ns3/ipv4-interface-container.h"
 #include "ns3/node-container.h"
 #include "ns3/nstime.h"
@@ -15,14 +18,14 @@
 using namespace ns3;
 
 /**
- * \ingroup dot11s-test
+ * @ingroup dot11s-test
  *
- * \brief This is a test for intermediate reply and saving routing
+ * @brief This is a test for intermediate reply and saving routing
  * information about neighbour. 4 stations and 3 UDP ping streams are initiated.
  */
 // clang-format off
 /**
- * \verbatim
+ * @verbatim
    <-----------|----------->   Broadcast frame
                |----------->|  Unicast frame
    (Node ID)   0            1            2            3
@@ -55,9 +58,10 @@ using namespace ns3;
                |----------->|            |            |             PREP
                |            |----------->|            |             PREP
                |            |            |----------->|             PREP
-   \endverbatim
+   @endverbatim
  */
 // clang-format on
+
 class HwmpDoRfRegressionTest : public TestCase
 {
   public:
@@ -69,7 +73,7 @@ class HwmpDoRfRegressionTest : public TestCase
     void CheckResults();
 
   private:
-    /// \internal It is important to have pointers here
+    /// @internal It is important to have pointers here
     NodeContainer* m_nodes;
     /// Simulation time
     Time m_time;
@@ -104,37 +108,39 @@ class HwmpDoRfRegressionTest : public TestCase
 
     /**
      * Send data A
-     * \param socket the sending socket
+     * @param socket the sending socket
      */
     void SendDataA(Ptr<Socket> socket);
 
     /**
      * Send data B
-     * \param socket the sending socket
+     * @param socket the sending socket
      */
     void SendDataB(Ptr<Socket> socket);
 
     /**
      * Send data C
-     * \param socket the sending socket
+     * @param socket the sending socket
      */
     void SendDataC(Ptr<Socket> socket);
 
     /**
-     * \brief Handle a packet reception.
+     * @brief Handle a packet reception.
      *
      * This function is called by lower layers.
      *
-     * \param socket the socket the packet was received to.
+     * @param socket the socket the packet was received to.
      */
     void HandleReadServer(Ptr<Socket> socket);
 
     /**
-     * \brief Handle a packet reception.
+     * @brief Handle a packet reception.
      *
      * This function is called by lower layers.
      *
-     * \param socket the socket the packet was received to.
+     * @param socket the socket the packet was received to.
      */
     void HandleReadClient(Ptr<Socket> socket);
 };
+
+#endif // HWMP_TARGET_FLAGS_REGRESSION_H

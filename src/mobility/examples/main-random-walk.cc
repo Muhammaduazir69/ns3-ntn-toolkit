@@ -11,8 +11,8 @@ using namespace ns3;
 
 /**
  * Function called when there is a course change
- * \param context event context
- * \param mobility a pointer to the mobility model
+ * @param context event context
+ * @param mobility a pointer to the mobility model
  */
 static void
 CourseChange(std::string context, Ptr<const MobilityModel> mobility)
@@ -59,7 +59,7 @@ main(int argc, char* argv[])
     mobility.InstallAll();
     Config::Connect("/NodeList/*/$ns3::MobilityModel/CourseChange", MakeCallback(&CourseChange));
 
-    Simulator::Stop(Seconds(100.0));
+    Simulator::Stop(Seconds(100));
 
     Simulator::Run();
 

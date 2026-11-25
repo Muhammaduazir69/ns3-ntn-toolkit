@@ -5,19 +5,25 @@
  *
  */
 
-#include "ns3/core-module.h"
-#include "ns3/internet-module.h"
-#include "ns3/network-module.h"
+#include "ns3/internet-stack-helper.h"
+#include "ns3/ipv4-address.h"
+#include "ns3/node.h"
+#include "ns3/ptr.h"
+#include "ns3/simulator.h"
+#include "ns3/socket.h"
+#include "ns3/tcp-socket-base.h"
+#include "ns3/tcp-socket-state.h"
 #include "ns3/test.h"
+#include "ns3/type-id.h"
 
 #include <iostream>
 
 using namespace ns3;
 
 /**
- * \ingroup internet-test
+ * @ingroup internet-test
  *
- * \brief Test that connection failed callback is called when
+ * @brief Test that connection failed callback is called when
  * SYN retransmission number is exceeded.
  */
 class TcpSynConnectionFailedTest : public TestCase
@@ -25,14 +31,14 @@ class TcpSynConnectionFailedTest : public TestCase
   public:
     /**
      * Constructor.
-     * \param desc Test description.
-     * \param useEcn Whether to enable ECN.
+     * @param desc Test description.
+     * @param useEcn Whether to enable ECN.
      */
     TcpSynConnectionFailedTest(std::string desc, bool useEcn);
 
     /**
-     * \brief Handle a connection failure.
-     * \param socket The receiving socket.
+     * @brief Handle a connection failure.
+     * @param socket The receiving socket.
      */
     void HandleConnectionFailed(Ptr<Socket> socket);
     void DoRun() override;
@@ -83,7 +89,7 @@ TcpSynConnectionFailedTest::DoRun()
 }
 
 /**
- * \ingroup internet-test
+ * @ingroup internet-test
  *
  * \brief A connection to a port with no listener is refused with RST+ACK
  * (RFC 9293 3.10.7.1). With Rfc9293SynSentReset the client takes the reset
@@ -156,9 +162,9 @@ class TcpSynSentResetTest : public TestCase
 };
 
 /**
- * \ingroup internet-test
+ * @ingroup internet-test
  *
- * \brief TestSuite
+ * @brief TestSuite
  */
 class TcpSynConnectionFailedTestSuite : public TestSuite
 {

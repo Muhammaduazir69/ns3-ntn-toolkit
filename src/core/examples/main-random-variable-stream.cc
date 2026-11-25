@@ -19,9 +19,9 @@
 #include <map>
 
 /**
- * \file
- * \ingroup core-examples
- * \ingroup randomvariable
+ * @file
+ * @ingroup core-examples
+ * @ingroup randomvariable
  * Example program illustrating use of RandomVariableStream
  */
 
@@ -34,9 +34,9 @@ namespace
  * Round a double number to the given precision.
  * For example, `dround(0.234, 0.1) = 0.2`
  * and `dround(0.257, 0.1) = 0.3`
- * \param [in] number The number to round.
- * \param [in] precision The least significant digit to keep in the rounding.
- * \returns \pname{number} rounded to \pname{precision}.
+ * @param [in] number The number to round.
+ * @param [in] precision The least significant digit to keep in the rounding.
+ * @returns \pname{number} rounded to \pname{precision}.
  */
 double
 dround(double number, double precision)
@@ -56,12 +56,12 @@ dround(double number, double precision)
 
 /**
  * Generate a histogram from a RandomVariableStream.
- * \param [in] rndvar The RandomVariableStream to sample.
- * \param [in] probes The number of samples.
- * \param [in] precision The precision to round samples to.
- * \param [in] title The title for the histogram.
- * \param [in] impulses Set the plot style to IMPULSES.
- * \return The histogram as a GnuPlot data set.
+ * @param [in] rndvar The RandomVariableStream to sample.
+ * @param [in] probes The number of samples.
+ * @param [in] precision The precision to round samples to.
+ * @param [in] title The title for the histogram.
+ * @param [in] impulses Set the plot style to IMPULSES.
+ * @return The histogram as a GnuPlot data set.
  */
 GnuplotDataset
 Histogram(Ptr<RandomVariableStream> rndvar,
@@ -70,7 +70,7 @@ Histogram(Ptr<RandomVariableStream> rndvar,
           const std::string& title,
           bool impulses = false)
 {
-    typedef std::map<double, unsigned int> histogram_maptype;
+    typedef std::map<double, double> histogram_maptype;
     histogram_maptype histogram;
 
     for (unsigned int i = 0; i < probes; ++i)
@@ -90,7 +90,7 @@ Histogram(Ptr<RandomVariableStream> rndvar,
 
     for (auto hi = histogram.begin(); hi != histogram.end(); ++hi)
     {
-        data.Add(hi->first, (double)hi->second / (double)probes / precision);
+        data.Add(hi->first, hi->second / probes / precision);
     }
 
     return data;
@@ -268,12 +268,12 @@ main(int argc, char* argv[])
         plot.AppendExtra("set xrange [*:*]");
 
         auto x = CreateObject<EmpiricalRandomVariable>();
-        x->CDF(0.0, 0.0 / 15.0);
+        x->CDF(0.0, 0.0);
         x->CDF(0.2, 1.0 / 15.0);
         x->CDF(0.4, 3.0 / 15.0);
         x->CDF(0.6, 6.0 / 15.0);
         x->CDF(0.8, 10.0 / 15.0);
-        x->CDF(1.0, 15.0 / 15.0);
+        x->CDF(1.0, 1.0);
 
         plot.AddDataset(
             Histogram(x, probes, precision, "EmpiricalRandomVariable (Sampling)", true));

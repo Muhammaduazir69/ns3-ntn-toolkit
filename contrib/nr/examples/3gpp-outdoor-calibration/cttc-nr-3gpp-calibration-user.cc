@@ -4,15 +4,16 @@
 
 #include "cttc-nr-3gpp-calibration.h"
 
-#include <ns3/command-line.h>
-#include <ns3/show-progress.h>
+#include "ns3/command-line.h"
+#include "ns3/core-module.h"
+#include "ns3/show-progress.h"
 
 using namespace ns3;
 
 /**
- * \ingroup examples
- * \file cttc-nr-3gpp-calibration-user.cc
- * \brief A multi-cell network deployment with site sectorization
+ * @ingroup examples
+ * @file cttc-nr-3gpp-calibration-user.cc
+ * @brief A multi-cell network deployment with site sectorization
  *
  * This example describes how to setup a simulation using the 3GPP channel model
  * from TR 38.901. This example consists of an hexagonal grid deployment
@@ -54,11 +55,12 @@ main(int argc, char* argv[])
                  "calibration scenarios. Please notice that if b) is selected"
                  "custom parameters should not be set through the command line",
                  params.confType);
-    cmd.AddValue("nrConfigurationScenario",
-                 "The NR calibration scenario string. Choose among:"
-                 "DenseA, DenseB, RuralA, RuralB"
-                 "This variable must be set when calibrationConf is chosen",
-                 params.nrConfigurationScenario);
+    cmd.AddValue(
+        "nrConfigurationScenario",
+        "The NR calibration scenario string. Choose among:"
+        "DenseA, DenseAmimo, DenseAmimoIntel, DenseAWraparoundBenchmark, DenseB, RuralA, RuralB"
+        "This variable must be set when calibrationConf is chosen",
+        params.nrConfigurationScenario);
     cmd.AddValue("scenario",
                  "The urban scenario string (UMa, RMa, UMi_StreeCanyon)",
                  params.scenario);
@@ -69,6 +71,10 @@ main(int argc, char* argv[])
     cmd.AddValue("appGenerationTime",
                  "Duration applications will generate traffic.",
                  params.appGenerationTime);
+    cmd.AddValue("appStopWindow",
+                 "When application generation finishes, add some extra time in the simulation for "
+                 "the last generated packets to be received.",
+                 params.appStopWindow);
     cmd.AddValue("numerologyBwp", "The numerology to be used (NR only)", params.numerologyBwp);
     cmd.AddValue("pattern", "The TDD pattern to use", params.pattern);
     cmd.AddValue("direction", "The flow direction (DL or UL)", params.direction);
@@ -82,8 +88,9 @@ main(int argc, char* argv[])
                  "The network operation mode can be TDD or FDD",
                  params.operationMode);
     cmd.AddValue("simTag",
-                 "tag to be appended to output filenames to distinguish simulation campaigns",
+                 "Tag to be appended to output filenames to distinguish simulation campaigns",
                  params.simTag);
+    cmd.AddValue("dbName", "Database name to be used for the simulation campaign", params.dbName);
     cmd.AddValue("outputDir", "directory where to store simulation results", params.outputDir);
     cmd.AddValue("errorModelType",
                  "Error model type: ns3::NrEesmCcT1, ns3::NrEesmCcT2, "
@@ -99,8 +106,7 @@ main(int argc, char* argv[])
                  params.enableFading);
     cmd.AddValue("enableShadowing", "If true, it enables Shadowing", params.enableShadowing);
     cmd.AddValue("bfMethod",
-                 "The BF method string. Can be a) Omni, b) CellScan c) fixedBeam"
-                 "d) CellScanAzimuth."
+                 "The BF method string. Can be a) Omni, b) CellScan c) fixedBeam."
                  "Notice that if Shadowing and Fading are disabled, fixedBeam will"
                  "be used. Default value is CellScan",
                  params.bfMethod);
@@ -248,7 +254,16 @@ main(int argc, char* argv[])
                  "the UE height, i.e. if the UE height is 1.5 then it is O2O,"
                  "otherwise it is O2I.",
                  params.linkO2iConditionToAntennaHeight);
-    cmd.AddValue("ueSpeed", "The UE speed.", params.speed);
+    cmd.AddValue("ueSpeed", "The UE speed.", params.indoorUeSpeed);
+    cmd.AddValue("enableWraparound",
+                 "Enable wraparound model in the simulation",
+                 params.enableWraparound);
+    cmd.AddValue("ftpM1Enabled", "Enable FTP", params.ftpM1Enabled);
+    cmd.AddValue("ftpLambda",
+                 "Lambda used in FTP (ftpM1Enabled must set to true)",
+                 params.ftpLambda);
+    cmd.AddValue("ftpFileSize", "ftpFileSize used in FTP ( must set to true)", params.ftpFileSize);
+    cmd.AddValue("enableMimo", "Enable MIMO in the simulation", params.enableMimo);
 
     // Parse the command line
     cmd.Parse(argc, argv);

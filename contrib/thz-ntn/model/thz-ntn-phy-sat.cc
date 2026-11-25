@@ -350,7 +350,7 @@ ThzNtnPhySat::ProcessRegenerativePayload(Ptr<SatSignalParameters> rxParams) cons
     }
 
     // Step 3: Create new SatSignalParameters for downlink
-    Ptr<SatSignalParameters> txParams = Create<SatSignalParameters>();
+    Ptr<SatSignalParameters> txParams = CreateObject<SatSignalParameters>();
 
     // Copy packets from uplink
     txParams->m_packetsInBurst = rxParams->m_packetsInBurst;

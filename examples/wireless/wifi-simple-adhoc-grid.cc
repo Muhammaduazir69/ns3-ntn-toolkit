@@ -97,7 +97,7 @@ NS_LOG_COMPONENT_DEFINE("WifiSimpleAdhocGrid");
 /**
  * Function called when a packet is received.
  *
- * \param socket The receiving socket.
+ * @param socket The receiving socket.
  */
 void
 ReceivePacket(Ptr<Socket> socket)
@@ -111,10 +111,10 @@ ReceivePacket(Ptr<Socket> socket)
 /**
  * Generate traffic.
  *
- * \param socket The sending socket.
- * \param pktSize The packet size.
- * \param pktCount The packet count.
- * \param pktInterval The interval between two packets.
+ * @param socket The sending socket.
+ * @param pktSize The packet size.
+ * @param pktCount The packet count.
+ * @param pktInterval The interval between two packets.
  */
 static void
 GenerateTraffic(Ptr<Socket> socket, uint32_t pktSize, uint32_t pktCount, Time pktInterval)
@@ -259,7 +259,7 @@ main(int argc, char* argv[])
     }
 
     // Give OLSR time to converge-- 30 seconds perhaps
-    Simulator::Schedule(Seconds(30.0),
+    Simulator::Schedule(Seconds(30),
                         &GenerateTraffic,
                         source,
                         packetSize,
@@ -270,7 +270,7 @@ main(int argc, char* argv[])
     NS_LOG_UNCOND("Testing from node " << sourceNode << " to " << sinkNode << " with grid distance "
                                        << distance);
 
-    Simulator::Stop(Seconds(33.0));
+    Simulator::Stop(Seconds(33));
     Simulator::Run();
     Simulator::Destroy();
 

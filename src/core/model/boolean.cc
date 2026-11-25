@@ -7,12 +7,11 @@
  */
 #include "boolean.h"
 
-#include "fatal-error.h"
 #include "log.h"
 
 /**
- * \file
- * \ingroup attribute_Boolean
+ * @file
+ * @ingroup attribute_Boolean
  * ns3::BooleanValue attribute value implementation.
  */
 
@@ -47,7 +46,8 @@ BooleanValue::Get() const
     return m_value;
 }
 
-BooleanValue::operator bool() const
+BooleanValue::
+operator bool() const
 {
     return m_value;
 }

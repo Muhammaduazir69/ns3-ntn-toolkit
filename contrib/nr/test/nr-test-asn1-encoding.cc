@@ -6,6 +6,20 @@
  * Author: Lluis Parcerisa <lparcerisa@cttc.cat>
  */
 
+/**
+ * @ingroup test
+ * @file nr-test-asn1-encoding.cc
+ *
+ * @brief Test suite (nr-test-asn1-encoding) for the ASN.1 encoding and decoding of the NR RRC
+ * messages implemented in nr-rrc-header.h. Each test case populates one RRC message type
+ * (connection request, setup, setup complete, reconfiguration and its complete, handover
+ * preparation info, the connection reestablishment family, connection reject, or measurement
+ * report) with representative values, serializes the corresponding header into a packet,
+ * deserializes it into a fresh header instance, and asserts field-by-field equality between the
+ * original and the decoded content. Additional round-trip cases sweep the DL/UL bandwidth values
+ * and enum leaves carried in SCellToAddMod to verify they survive the encode/decode cycle.
+ */
+
 #include "ns3/boolean.h"
 #include "ns3/double.h"
 #include "ns3/enum.h"
@@ -18,6 +32,8 @@
 #include "ns3/test.h"
 
 #include <iomanip>
+#include <sstream>
+#include <string>
 #include <vector>
 
 using namespace ns3;
@@ -25,17 +41,17 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("NrAsn1EncodingTest");
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Contains ASN encoding test utility functions.
+ * @brief Contains ASN encoding test utility functions.
  */
 class TestUtils
 {
   public:
     /**
      * Function to convert packet contents in hex format
-     * \param pkt the packet
-     * \returns the text string
+     * @param pkt the packet
+     * @returns the text string
      */
     static std::string sprintPacketContentsHex(Ptr<Packet> pkt)
     {
@@ -51,8 +67,8 @@ class TestUtils
 
     /**
      * Function to convert packet contents in binary format
-     * \param pkt the packet
-     * \returns the text string
+     * @param pkt the packet
+     * @returns the text string
      */
     static std::string sprintPacketContentsBin(Ptr<Packet> pkt)
     {
@@ -68,7 +84,7 @@ class TestUtils
 
     /**
      * Function to log packet contents
-     * \param pkt the packet
+     * @param pkt the packet
      */
     static void LogPacketContents(Ptr<Packet> pkt)
     {
@@ -79,8 +95,8 @@ class TestUtils
 
     /**
      * Function to log packet info
-     * \param source T
-     * \param s the string
+     * @param source T
+     * @param s the string
      */
     template <class T>
     static void LogPacketInfo(T source, std::string s)
@@ -92,46 +108,60 @@ class TestUtils
     }
 };
 
-// --------------------------- CLASS RrcHeaderTestCase -----------------------------
+// --------------------------- CLASS NrRrcHeaderTestCase -----------------------------
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief This class provides common functions to be inherited
+ * @brief This class provides common functions to be inherited
  * by the children TestCases
  */
-class RrcHeaderTestCase : public TestCase
+class NrRrcHeaderTestCase : public TestCase
 {
   public:
     /**
      * Constructor
-     * \param s the reference name
+     * @param s the reference name
      */
-    RrcHeaderTestCase(std::string s);
+    NrRrcHeaderTestCase(std::string s);
     void DoRun() override = 0;
     /**
-     * \brief Create radio resource config dedicated
-     * \returns NrRrcSap::RadioResourceConfigDedicated
+     * @brief Create radio resource config dedicated
+     * @returns NrRrcSap::RadioResourceConfigDedicated
      */
     NrRrcSap::RadioResourceConfigDedicated CreateRadioResourceConfigDedicated();
     /**
-     * \brief Assert equal radio resource config dedicated
-     * \param rrcd1 NrRrcSap::RadioResourceConfigDedicated # 1
-     * \param rrcd2 NrRrcSap::RadioResourceConfigDedicated # 2
+     * @brief Assert equal radio resource config dedicated
+     * @param rrcd1 NrRrcSap::RadioResourceConfigDedicated # 1
+     * @param rrcd2 NrRrcSap::RadioResourceConfigDedicated # 2
      */
     void AssertEqualRadioResourceConfigDedicated(NrRrcSap::RadioResourceConfigDedicated rrcd1,
                                                  NrRrcSap::RadioResourceConfigDedicated rrcd2);
+
+    /**
+     * @brief Build an SCellToAddMod whose RadioResourceConfigCommonSCell carries
+     *        the given DL and UL bandwidths (in units of 100 kHz).
+     * @param dlBandwidth DL bandwidth (100 kHz units, e.g. 200 == 20 MHz)
+     * @param ulBandwidth UL bandwidth (100 kHz units)
+     * @param dlArfcn SCell DL carrier ARFCN (selects the FR1/FR2 dl-Bandwidth leaf)
+     * @param ulArfcn SCell UL carrier ARFCN (selects the FR1/FR2 ul-Bandwidth leaf)
+     * @returns the populated NrRrcSap::SCellToAddMod
+     */
+    NrRrcSap::SCellToAddMod CreateSCellToAddMod(uint16_t dlBandwidth,
+                                                uint16_t ulBandwidth,
+                                                uint32_t dlArfcn = 42,
+                                                uint32_t ulArfcn = 21);
 
   protected:
     Ptr<Packet> packet; ///< the packet
 };
 
-RrcHeaderTestCase::RrcHeaderTestCase(std::string s)
+NrRrcHeaderTestCase::NrRrcHeaderTestCase(std::string s)
     : TestCase(s)
 {
 }
 
 NrRrcSap::RadioResourceConfigDedicated
-RrcHeaderTestCase::CreateRadioResourceConfigDedicated()
+NrRrcHeaderTestCase::CreateRadioResourceConfigDedicated()
 {
     NrRrcSap::RadioResourceConfigDedicated rrd;
 
@@ -142,6 +172,7 @@ RrcHeaderTestCase::CreateRadioResourceConfigDedicated()
 
     NrRrcSap::LogicalChannelConfig logicalChannelConfig;
     logicalChannelConfig.priority = 9;
+    logicalChannelConfig.fiveQi = NrQosFlow::GBR_CONV_VOICE;
     logicalChannelConfig.prioritizedBitRateKbps = 128;
     logicalChannelConfig.bucketSizeDurationMs = 100;
     logicalChannelConfig.logicalChannelGroup = 3;
@@ -150,7 +181,7 @@ RrcHeaderTestCase::CreateRadioResourceConfigDedicated()
     rrd.srbToAddModList.insert(rrd.srbToAddModList.begin(), srbToAddMod);
 
     NrRrcSap::DrbToAddMod drbToAddMod;
-    drbToAddMod.epsBearerIdentity = 1;
+    drbToAddMod.qosFlowIdentity = 1;
     drbToAddMod.drbIdentity = 1;
     drbToAddMod.logicalChannelIdentity = 5;
     NrRrcSap::RlcConfig rlcConfig;
@@ -159,6 +190,7 @@ RrcHeaderTestCase::CreateRadioResourceConfigDedicated()
 
     NrRrcSap::LogicalChannelConfig logicalChannelConfig2;
     logicalChannelConfig2.priority = 7;
+    logicalChannelConfig2.fiveQi = NrQosFlow::NGBR_VIDEO_TCP_DEFAULT;
     logicalChannelConfig2.prioritizedBitRateKbps = 256;
     logicalChannelConfig2.bucketSizeDurationMs = 50;
     logicalChannelConfig2.logicalChannelGroup = 2;
@@ -182,11 +214,28 @@ RrcHeaderTestCase::CreateRadioResourceConfigDedicated()
 
     rrd.physicalConfigDedicated = physicalConfigDedicated;
 
+    NrRrcSap::BwpConfig bwpConfig;
+    bwpConfig.arfcn = 2079165;
+    bwpConfig.config.numerology = 1;
+    bwpConfig.config.ulNumerology = 0;
+    bwpConfig.config.ulCarrierFreq = 2082915;
+    bwpConfig.config.symbolsPerSlot = 14;
+    bwpConfig.config.dlCtrlSymsNum = 1;
+    bwpConfig.config.ulCtrlSymsNum = 1;
+    bwpConfig.config.tddPattern = "DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|";
+    bwpConfig.config.rbgSize = 2;
+    rrd.bwpConfigList.push_back(bwpConfig);
+
+    NrRrcSap::QosFlowToBwp qosFlowToBwp;
+    qosFlowToBwp.fiveQi = 2;
+    qosFlowToBwp.bwpArfcn = 2082915;
+    rrd.qosFlowToBwpList.push_back(qosFlowToBwp);
+
     return rrd;
 }
 
 void
-RrcHeaderTestCase::AssertEqualRadioResourceConfigDedicated(
+NrRrcHeaderTestCase::AssertEqualRadioResourceConfigDedicated(
     NrRrcSap::RadioResourceConfigDedicated rrcd1,
     NrRrcSap::RadioResourceConfigDedicated rrcd2)
 {
@@ -227,13 +276,13 @@ RrcHeaderTestCase::AssertEqualRadioResourceConfigDedicated(
 
     for (; it3 != srcDrbToAddModList.end(); it3++, it4++)
     {
-        NS_TEST_ASSERT_MSG_EQ(it3->epsBearerIdentity, it4->epsBearerIdentity, "epsBearerIdentity");
+        NS_TEST_ASSERT_MSG_EQ(it3->qosFlowIdentity, it4->qosFlowIdentity, "qosFlowIdentity");
         NS_TEST_ASSERT_MSG_EQ(it3->drbIdentity, it4->drbIdentity, "drbIdentity");
         NS_TEST_ASSERT_MSG_EQ(it3->rlcConfig.choice, it4->rlcConfig.choice, "rlcConfig.choice");
         NS_TEST_ASSERT_MSG_EQ(it3->logicalChannelIdentity,
                               it4->logicalChannelIdentity,
                               "logicalChannelIdentity");
-        NS_TEST_ASSERT_MSG_EQ(it3->epsBearerIdentity, it4->epsBearerIdentity, "epsBearerIdentity");
+        NS_TEST_ASSERT_MSG_EQ(it3->qosFlowIdentity, it4->qosFlowIdentity, "qosFlowIdentity");
 
         NS_TEST_ASSERT_MSG_EQ(it3->logicalChannelConfig.priority,
                               it4->logicalChannelConfig.priority,
@@ -308,14 +357,92 @@ RrcHeaderTestCase::AssertEqualRadioResourceConfigDedicated(
                                   "pdschConfigDedicated.pa");
         }
     }
+
+    NS_TEST_ASSERT_MSG_EQ(rrcd1.bwpConfigList.size(),
+                          rrcd2.bwpConfigList.size(),
+                          "BwpConfigList different sizes");
+
+    auto bwpIt1 = rrcd1.bwpConfigList.begin();
+    auto bwpIt2 = rrcd2.bwpConfigList.begin();
+    for (; bwpIt1 != rrcd1.bwpConfigList.end(); bwpIt1++, bwpIt2++)
+    {
+        NS_TEST_ASSERT_MSG_EQ(bwpIt1->arfcn, bwpIt2->arfcn, "bwpConfig.arfcn");
+        NS_TEST_ASSERT_MSG_EQ(+bwpIt1->config.numerology,
+                              +bwpIt2->config.numerology,
+                              "bwpConfig.config.numerology");
+        NS_TEST_ASSERT_MSG_EQ(+bwpIt1->config.ulNumerology,
+                              +bwpIt2->config.ulNumerology,
+                              "bwpConfig.config.ulNumerology");
+        NS_TEST_ASSERT_MSG_EQ(bwpIt1->config.ulCarrierFreq,
+                              bwpIt2->config.ulCarrierFreq,
+                              "bwpConfig.config.ulCarrierFreq");
+        NS_TEST_ASSERT_MSG_EQ(+bwpIt1->config.symbolsPerSlot,
+                              +bwpIt2->config.symbolsPerSlot,
+                              "bwpConfig.config.symbolsPerSlot");
+        NS_TEST_ASSERT_MSG_EQ(+bwpIt1->config.dlCtrlSymsNum,
+                              +bwpIt2->config.dlCtrlSymsNum,
+                              "bwpConfig.config.dlCtrlSymsNum");
+        NS_TEST_ASSERT_MSG_EQ(+bwpIt1->config.ulCtrlSymsNum,
+                              +bwpIt2->config.ulCtrlSymsNum,
+                              "bwpConfig.config.ulCtrlSymsNum");
+        NS_TEST_ASSERT_MSG_EQ(bwpIt1->config.tddPattern,
+                              bwpIt2->config.tddPattern,
+                              "bwpConfig.config.tddPattern");
+        NS_TEST_ASSERT_MSG_EQ(+bwpIt1->config.rbgSize,
+                              +bwpIt2->config.rbgSize,
+                              "bwpConfig.config.rbgSize");
+    }
+
+    NS_TEST_ASSERT_MSG_EQ(rrcd1.qosFlowToBwpList.size(),
+                          rrcd2.qosFlowToBwpList.size(),
+                          "QosFlowToBwpList different sizes");
+
+    auto qosIt1 = rrcd1.qosFlowToBwpList.begin();
+    auto qosIt2 = rrcd2.qosFlowToBwpList.begin();
+    for (; qosIt1 != rrcd1.qosFlowToBwpList.end(); qosIt1++, qosIt2++)
+    {
+        NS_TEST_ASSERT_MSG_EQ(+qosIt1->fiveQi, +qosIt2->fiveQi, "qosFlowToBwp.fiveQi");
+        NS_TEST_ASSERT_MSG_EQ(qosIt1->bwpArfcn, qosIt2->bwpArfcn, "qosFlowToBwp.bwpArfcn");
+    }
+}
+
+NrRrcSap::SCellToAddMod
+NrRrcHeaderTestCase::CreateSCellToAddMod(uint16_t dlBandwidth,
+                                         uint16_t ulBandwidth,
+                                         uint32_t dlArfcn,
+                                         uint32_t ulArfcn)
+{
+    NrRrcSap::SCellToAddMod sctam;
+    sctam.sCellIndex = 1; // serialized as INTEGER (1..7)
+    sctam.cellIdentification.physCellId = 7;
+    sctam.cellIdentification.dlCarrierFreq = dlArfcn;
+
+    // RadioResourceConfigCommonSCell: enable both the non-UL and UL
+    // configurations so that the DL and UL bandwidth fields are actually
+    // serialized and round-tripped.
+    sctam.radioResourceConfigCommonSCell.haveNonUlConfiguration = true;
+    sctam.radioResourceConfigCommonSCell.nonUlConfiguration.dlBandwidth = dlBandwidth;
+    sctam.radioResourceConfigCommonSCell.nonUlConfiguration.antennaInfoCommon.antennaPortsCount = 1;
+    sctam.radioResourceConfigCommonSCell.nonUlConfiguration.pdschConfigCommon.referenceSignalPower =
+        -10;
+    sctam.radioResourceConfigCommonSCell.nonUlConfiguration.pdschConfigCommon.pb = 0;
+
+    sctam.radioResourceConfigCommonSCell.haveUlConfiguration = true;
+    sctam.radioResourceConfigCommonSCell.ulConfiguration.ulFreqInfo.ulCarrierFreq = ulArfcn;
+    sctam.radioResourceConfigCommonSCell.ulConfiguration.ulFreqInfo.ulBandwidth = ulBandwidth;
+    sctam.radioResourceConfigCommonSCell.ulConfiguration.ulPowerControlCommonSCell.alpha = 0;
+    sctam.radioResourceConfigCommonSCell.ulConfiguration.prachConfigSCell.index = 0;
+
+    sctam.haveRadioResourceConfigDedicatedSCell = false;
+    return sctam;
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Request Test Case
+ * @brief Rrc Connection Request Test Case
  */
-class NrRrcConnectionRequestTestCase : public RrcHeaderTestCase
+class NrRrcConnectionRequestTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionRequestTestCase();
@@ -323,7 +450,7 @@ class NrRrcConnectionRequestTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionRequestTestCase::NrRrcConnectionRequestTestCase()
-    : RrcHeaderTestCase("Testing RrcConnectionRequest")
+    : NrRrcHeaderTestCase("Testing RrcConnectionRequest")
 {
 }
 
@@ -363,11 +490,11 @@ NrRrcConnectionRequestTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Setup Test Case
+ * @brief Rrc Connection Setup Test Case
  */
-class NrRrcConnectionSetupTestCase : public RrcHeaderTestCase
+class NrRrcConnectionSetupTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionSetupTestCase();
@@ -375,7 +502,7 @@ class NrRrcConnectionSetupTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionSetupTestCase::NrRrcConnectionSetupTestCase()
-    : RrcHeaderTestCase("Testing NrRrcConnectionSetupTestCase")
+    : NrRrcHeaderTestCase("Testing NrRrcConnectionSetupTestCase")
 {
 }
 
@@ -420,11 +547,11 @@ NrRrcConnectionSetupTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Setup Complete Test Case
+ * @brief Rrc Connection Setup Complete Test Case
  */
-class NrRrcConnectionSetupCompleteTestCase : public RrcHeaderTestCase
+class NrRrcConnectionSetupCompleteTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionSetupCompleteTestCase();
@@ -432,7 +559,7 @@ class NrRrcConnectionSetupCompleteTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionSetupCompleteTestCase::NrRrcConnectionSetupCompleteTestCase()
-    : RrcHeaderTestCase("Testing NrRrcConnectionSetupCompleteTestCase")
+    : NrRrcHeaderTestCase("Testing NrRrcConnectionSetupCompleteTestCase")
 {
 }
 
@@ -473,11 +600,11 @@ NrRrcConnectionSetupCompleteTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Reconfiguration Complete Test Case
+ * @brief Rrc Connection Reconfiguration Complete Test Case
  */
-class NrRrcConnectionReconfigurationCompleteTestCase : public RrcHeaderTestCase
+class NrRrcConnectionReconfigurationCompleteTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionReconfigurationCompleteTestCase();
@@ -485,7 +612,7 @@ class NrRrcConnectionReconfigurationCompleteTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionReconfigurationCompleteTestCase::NrRrcConnectionReconfigurationCompleteTestCase()
-    : RrcHeaderTestCase("Testing NrRrcConnectionReconfigurationCompleteTestCase")
+    : NrRrcHeaderTestCase("Testing NrRrcConnectionReconfigurationCompleteTestCase")
 {
 }
 
@@ -527,11 +654,11 @@ NrRrcConnectionReconfigurationCompleteTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Reconfiguration Test Case
+ * @brief Rrc Connection Reconfiguration Test Case
  */
-class NrRrcConnectionReconfigurationTestCase : public RrcHeaderTestCase
+class NrRrcConnectionReconfigurationTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionReconfigurationTestCase();
@@ -539,7 +666,7 @@ class NrRrcConnectionReconfigurationTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionReconfigurationTestCase::NrRrcConnectionReconfigurationTestCase()
-    : RrcHeaderTestCase("Testing NrRrcConnectionReconfigurationTestCase")
+    : NrRrcHeaderTestCase("Testing NrRrcConnectionReconfigurationTestCase")
 {
 }
 
@@ -588,7 +715,10 @@ NrRrcConnectionReconfigurationTestCase::DoRun()
     NrRrcSap::MeasObjectToAddMod measObjectToAddMod;
     measObjectToAddMod.measObjectId = 3;
     measObjectToAddMod.measObjectEutra.carrierFreq = 21;
-    measObjectToAddMod.measObjectEutra.allowedMeasBandwidth = 15;
+    // allowedMeasBandwidth, like every other bandwidth field, is expressed in
+    // units of 100 kHz (set from NrComponentCarrier::GetDlBandwidth() in the
+    // production code), so 150 == 15 MHz.
+    measObjectToAddMod.measObjectEutra.allowedMeasBandwidth = 150;
     measObjectToAddMod.measObjectEutra.presenceAntennaPort1 = true;
     measObjectToAddMod.measObjectEutra.neighCellConfig = 3;
     measObjectToAddMod.measObjectEutra.offsetFreq = -12;
@@ -653,8 +783,9 @@ NrRrcConnectionReconfigurationTestCase::DoRun()
     msg.mobilityControlInfo.carrierFreq.dlCarrierFreq = 3;
     msg.mobilityControlInfo.carrierFreq.ulCarrierFreq = 5;
     msg.mobilityControlInfo.haveCarrierBandwidth = true;
-    msg.mobilityControlInfo.carrierBandwidth.dlBandwidth = 50;
-    msg.mobilityControlInfo.carrierBandwidth.ulBandwidth = 25;
+    // Bandwidths are in units of 100 kHz: 500 == 50 MHz, 250 == 25 MHz.
+    msg.mobilityControlInfo.carrierBandwidth.dlBandwidth = 500;
+    msg.mobilityControlInfo.carrierBandwidth.ulBandwidth = 250;
     msg.mobilityControlInfo.newUeIdentity = 11;
     msg.mobilityControlInfo.haveRachConfigDedicated = true;
     msg.mobilityControlInfo.rachConfigDedicated.raPreambleIndex = 2;
@@ -670,7 +801,13 @@ NrRrcConnectionReconfigurationTestCase::DoRun()
 
     msg.radioResourceConfigDedicated = CreateRadioResourceConfigDedicated();
 
-    msg.haveNonCriticalExtension = false; // Danilo
+    // Exercise the secondary-cell (carrier aggregation) path: attach an SCell
+    // carrying a RadioResourceConfigCommonSCell with DL and UL bandwidths so
+    // that the SCell DL/UL-bandwidth (de)serialization is actually tested.
+    msg.haveNonCriticalExtension = true;
+    msg.nonCriticalExtension.sCellToAddModList.push_back(
+        CreateSCellToAddMod(200 /* 20 MHz */, 200 /* 20 MHz */));
+
     NrRrcConnectionReconfigurationHeader source;
     source.SetMessage(msg);
 
@@ -761,15 +898,46 @@ NrRrcConnectionReconfigurationTestCase::DoRun()
                                                 destination.GetRadioResourceConfigDedicated());
     }
 
+    // Assert the SCell (carrier aggregation) path round-trips, including the
+    // DL/UL bandwidth fields that this suite previously never exercised.
+    NS_TEST_ASSERT_MSG_EQ(source.GetHaveNonCriticalExtensionConfig(),
+                          destination.GetHaveNonCriticalExtensionConfig(),
+                          "GetHaveNonCriticalExtensionConfig");
+    if (source.GetHaveNonCriticalExtensionConfig())
+    {
+        auto srcScells = source.GetNonCriticalExtensionConfig().sCellToAddModList;
+        auto dstScells = destination.GetNonCriticalExtensionConfig().sCellToAddModList;
+        NS_TEST_ASSERT_MSG_EQ(srcScells.size(),
+                              dstScells.size(),
+                              "sCellToAddModList different sizes");
+        auto its = srcScells.begin();
+        auto itd = dstScells.begin();
+        for (; its != srcScells.end(); its++, itd++)
+        {
+            NS_TEST_ASSERT_MSG_EQ(its->sCellIndex, itd->sCellIndex, "sCellIndex");
+            NS_TEST_ASSERT_MSG_EQ(its->cellIdentification.physCellId,
+                                  itd->cellIdentification.physCellId,
+                                  "cellIdentification.physCellId");
+            NS_TEST_ASSERT_MSG_EQ(
+                its->radioResourceConfigCommonSCell.nonUlConfiguration.dlBandwidth,
+                itd->radioResourceConfigCommonSCell.nonUlConfiguration.dlBandwidth,
+                "SCell nonUlConfiguration.dlBandwidth");
+            NS_TEST_ASSERT_MSG_EQ(
+                its->radioResourceConfigCommonSCell.ulConfiguration.ulFreqInfo.ulBandwidth,
+                itd->radioResourceConfigCommonSCell.ulConfiguration.ulFreqInfo.ulBandwidth,
+                "SCell ulConfiguration.ulFreqInfo.ulBandwidth");
+        }
+    }
+
     packet = nullptr;
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Handover Preparation Info Test Case
+ * @brief Handover Preparation Info Test Case
  */
-class NrHandoverPreparationInfoTestCase : public RrcHeaderTestCase
+class NrHandoverPreparationInfoTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrHandoverPreparationInfoTestCase();
@@ -777,7 +945,7 @@ class NrHandoverPreparationInfoTestCase : public RrcHeaderTestCase
 };
 
 NrHandoverPreparationInfoTestCase::NrHandoverPreparationInfoTestCase()
-    : RrcHeaderTestCase("Testing NrHandoverPreparationInfoTestCase")
+    : NrRrcHeaderTestCase("Testing NrHandoverPreparationInfoTestCase")
 {
 }
 
@@ -791,6 +959,7 @@ NrHandoverPreparationInfoTestCase::DoRun()
     msg.asConfig.sourceDlCarrierFreq = 3;
     msg.asConfig.sourceUeIdentity = 11;
     msg.asConfig.sourceRadioResourceConfig = CreateRadioResourceConfigDedicated();
+    msg.asConfig.sourceMasterInformationBlock.numerology = 3;
     msg.asConfig.sourceMasterInformationBlock.dlBandwidth = 50;
     msg.asConfig.sourceMasterInformationBlock.systemFrameNumber = 1;
 
@@ -839,6 +1008,9 @@ NrHandoverPreparationInfoTestCase::DoRun()
     NS_TEST_ASSERT_MSG_EQ(source.GetAsConfig().sourceUeIdentity,
                           destination.GetAsConfig().sourceUeIdentity,
                           "sourceUeIdentity");
+    NS_TEST_ASSERT_MSG_EQ(source.GetAsConfig().sourceMasterInformationBlock.numerology,
+                          destination.GetAsConfig().sourceMasterInformationBlock.numerology,
+                          "numerology");
     NS_TEST_ASSERT_MSG_EQ(source.GetAsConfig().sourceMasterInformationBlock.dlBandwidth,
                           destination.GetAsConfig().sourceMasterInformationBlock.dlBandwidth,
                           "dlBandwidth");
@@ -874,11 +1046,11 @@ NrHandoverPreparationInfoTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Reestablishment Request Test Case
+ * @brief Rrc Connection Reestablishment Request Test Case
  */
-class NrRrcConnectionReestablishmentRequestTestCase : public RrcHeaderTestCase
+class NrRrcConnectionReestablishmentRequestTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionReestablishmentRequestTestCase();
@@ -886,7 +1058,7 @@ class NrRrcConnectionReestablishmentRequestTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionReestablishmentRequestTestCase::NrRrcConnectionReestablishmentRequestTestCase()
-    : RrcHeaderTestCase("Testing NrRrcConnectionReestablishmentRequestTestCase")
+    : NrRrcHeaderTestCase("Testing NrRrcConnectionReestablishmentRequestTestCase")
 {
 }
 
@@ -934,11 +1106,11 @@ NrRrcConnectionReestablishmentRequestTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Reestablishment Test Case
+ * @brief Rrc Connection Reestablishment Test Case
  */
-class NrRrcConnectionReestablishmentTestCase : public RrcHeaderTestCase
+class NrRrcConnectionReestablishmentTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionReestablishmentTestCase();
@@ -946,7 +1118,7 @@ class NrRrcConnectionReestablishmentTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionReestablishmentTestCase::NrRrcConnectionReestablishmentTestCase()
-    : RrcHeaderTestCase("Testing NrRrcConnectionReestablishmentTestCase")
+    : NrRrcHeaderTestCase("Testing NrRrcConnectionReestablishmentTestCase")
 {
 }
 
@@ -990,11 +1162,11 @@ NrRrcConnectionReestablishmentTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Reestablishment Complete Test Case
+ * @brief Rrc Connection Reestablishment Complete Test Case
  */
-class NrRrcConnectionReestablishmentCompleteTestCase : public RrcHeaderTestCase
+class NrRrcConnectionReestablishmentCompleteTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionReestablishmentCompleteTestCase();
@@ -1002,7 +1174,7 @@ class NrRrcConnectionReestablishmentCompleteTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionReestablishmentCompleteTestCase::NrRrcConnectionReestablishmentCompleteTestCase()
-    : RrcHeaderTestCase("Testing NrRrcConnectionReestablishmentCompleteTestCase")
+    : NrRrcHeaderTestCase("Testing NrRrcConnectionReestablishmentCompleteTestCase")
 {
 }
 
@@ -1044,11 +1216,11 @@ NrRrcConnectionReestablishmentCompleteTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Rrc Connection Reject Test Case
+ * @brief Rrc Connection Reject Test Case
  */
-class NrRrcConnectionRejectTestCase : public RrcHeaderTestCase
+class NrRrcConnectionRejectTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrRrcConnectionRejectTestCase();
@@ -1056,7 +1228,7 @@ class NrRrcConnectionRejectTestCase : public RrcHeaderTestCase
 };
 
 NrRrcConnectionRejectTestCase::NrRrcConnectionRejectTestCase()
-    : RrcHeaderTestCase("Testing NrRrcConnectionRejectTestCase")
+    : NrRrcHeaderTestCase("Testing NrRrcConnectionRejectTestCase")
 {
 }
 
@@ -1097,11 +1269,11 @@ NrRrcConnectionRejectTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Measurement Report Test Case
+ * @brief Measurement Report Test Case
  */
-class NrMeasurementReportTestCase : public RrcHeaderTestCase
+class NrMeasurementReportTestCase : public NrRrcHeaderTestCase
 {
   public:
     NrMeasurementReportTestCase();
@@ -1109,7 +1281,7 @@ class NrMeasurementReportTestCase : public RrcHeaderTestCase
 };
 
 NrMeasurementReportTestCase::NrMeasurementReportTestCase()
-    : RrcHeaderTestCase("Testing NrMeasurementReportTestCase")
+    : NrRrcHeaderTestCase("Testing NrMeasurementReportTestCase")
 {
 }
 
@@ -1233,10 +1405,365 @@ NrMeasurementReportTestCase::DoRun()
     packet = nullptr;
 }
 
+// NR-ARFCNs used by the bandwidth round-trip tests. The FR1/FR2 boundary is at
+// NR-ARFCN 2016667 (24.25 GHz, see NrPhy::ArfcnToFrequencyHz). kFr1Arfcn is well
+// below it (~0.5 GHz) and kFr2Arfcn is above it (~28 GHz), so the
+// SupportedBandwidth CHOICE encodes the fr1 leaf for the former and the fr2 leaf
+// for the latter.
+static constexpr uint32_t kFr1Arfcn = 100000;  // ~0.5 GHz, FR1
+static constexpr uint32_t kFr2Arfcn = 2079167; // ~28 GHz, FR2
+
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Asn1Encoding Test Suite
+ * @brief Bandwidth round-trip sweep test case.
+ *
+ * Sweeps every supported NR bandwidth (expressed in units of 100 kHz, i.e.
+ * MHz * 10) on a carrier of the matching frequency range and asserts that the
+ * value is preserved across ASN.1 serialization/deserialization through every
+ * header path that carries a SupportedBandwidth CHOICE:
+ *   (a) the SCell RadioResourceConfigCommonSCell (DL and UL),
+ *   (b) the handover MobilityControlInfo.carrierBandwidth (DL and UL),
+ *   (c) the measObject allowedMeasBandwidth,
+ *   (d) the HandoverPreparationInfo source MasterInformationBlock dl-Bandwidth,
+ *       and
+ *   (e) the SIB2 freqInfo ul-Bandwidth.
+ *
+ * The FR1 set {5,10,15,20,25,30,40,50,60,80,100} MHz is exercised on an FR1
+ * carrier and the FR2 set {50,100,200,400} MHz on an FR2 carrier. The 50 and
+ * 100 MHz bandwidths are ambiguous across the CHOICE (they appear in both the
+ * fr1 and fr2 leaves); the test drives them on both an FR1 and an FR2 carrier
+ * and asserts both round-trip to the same value, with the encoded FR matching
+ * the carrier.
+ */
+class NrBandwidthRoundTripTestCase : public NrRrcHeaderTestCase
+{
+  public:
+    NrBandwidthRoundTripTestCase();
+    void DoRun() override;
+
+  private:
+    /**
+     * @brief Round-trip a single (dl,ul) bandwidth pair through the SCell,
+     *        MobilityControlInfo and measObject paths of
+     *        RrcConnectionReconfiguration, with both carriers at @p arfcn.
+     * @param dlBandwidth DL bandwidth in 100 kHz units
+     * @param ulBandwidth UL bandwidth in 100 kHz units
+     * @param arfcn carrier ARFCN that selects the FR1/FR2 CHOICE leaf
+     */
+    void CheckReconfiguration(uint16_t dlBandwidth, uint16_t ulBandwidth, uint32_t arfcn);
+    /**
+     * @brief Round-trip a single DL bandwidth through the HandoverPreparationInfo
+     *        source MasterInformationBlock and SIB2 ul-Bandwidth paths, with the
+     *        carriers at @p arfcn.
+     * @param dlBandwidth DL bandwidth in 100 kHz units
+     * @param arfcn carrier ARFCN that selects the FR1/FR2 CHOICE leaf
+     */
+    void CheckHandoverPreparationInfo(uint16_t dlBandwidth, uint32_t arfcn);
+};
+
+NrBandwidthRoundTripTestCase::NrBandwidthRoundTripTestCase()
+    : NrRrcHeaderTestCase("Testing NrBandwidthRoundTripTestCase")
+{
+}
+
+void
+NrBandwidthRoundTripTestCase::CheckReconfiguration(uint16_t dlBandwidth,
+                                                   uint16_t ulBandwidth,
+                                                   uint32_t arfcn)
+{
+    NrRrcSap::RrcConnectionReconfiguration msg{};
+    msg.rrcTransactionIdentifier = 1;
+
+    // (c) measObject allowedMeasBandwidth path, carried on the same ARFCN.
+    msg.haveMeasConfig = true;
+    msg.measConfig.haveQuantityConfig = false;
+    msg.measConfig.haveMeasGapConfig = false;
+    msg.measConfig.haveSmeasure = false;
+    msg.measConfig.haveSpeedStatePars = false;
+    NrRrcSap::MeasObjectToAddMod measObjectToAddMod;
+    measObjectToAddMod.measObjectId = 1;
+    measObjectToAddMod.measObjectEutra.carrierFreq = arfcn;
+    measObjectToAddMod.measObjectEutra.allowedMeasBandwidth = dlBandwidth;
+    measObjectToAddMod.measObjectEutra.presenceAntennaPort1 = false;
+    measObjectToAddMod.measObjectEutra.neighCellConfig = 0;
+    measObjectToAddMod.measObjectEutra.offsetFreq = 0;
+    measObjectToAddMod.measObjectEutra.haveCellForWhichToReportCGI = false;
+    msg.measConfig.measObjectToAddModList.push_back(measObjectToAddMod);
+
+    // (b) MobilityControlInfo.carrierBandwidth path. haveCarrierFreq is true so
+    // the dl/ul carrier ARFCNs (which select the FR) are present.
+    msg.haveMobilityControlInfo = true;
+    msg.mobilityControlInfo.targetPhysCellId = 4;
+    msg.mobilityControlInfo.haveCarrierFreq = true;
+    msg.mobilityControlInfo.carrierFreq.dlCarrierFreq = arfcn;
+    msg.mobilityControlInfo.carrierFreq.ulCarrierFreq = arfcn;
+    msg.mobilityControlInfo.haveCarrierBandwidth = true;
+    msg.mobilityControlInfo.carrierBandwidth.dlBandwidth = dlBandwidth;
+    msg.mobilityControlInfo.carrierBandwidth.ulBandwidth = ulBandwidth;
+    msg.mobilityControlInfo.newUeIdentity = 11;
+    msg.mobilityControlInfo.haveRachConfigDedicated = false;
+    // radioResourceConfigCommon.rachConfigCommon is always serialized when
+    // mobilityControlInfo is present; populate the constrained-enum fields so
+    // serialization does not NS_FATAL_ERROR.
+    msg.mobilityControlInfo.radioResourceConfigCommon.rachConfigCommon.preambleInfo
+        .numberOfRaPreambles = 4;
+    msg.mobilityControlInfo.radioResourceConfigCommon.rachConfigCommon.raSupervisionInfo
+        .preambleTransMax = 3;
+    msg.mobilityControlInfo.radioResourceConfigCommon.rachConfigCommon.raSupervisionInfo
+        .raResponseWindowSize = 6;
+
+    msg.haveRadioResourceConfigDedicated = false;
+
+    // (a) SCell RadioResourceConfigCommonSCell path, DL and UL carriers at arfcn.
+    msg.haveNonCriticalExtension = true;
+    msg.nonCriticalExtension.sCellToAddModList.push_back(
+        CreateSCellToAddMod(dlBandwidth, ulBandwidth, arfcn, arfcn));
+
+    NrRrcConnectionReconfigurationHeader source;
+    source.SetMessage(msg);
+
+    Ptr<Packet> p = Create<Packet>();
+    p->AddHeader(source);
+    NrRrcConnectionReconfigurationHeader destination;
+    p->RemoveHeader(destination);
+
+    // MobilityControlInfo.carrierBandwidth
+    NS_TEST_ASSERT_MSG_EQ(destination.GetMobilityControlInfo().carrierBandwidth.dlBandwidth,
+                          dlBandwidth,
+                          "MobilityControlInfo.carrierBandwidth.dlBandwidth round-trip ("
+                              << dlBandwidth << " in 100 kHz units, ARFCN " << arfcn << ")");
+    NS_TEST_ASSERT_MSG_EQ(destination.GetMobilityControlInfo().carrierBandwidth.ulBandwidth,
+                          ulBandwidth,
+                          "MobilityControlInfo.carrierBandwidth.ulBandwidth round-trip ("
+                              << ulBandwidth << " in 100 kHz units, ARFCN " << arfcn << ")");
+
+    // measObject allowedMeasBandwidth
+    auto measObjs = destination.GetMeasConfig().measObjectToAddModList;
+    NS_TEST_ASSERT_MSG_EQ(measObjs.size(), 1, "exactly one measObject expected");
+    NS_TEST_ASSERT_MSG_EQ(measObjs.front().measObjectEutra.allowedMeasBandwidth,
+                          dlBandwidth,
+                          "measObject allowedMeasBandwidth round-trip ("
+                              << dlBandwidth << " in 100 kHz units, ARFCN " << arfcn << ")");
+
+    // SCell DL/UL bandwidth
+    auto scells = destination.GetNonCriticalExtensionConfig().sCellToAddModList;
+    NS_TEST_ASSERT_MSG_EQ(scells.size(), 1, "exactly one SCell expected");
+    const auto& rrccsc = scells.front().radioResourceConfigCommonSCell;
+    NS_TEST_ASSERT_MSG_EQ(rrccsc.nonUlConfiguration.dlBandwidth,
+                          dlBandwidth,
+                          "SCell nonUlConfiguration.dlBandwidth round-trip ("
+                              << dlBandwidth << " in 100 kHz units, ARFCN " << arfcn << ")");
+    NS_TEST_ASSERT_MSG_EQ(rrccsc.ulConfiguration.ulFreqInfo.ulBandwidth,
+                          ulBandwidth,
+                          "SCell ulConfiguration.ulFreqInfo.ulBandwidth round-trip ("
+                              << ulBandwidth << " in 100 kHz units, ARFCN " << arfcn << ")");
+}
+
+void
+NrBandwidthRoundTripTestCase::CheckHandoverPreparationInfo(uint16_t dlBandwidth, uint32_t arfcn)
+{
+    NrRrcSap::HandoverPreparationInfo msg;
+    msg.asConfig.sourceDlCarrierFreq = arfcn;
+    msg.asConfig.sourceUeIdentity = 11;
+    msg.asConfig.sourceRadioResourceConfig = CreateRadioResourceConfigDedicated();
+    msg.asConfig.sourceMasterInformationBlock.numerology = 3;
+    msg.asConfig.sourceMasterInformationBlock.dlBandwidth = dlBandwidth;
+    msg.asConfig.sourceMasterInformationBlock.systemFrameNumber = 1;
+
+    msg.asConfig.sourceSystemInformationBlockType1.cellAccessRelatedInfo.csgIndication = true;
+    msg.asConfig.sourceSystemInformationBlockType1.cellAccessRelatedInfo.cellIdentity = 5;
+    msg.asConfig.sourceSystemInformationBlockType1.cellAccessRelatedInfo.csgIdentity = 4;
+    msg.asConfig.sourceSystemInformationBlockType1.cellAccessRelatedInfo.plmnIdentityInfo
+        .plmnIdentity = 123;
+
+    // freqInfo.ulBandwidth also goes through the bandwidth codec; sweep it too,
+    // on a UL carrier in the same frequency range.
+    msg.asConfig.sourceSystemInformationBlockType2.freqInfo.ulBandwidth = dlBandwidth;
+    msg.asConfig.sourceSystemInformationBlockType2.freqInfo.ulCarrierFreq = arfcn;
+    msg.asConfig.sourceSystemInformationBlockType2.radioResourceConfigCommon.rachConfigCommon
+        .preambleInfo.numberOfRaPreambles = 4;
+    msg.asConfig.sourceSystemInformationBlockType2.radioResourceConfigCommon.rachConfigCommon
+        .raSupervisionInfo.preambleTransMax = 3;
+    msg.asConfig.sourceSystemInformationBlockType2.radioResourceConfigCommon.rachConfigCommon
+        .raSupervisionInfo.raResponseWindowSize = 6;
+
+    msg.asConfig.sourceMeasConfig.haveQuantityConfig = false;
+    msg.asConfig.sourceMeasConfig.haveMeasGapConfig = false;
+    msg.asConfig.sourceMeasConfig.haveSmeasure = false;
+    msg.asConfig.sourceMeasConfig.haveSpeedStatePars = false;
+
+    NrHandoverPreparationInfoHeader source;
+    source.SetMessage(msg);
+
+    Ptr<Packet> p = Create<Packet>();
+    p->AddHeader(source);
+    NrHandoverPreparationInfoHeader destination;
+    p->RemoveHeader(destination);
+
+    NS_TEST_ASSERT_MSG_EQ(destination.GetAsConfig().sourceMasterInformationBlock.dlBandwidth,
+                          dlBandwidth,
+                          "HandoverPreparationInfo source MIB dlBandwidth round-trip ("
+                              << dlBandwidth << " in 100 kHz units, ARFCN " << arfcn << ")");
+    NS_TEST_ASSERT_MSG_EQ(
+        destination.GetAsConfig().sourceSystemInformationBlockType2.freqInfo.ulBandwidth,
+        dlBandwidth,
+        "HandoverPreparationInfo SIB2 ulBandwidth round-trip ("
+            << dlBandwidth << " in 100 kHz units, ARFCN " << arfcn << ")");
+}
+
+void
+NrBandwidthRoundTripTestCase::DoRun()
+{
+    NS_LOG_DEBUG("============= NrBandwidthRoundTripTestCase ===========");
+
+    // FR1 SupportedBandwidth set {5,10,15,20,25,30,40,50,60,80,100} MHz, in
+    // units of 100 kHz (MHz * 10), carried on an FR1 ARFCN.
+    const std::vector<uint16_t> fr1Bandwidths100kHz =
+        {50, 100, 150, 200, 250, 300, 400, 500, 600, 800, 1000};
+    for (uint16_t bw : fr1Bandwidths100kHz)
+    {
+        CheckReconfiguration(bw, bw, kFr1Arfcn);
+        CheckHandoverPreparationInfo(bw, kFr1Arfcn);
+    }
+
+    // FR2 SupportedBandwidth set {50,100,200,400} MHz, carried on an FR2 ARFCN.
+    const std::vector<uint16_t> fr2Bandwidths100kHz = {500, 1000, 2000, 4000};
+    for (uint16_t bw : fr2Bandwidths100kHz)
+    {
+        CheckReconfiguration(bw, bw, kFr2Arfcn);
+        CheckHandoverPreparationInfo(bw, kFr2Arfcn);
+    }
+
+    // Ambiguous bandwidths: 50 and 100 MHz exist in both the fr1 and fr2 leaves.
+    // Drive each on an FR1 carrier and an FR2 carrier and assert both round-trip
+    // to the same value. The CHOICE discriminator is on the wire, so the value
+    // is recovered regardless of which FR leaf was chosen at serialize time.
+    for (uint16_t bw :
+         {static_cast<uint16_t>(500) /* 50 MHz */, static_cast<uint16_t>(1000) /* 100 MHz */})
+    {
+        CheckReconfiguration(bw, bw, kFr1Arfcn);
+        CheckReconfiguration(bw, bw, kFr2Arfcn);
+        CheckHandoverPreparationInfo(bw, kFr1Arfcn);
+        CheckHandoverPreparationInfo(bw, kFr2Arfcn);
+    }
+
+    // Also cross dl != ul to make sure the two fields are not accidentally
+    // sharing state through the codec (both within a single FR's set).
+    CheckReconfiguration(200 /* 20 MHz */, 100 /* 10 MHz */, kFr1Arfcn);
+    CheckReconfiguration(4000 /* 400 MHz */, 500 /* 50 MHz */, kFr2Arfcn);
+}
+
+/**
+ * @ingroup nr-test
+ *
+ * @brief Bandwidth enum index round-trip test case.
+ *
+ * For every valid SupportedBandwidth CHOICE leaf index, builds the
+ * corresponding bandwidth (in 100 kHz units) and asserts it survives an ASN.1
+ * round-trip. The FR1 leaf has indices 0..10
+ * {5,10,15,20,25,30,40,50,60,80,100} MHz and is exercised on an FR1 carrier;
+ * the FR2 leaf has indices 0..3 {50,100,200,400} MHz and is exercised on an FR2
+ * carrier. This indirectly exercises EnumToFr1Bandwidth / Fr1BandwidthToEnum
+ * and EnumToFr2Bandwidth / Fr2BandwidthToEnum for every index.
+ */
+class NrBandwidthEnumRoundTripTestCase : public NrRrcHeaderTestCase
+{
+  public:
+    NrBandwidthEnumRoundTripTestCase();
+    void DoRun() override;
+
+  private:
+    /**
+     * @brief Round-trip a single bandwidth through the HandoverPreparationInfo
+     *        source-MIB path on a carrier at @p arfcn, asserting it is preserved.
+     * @param bw100kHz bandwidth in 100 kHz units
+     * @param arfcn carrier ARFCN that selects the FR1/FR2 CHOICE leaf
+     * @param label human-readable label for the assertion message
+     */
+    void CheckSourceMibBandwidth(uint16_t bw100kHz, uint32_t arfcn, const std::string& label);
+};
+
+NrBandwidthEnumRoundTripTestCase::NrBandwidthEnumRoundTripTestCase()
+    : NrRrcHeaderTestCase("Testing NrBandwidthEnumRoundTripTestCase")
+{
+}
+
+void
+NrBandwidthEnumRoundTripTestCase::CheckSourceMibBandwidth(uint16_t bw100kHz,
+                                                          uint32_t arfcn,
+                                                          const std::string& label)
+{
+    NrRrcSap::HandoverPreparationInfo msg;
+    msg.asConfig.sourceDlCarrierFreq = arfcn;
+    msg.asConfig.sourceUeIdentity = 11;
+    msg.asConfig.sourceRadioResourceConfig = CreateRadioResourceConfigDedicated();
+    msg.asConfig.sourceMasterInformationBlock.numerology = 0;
+    msg.asConfig.sourceMasterInformationBlock.dlBandwidth = bw100kHz;
+    msg.asConfig.sourceMasterInformationBlock.systemFrameNumber = 0;
+    msg.asConfig.sourceSystemInformationBlockType1.cellAccessRelatedInfo.csgIndication = false;
+    msg.asConfig.sourceSystemInformationBlockType1.cellAccessRelatedInfo.cellIdentity = 1;
+    msg.asConfig.sourceSystemInformationBlockType1.cellAccessRelatedInfo.csgIdentity = 1;
+    msg.asConfig.sourceSystemInformationBlockType1.cellAccessRelatedInfo.plmnIdentityInfo
+        .plmnIdentity = 1;
+    msg.asConfig.sourceSystemInformationBlockType2.freqInfo.ulBandwidth = bw100kHz;
+    msg.asConfig.sourceSystemInformationBlockType2.freqInfo.ulCarrierFreq = arfcn;
+    msg.asConfig.sourceSystemInformationBlockType2.radioResourceConfigCommon.rachConfigCommon
+        .preambleInfo.numberOfRaPreambles = 4;
+    msg.asConfig.sourceSystemInformationBlockType2.radioResourceConfigCommon.rachConfigCommon
+        .raSupervisionInfo.preambleTransMax = 3;
+    msg.asConfig.sourceSystemInformationBlockType2.radioResourceConfigCommon.rachConfigCommon
+        .raSupervisionInfo.raResponseWindowSize = 6;
+    msg.asConfig.sourceMeasConfig.haveQuantityConfig = false;
+    msg.asConfig.sourceMeasConfig.haveMeasGapConfig = false;
+    msg.asConfig.sourceMeasConfig.haveSmeasure = false;
+    msg.asConfig.sourceMeasConfig.haveSpeedStatePars = false;
+
+    NrHandoverPreparationInfoHeader source;
+    source.SetMessage(msg);
+
+    Ptr<Packet> p = Create<Packet>();
+    p->AddHeader(source);
+    NrHandoverPreparationInfoHeader destination;
+    p->RemoveHeader(destination);
+
+    NS_TEST_ASSERT_MSG_EQ(destination.GetAsConfig().sourceMasterInformationBlock.dlBandwidth,
+                          bw100kHz,
+                          label << " dlBandwidth round-trip");
+}
+
+void
+NrBandwidthEnumRoundTripTestCase::DoRun()
+{
+    NS_LOG_DEBUG("============= NrBandwidthEnumRoundTripTestCase ===========");
+
+    // FR1 leaf: indices 0..10 -> {5,10,15,20,25,30,40,50,60,80,100} MHz, encoded
+    // as fr1 on an FR1 carrier.
+    const std::vector<uint16_t> fr1MhzByIndex = {5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100};
+    for (std::size_t idx = 0; idx < fr1MhzByIndex.size(); idx++)
+    {
+        const uint16_t bw100kHz = fr1MhzByIndex[idx] * 10;
+        std::ostringstream oss;
+        oss << "FR1 enum index " << idx << " (" << fr1MhzByIndex[idx] << " MHz)";
+        CheckSourceMibBandwidth(bw100kHz, kFr1Arfcn, oss.str());
+    }
+
+    // FR2 leaf: indices 0..3 -> {50,100,200,400} MHz, encoded as fr2 on an FR2
+    // carrier.
+    const std::vector<uint16_t> fr2MhzByIndex = {50, 100, 200, 400};
+    for (std::size_t idx = 0; idx < fr2MhzByIndex.size(); idx++)
+    {
+        const uint16_t bw100kHz = fr2MhzByIndex[idx] * 10;
+        std::ostringstream oss;
+        oss << "FR2 enum index " << idx << " (" << fr2MhzByIndex[idx] << " MHz)";
+        CheckSourceMibBandwidth(bw100kHz, kFr2Arfcn, oss.str());
+    }
+}
+
+/**
+ * @ingroup nr-test
+ *
+ * @brief Asn1Encoding Test Suite
  */
 class NrAsn1EncodingSuite : public TestSuite
 {
@@ -1259,10 +1786,12 @@ NrAsn1EncodingSuite::NrAsn1EncodingSuite()
     AddTestCase(new NrRrcConnectionReestablishmentCompleteTestCase(), TestCase::Duration::QUICK);
     AddTestCase(new NrRrcConnectionRejectTestCase(), TestCase::Duration::QUICK);
     AddTestCase(new NrMeasurementReportTestCase(), TestCase::Duration::QUICK);
+    AddTestCase(new NrBandwidthRoundTripTestCase(), TestCase::Duration::QUICK);
+    AddTestCase(new NrBandwidthEnumRoundTripTestCase(), TestCase::Duration::QUICK);
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 NrAsn1EncodingSuite g_nrAsn1EncodingSuite;

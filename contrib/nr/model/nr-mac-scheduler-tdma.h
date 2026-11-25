@@ -6,6 +6,8 @@
 
 #include "nr-mac-scheduler-ns3.h"
 
+#include "ns3/nr-export.h"
+
 #include <functional>
 #include <memory>
 
@@ -13,8 +15,8 @@ namespace ns3
 {
 
 /**
- * \ingroup scheduler
- * \brief The base for all the TDMA schedulers
+ * @ingroup scheduler
+ * @brief The base for all the TDMA schedulers
  *
  * An example of TDMA-based scheduling is the following:
  * <pre>
@@ -55,25 +57,27 @@ namespace ns3
  * The last one is answered by CreateDlDci() or CreateUlDci(), which call CreateDci()
  * to perform the "hard" work.
  *
- * \see NrMacSchedulerTdmaRR
- * \see NrMacSchedulerTdmaPF
- * \see NrMacSchedulerTdmaMR
+ * @see NrMacSchedulerTdmaRR
+ * @see NrMacSchedulerTdmaPF
+ * @see NrMacSchedulerTdmaMR
  */
-class NrMacSchedulerTdma : public NrMacSchedulerNs3
+class NR_EXPORT NrMacSchedulerTdma : public NrMacSchedulerNs3
 {
+    friend class NrTestSchedulerAiCase;
+
   public:
     /**
-     * \brief GetTypeId
-     * \return The TypeId of the class
+     * @brief GetTypeId
+     * @return The TypeId of the class
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief NrMacSchedulerTdma constructor
+     * @brief NrMacSchedulerTdma constructor
      */
     NrMacSchedulerTdma();
     /**
-     * \brief NrMacSchedulerTdma deconstructor
+     * @brief NrMacSchedulerTdma deconstructor
      */
     ~NrMacSchedulerTdma() override;
 
@@ -91,9 +95,9 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
         uint32_t maxSym) const override;
 
     /**
-     * \brief Not doing anything, moving forward the spoint is done by CreateDci
-     * \param spoint Starting point
-     * \param symOfBeam the number of symbols assigned to the beam
+     * @brief Not doing anything, moving forward the spoint is done by CreateDci
+     * @param spoint Starting point
+     * @param symOfBeam the number of symbols assigned to the beam
      */
     void ChangeDlBeam([[maybe_unused]] PointInFTPlane* spoint,
                       [[maybe_unused]] uint32_t symOfBeam) const override
@@ -101,9 +105,9 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
     }
 
     /**
-     * \brief Not doing anything, moving forward the spoint is done by CreateDci
-     * \param spoint Starting point
-     * \param symOfBeam the number of symbols assigned to the beam
+     * @brief Not doing anything, moving forward the spoint is done by CreateDci
+     * @param spoint Starting point
+     * @param symOfBeam the number of symbols assigned to the beam
      */
     void ChangeUlBeam([[maybe_unused]] PointInFTPlane* spoint,
                       [[maybe_unused]] uint32_t symOfBeam) const override
@@ -113,8 +117,8 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
     uint8_t GetTpc() const override;
 
     /**
-     * \brief Provide the comparison function to order the UE when scheduling DL
-     * \return a function that should order two UEs based on their priority: if
+     * @brief Provide the comparison function to order the UE when scheduling DL
+     * @return a function that should order two UEs based on their priority: if
      * UE a is less than UE b, it will have an higher priority.
      */
     virtual std::function<bool(const NrMacSchedulerNs3::UePtrAndBufferReq& lhs,
@@ -122,8 +126,8 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
     GetUeCompareDlFn() const = 0;
 
     /**
-     * \brief Provide the comparison function to order the UE when scheduling UL
-     * \return a function that should order two UEs based on their priority: if
+     * @brief Provide the comparison function to order the UE when scheduling UL
+     * @return a function that should order two UEs based on their priority: if
      * UE a is less than UE b, it will have an higher priority.
      */
     virtual std::function<bool(const NrMacSchedulerNs3::UePtrAndBufferReq& lhs,
@@ -131,10 +135,10 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
     GetUeCompareUlFn() const = 0;
 
     /**
-     * \brief Update the UE representation after a symbol (DL) has been assigned to it
-     * \param ue UE to which a symbol has been assigned
-     * \param assigned the amount of resources assigned
-     * \param totalAssigned the amount of total resources assigned until now
+     * @brief Update the UE representation after a symbol (DL) has been assigned to it
+     * @param ue UE to which a symbol has been assigned
+     * @param assigned the amount of resources assigned
+     * @param totalAssigned the amount of total resources assigned until now
      *
      * After an UE is selected to be eligible for a symbol assignment, its representation
      * should be updated. The subclasses, by implementing this method, update
@@ -147,10 +151,10 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
                                      const FTResources& totalAssigned) const = 0;
 
     /**
-     * \brief Update the UE representation after a symbol (DL) has been assigned to it
-     * \param ue UE to which a symbol has been assigned
-     * \param assigned the amount of resources assigned
-     * \param totalAssigned the amount of total resources assigned until now
+     * @brief Update the UE representation after a symbol (DL) has been assigned to it
+     * @param ue UE to which a symbol has been assigned
+     * @param assigned the amount of resources assigned
+     * @param totalAssigned the amount of total resources assigned until now
      *
      * After an UE is selected to be eligible for a symbol assignment, its representation
      * should be updated. The subclasses, by implementing this method, update
@@ -163,29 +167,29 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
                                      const FTResources& totalAssigned) const = 0;
 
     /**
-     * \brief Update the UE representation after a symbol (DL) has been assigned to other UE
-     * \param ue UE to which a symbol has not been assigned
-     * \param notAssigned the amount of resources not assigned
-     * \param totalAssigned the amount of total resources assigned until now
+     * @brief Update the UE representation after a symbol (DL) has been assigned to other UE
+     * @param ue UE to which a symbol has not been assigned
+     * @param notAssigned the amount of resources not assigned
+     * @param totalAssigned the amount of total resources assigned until now
      */
     virtual void NotAssignedDlResources(const UePtrAndBufferReq& ue,
                                         const FTResources& notAssigned,
                                         const FTResources& totalAssigned) const = 0;
 
     /**
-     * \brief Update the UE representation after a symbol (UL) has been assigned to other UE
-     * \param ue UE to which a symbol has not been assigned
-     * \param notAssigned the amount of resources not assigned
-     * \param totalAssigned the amount of total resources assigned until now
+     * @brief Update the UE representation after a symbol (UL) has been assigned to other UE
+     * @param ue UE to which a symbol has not been assigned
+     * @param notAssigned the amount of resources not assigned
+     * @param totalAssigned the amount of total resources assigned until now
      */
     virtual void NotAssignedUlResources(const UePtrAndBufferReq& ue,
                                         const FTResources& notAssigned,
                                         const FTResources& totalAssigned) const = 0;
 
     /**
-     * \brief Prepare UE for the DL scheduling
-     * \param ue UE that is eligible for an assignation in any iteration round
-     * \param assignableInIteration Resources that can be assigned in each iteration
+     * @brief Prepare UE for the DL scheduling
+     * @param ue UE that is eligible for an assignation in any iteration round
+     * @param assignableInIteration Resources that can be assigned in each iteration
      *
      * The default implementation is empty, but a subclass can specialize the
      * behaviour, e.g., to calculate some value before the choice of RBG to
@@ -195,9 +199,9 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
                                const FTResources& assignableInIteration) const = 0;
 
     /**
-     * \brief Prepare UE for the UL scheduling
-     * \param ue UE that is eligible for an assignation in any iteration round
-     * \param assignableInIteration Resources that can be assigned in each iteration
+     * @brief Prepare UE for the UL scheduling
+     * @param ue UE that is eligible for an assignation in any iteration round
+     * @param assignableInIteration Resources that can be assigned in each iteration
      *
      * The default implementation is empty, but a subclass can specialize the
      * behaviour, e.g., to calculate some value before the choice of RBG to
@@ -206,49 +210,90 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
     virtual void BeforeUlSched(const UePtrAndBufferReq& ue,
                                const FTResources& assignableInIteration) const = 0;
 
+    /**
+     * @brief Call the notify callback function in the OpenGymEnv class
+     * in the ns3-gym module for downlink
+     * @param ueVector A vector containing pointers to active UEs and their corresponding buffer
+     * requests
+     */
+    virtual void CallNotifyDlFn(const std::vector<UePtrAndBufferReq>& ueVector) const
+    {
+    }
+
+    /**
+     * @brief Call the notify callback function in the OpenGymEnv class
+     * in the ns3-gym module for uplink
+     * @param ueVector A vector containing pointers to active UEs and their corresponding buffer
+     * requests
+     */
+    virtual void CallNotifyUlFn(const std::vector<UePtrAndBufferReq>& ueVector) const
+    {
+    }
+
+    typedef std::function<bool(const NrMacSchedulerNs3::UePtrAndBufferReq& lhs,
+                               const NrMacSchedulerNs3::UePtrAndBufferReq& rhs)>
+        CompareUeFn;
+    typedef std::function<CompareUeFn()> GetCompareUeFn;
+    /**
+     * @brief Sorts the given vector of UE pointers and buffer requests.
+     *
+     * This method sorts the provided `ueVector` in-place using a stable sort algorithm, based on
+     * the comparison function specified by `GetCompareFn`.
+     *
+     * Note: This function is inherited and overridden by nr-mac-scheduler-tdma-random to implement
+     * random scheduler in which GetCompareFn is not used.
+     *
+     * @param ueVector A pointer to the vector containing UE pointers and their corresponding buffer
+     * requests. The elements within this vector will be sorted according to the comparison criteria
+     * defined by the `GetCompareFn`.
+     * @param GetCompareFn A constant reference to a comparison function object that defines the
+     * sorting order for the elements in the `ueVector`. This function should take two arguments of
+     * type `UePtrAndBufferReq` and return a boolean indicating whether the first argument is less
+     * than the second.
+     */
+    virtual void SortUeVector(std::vector<UePtrAndBufferReq>* ueVector,
+                              [[maybe_unused]] const GetCompareUeFn& GetCompareFn) const;
+
   private:
     /**
-     * \brief Retrieve the UE vector from an ActiveUeMap
-     * \param activeUes UE map
-     * \return A Vector of UEs and their buffer requirements (in B)
+     * @brief Retrieve the UE vector from an ActiveUeMap
+     * @param activeUes UE map
+     * @return A Vector of UEs and their buffer requirements (in B)
      *
      * Really used only in TDMA scheduling. Worth moving?
      */
     static std::vector<UePtrAndBufferReq> GetUeVectorFromActiveUeMap(const ActiveUeMap& activeUes);
 
-  private:
     typedef std::function<void(const UePtrAndBufferReq&, const FTResources&)>
         BeforeSchedFn; //!< Before scheduling function
     /**
-     * \brief //!< Function to notify a successful assignment
+     * @brief //!< Function to notify a successful assignment
      */
     typedef std::function<void(const UePtrAndBufferReq&, const FTResources&, const FTResources&)>
         AfterSuccessfulAssignmentFn;
     /**
-     * \brief Function to notify that the UE did not get any resource in one iteration
+     * @brief Function to notify that the UE did not get any resource in one iteration
      */
     typedef std::function<void(const UePtrAndBufferReq&, const FTResources&, const FTResources&)>
         AfterUnsuccessfulAssignmentFn;
-    typedef std::function<uint32_t&(const UePtr& ue)> GetRBGFn; //!< Getter for the RBG of an UE
+    typedef std::function<std::vector<uint16_t>&(const UePtr& ue)>
+        GetRBGFn;                                               //!< Getter for the RBG of an UE
     typedef std::function<uint32_t&(const UePtr& ue)> GetTBSFn; //!< Getter for the TBS of an UE
-    typedef std::function<uint8_t&(const UePtr& ue)>
+    typedef std::function<std::vector<uint8_t>&(const UePtr& ue)>
         GetSymFn; //!< Getter for the number of symbols of an UE
-    typedef std::function<bool(const NrMacSchedulerNs3::UePtrAndBufferReq& lhs,
-                               const NrMacSchedulerNs3::UePtrAndBufferReq& rhs)>
-        CompareUeFn;
-    typedef std::function<CompareUeFn()> GetCompareUeFn;
+    typedef std::function<void(std::vector<UePtrAndBufferReq>& ueVector)> CallNotifyFn;
 
-    BeamSymbolMap AssignRBGTDMA(
-        uint32_t symAvail,
-        const ActiveUeMap& activeUe,
-        const std::string& type,
-        const BeforeSchedFn& BeforeSchedFn,
-        const GetCompareUeFn& GetCompareFn,
-        const GetTBSFn& GetTBSFn,
-        const GetRBGFn& GetRBGFn,
-        const GetSymFn& GetSymFn,
-        const AfterSuccessfulAssignmentFn& SuccessfulAssignmentFn,
-        const AfterUnsuccessfulAssignmentFn& UnSuccessfulAssignmentFn) const;
+    BeamSymbolMap AssignRBGTDMA(uint32_t symAvail,
+                                const ActiveUeMap& activeUe,
+                                const std::string& type,
+                                const BeforeSchedFn& BeforeSchedFn,
+                                const GetCompareUeFn& GetCompareFn,
+                                const GetTBSFn& GetTBSFn,
+                                const GetRBGFn& GetRBGFn,
+                                const GetSymFn& GetSymFn,
+                                const AfterSuccessfulAssignmentFn& SuccessfulAssignmentFn,
+                                const AfterUnsuccessfulAssignmentFn& UnSuccessfulAssignmentFn,
+                                const CallNotifyFn& callNotifyFn) const;
 
     std::shared_ptr<DciInfoElementTdma> CreateDci(
         PointInFTPlane* spoint,
@@ -259,6 +304,14 @@ class NrMacSchedulerTdma : public NrMacSchedulerNs3
         uint8_t rank,
         Ptr<const ComplexMatrixArray> precMats,
         uint8_t numSym) const;
+
+    std::vector<DciInfoElementTdma> DoReshapeAllocation(
+        const std::vector<DciInfoElementTdma>& dcis,
+        uint8_t& startingSymbol,
+        uint8_t& numSymbols,
+        std::vector<bool>& bitmask,
+        const bool isDl,
+        const std::unordered_map<uint16_t, std::shared_ptr<NrMacSchedulerUeInfo>>& ueMap) override;
 };
 
 } // namespace ns3

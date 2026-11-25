@@ -113,6 +113,7 @@
 // dwell times and accuracy gaps in one run (the decision does not feed back
 // into anything else, so all variants see the same dynamics).
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/flow-monitor-helper.h"
@@ -3809,6 +3810,18 @@ main(int argc, char* argv[])
     }
 
     Simulator::Stop(Seconds(g.simS));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4). The satellites that serve
+    // the cell over the run exist only as mobility models feeding the contact plans; give them
+    // device-less nodes so the scene shows them (the full shell is not drawn).
+    {
+        std::vector<Ptr<ntncon::Sgp4MobilityModel>> servingMobs;
+        for (const auto& s : sats)
+        {
+            servingMobs.push_back(s.mob);
+        }
+        ns3::ntnobs::AddContextSatelliteNodes(servingMobs);
+    }
+    ns3::ntnobs::StartSceneFromNodeList(g.outDir);
     Simulator::Run();
 
     // Close an outage still open at the end.
@@ -4021,6 +4034,9 @@ main(int argc, char* argv[])
     {
         WriteUserPlane();
     }
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(g.outDir, "oran-ntn-feeder-mgmt", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

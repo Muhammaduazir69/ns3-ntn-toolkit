@@ -1,0 +1,29 @@
+digraph NrChannelConditions {
+
+    rankdir=LR;
+    node [fontname="Helvetica", fontsize=10];
+    edge [fontname="Helvetica", fontsize=10, arrowhead=vee];
+
+    attr [shape="ellipse", style="filled", fillcolor="lightblue",
+          label="NrChannelHelper\n\"ChannelCondition\""]
+
+    los [shape="box", style="filled", fillcolor="white", label="LOS"]
+    nlos [shape="box", style="filled", fillcolor="white", label="NLOS"]
+    bld [shape="box", style="filled", fillcolor="white", label="Buildings"]
+    def [shape="box", style="filled", fillcolor="gray92", label="Default"]
+
+    losm [shape="note", label="AlwaysLosChannelConditionModel\n(always line-of-sight)"]
+    nlosm [shape="note", label="NeverLosChannelConditionModel\n(always non-line-of-sight)"]
+    bldm [shape="note", label="BuildingsChannelConditionModel\n(LOS/NLOS from 3D building geometry)"]
+    natm [shape="note", label="scenario-native model\n(ThreeGpp* / NYU* ChannelConditionModel,\nstochastic LOS/NLOS per TR 38.901)"]
+
+    attr -> los
+    attr -> nlos
+    attr -> bld
+    attr -> def
+
+    los -> losm
+    nlos -> nlosm
+    bld -> bldm
+    def -> natm
+}

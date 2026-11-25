@@ -5,6 +5,8 @@
 #ifndef FAST_EXP_H
 #define FAST_EXP_H
 
+#include "ns3/nr-export.h"
+
 #include <iomanip>
 
 /*

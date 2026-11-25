@@ -13,7 +13,6 @@
 #include "ns3/abort.h"
 #include "ns3/attribute-construction-list.h"
 #include "ns3/boolean.h"
-#include "ns3/config-store-config.h"
 #include "ns3/enum.h"
 #include "ns3/log.h"
 #include "ns3/simulator.h"
@@ -26,7 +25,6 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <unistd.h>
 
 namespace ns3
 {
@@ -62,16 +60,7 @@ ConfigStore::GetTypeId()
                 "Type of file format",
                 EnumValue(ConfigStore::RAW_TEXT),
                 MakeEnumAccessor<FileFormat>(&ConfigStore::SetFileFormat),
-                MakeEnumChecker(ConfigStore::RAW_TEXT, "RawText", ConfigStore::XML, "Xml"))
-            .AddAttribute(
-                "SaveDeprecated",
-                "Save DEPRECATED attributes",
-                BooleanValue(true),
-                MakeBooleanAccessor(&ConfigStore::SetSaveDeprecated),
-                MakeBooleanChecker(),
-                TypeId::OBSOLETE,
-                "OBSOLETE since ns-3.43 as it is no longer needed; deprecated attributes are saved "
-                "only if their value differs from their respective original initial value");
+                MakeEnumChecker(ConfigStore::RAW_TEXT, "RawText", ConfigStore::XML, "Xml"));
     return tid;
 }
 

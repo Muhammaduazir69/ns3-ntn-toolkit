@@ -24,24 +24,24 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("TestUniformPlanarArray");
 
 /**
- * \ingroup antenna-tests
+ * @ingroup antenna-tests
  *
- * \brief UniformPlanarArray Test Case
+ * @brief UniformPlanarArray Test Case
  */
 class UniformPlanarArrayTestCase : public TestCase
 {
   public:
     /**
      * Generate a string containing all relevant parameters
-     * \param element the antenna element
-     * \param rows the number of rows
-     * \param cols the number of columns
-     * \param rowSpace the row spacing
-     * \param colSpace the column spacing
-     * \param alpha the bearing angle
-     * \param beta the tilting angle
-     * \param direction the direction
-     * \return the string containing all relevant parameters
+     * @param element the antenna element
+     * @param rows the number of rows
+     * @param cols the number of columns
+     * @param rowSpace the row spacing
+     * @param colSpace the column spacing
+     * @param alpha the bearing angle
+     * @param beta the tilting angle
+     * @param direction the direction
+     * @return the string containing all relevant parameters
      */
     static std::string BuildNameString(Ptr<AntennaModel> element,
                                        uint32_t rows,
@@ -53,15 +53,15 @@ class UniformPlanarArrayTestCase : public TestCase
                                        Angles direction);
     /**
      * The constructor of the test case
-     * \param element the antenna element
-     * \param rows the number of rows
-     * \param cols the number of columns
-     * \param rowSpace the row spacing
-     * \param colSpace the column spacing
-     * \param alpha the bearing angle
-     * \param beta the tilting angle
-     * \param direction the direction
-     * \param expectedGainDb the expected antenna gain [dB]
+     * @param element the antenna element
+     * @param rows the number of rows
+     * @param cols the number of columns
+     * @param rowSpace the row spacing
+     * @param colSpace the column spacing
+     * @param alpha the bearing angle
+     * @param beta the tilting angle
+     * @param direction the direction
+     * @param expectedGainDb the expected antenna gain [dB]
      */
     UniformPlanarArrayTestCase(Ptr<AntennaModel> element,
                                uint32_t rows,
@@ -80,8 +80,8 @@ class UniformPlanarArrayTestCase : public TestCase
     void DoRun() override;
     /**
      * Compute the gain of the antenna array
-     * \param a the antenna array
-     * \return the gain of the antenna array [dB]
+     * @param a the antenna array
+     * @return the gain of the antenna array [dB]
      */
     double ComputeGain(Ptr<UniformPlanarArray> a);
 
@@ -108,8 +108,7 @@ UniformPlanarArrayTestCase::BuildNameString(Ptr<AntennaModel> element,
 {
     std::ostringstream oss;
     oss << "UPA=" << rows << "x" << cols << ", row spacing=" << rowSpace << "*lambda"
-        << ", col spacing=" << colSpace << "*lambda"
-        << ", bearing=" << RadiansToDegrees(alpha) << " deg"
+        << ", col spacing=" << colSpace << "*lambda, bearing=" << RadiansToDegrees(alpha) << " deg"
         << ", tilting=" << RadiansToDegrees(beta) << " deg"
         << ", element=" << element->GetInstanceTypeId().GetName() << ", direction=" << direction;
     return oss.str();
@@ -193,9 +192,94 @@ UniformPlanarArrayTestCase::DoRun()
 }
 
 /**
- * \ingroup antenna-tests
+ * @ingroup antenna-tests
  *
- * \brief UniformPlanarArray Test Suite
+ * @brief UpdateOnChange Test Case
+ */
+class UpdateOnChangeTestCase : public TestCase
+{
+  public:
+    /**
+     * The constructor of the test case
+     * @param element the antenna element
+     * @param name the test case name
+     */
+    UpdateOnChangeTestCase(Ptr<AntennaModel> element, std::string name)
+        : TestCase(name),
+          m_element(element)
+    {
+    }
+
+  private:
+    /**
+     * Run the test
+     */
+    void DoRun() override;
+    Ptr<AntennaModel> m_element; //!< the antenna element
+};
+
+void
+UpdateOnChangeTestCase::DoRun()
+{
+    Ptr<UniformPlanarArray> ant = CreateObject<UniformPlanarArray>();
+    ant->SetAttribute("AntennaElement", PointerValue(m_element));
+    ant->SetAttribute("NumRows", UintegerValue(10));
+    ant->SetAttribute("NumColumns", UintegerValue(10));
+    ant->SetAttribute("AntennaVerticalSpacing", DoubleValue(0.5));
+    ant->SetAttribute("AntennaHorizontalSpacing", DoubleValue(0.5));
+    ant->SetAttribute("BearingAngle", DoubleValue(DegreesToRadians(0)));
+    ant->SetAttribute("DowntiltAngle", DoubleValue(DegreesToRadians(45)));
+
+    Ptr<UniformPlanarArray> ant2 = CreateObject<UniformPlanarArray>();
+    ant2->SetAttribute("AntennaElement", PointerValue(m_element));
+    ant2->SetAttribute("NumRows", UintegerValue(10));
+    ant2->SetAttribute("NumColumns", UintegerValue(10));
+    ant2->SetAttribute("AntennaVerticalSpacing", DoubleValue(0.5));
+    ant2->SetAttribute("AntennaHorizontalSpacing", DoubleValue(0.5));
+    ant2->SetAttribute("BearingAngle", DoubleValue(DegreesToRadians(0)));
+    ant2->SetAttribute("DowntiltAngle", DoubleValue(DegreesToRadians(45)));
+
+    NS_TEST_ASSERT_MSG_EQ(ant.operator bool(), true, "AntennaModel is not a PhasedArrayModel");
+
+    // Initial state of array requires a channel update
+    NS_TEST_ASSERT_MSG_EQ(ant->IsChannelOutOfDate(ant2),
+                          true,
+                          "Expecting update, since the pair was never setup");
+    NS_TEST_ASSERT_MSG_EQ(
+        ant2->IsChannelOutOfDate(ant),
+        false,
+        "Not expecting update, since the pair was just updated and no settings changed");
+    ant->SetAlpha(DegreesToRadians(90));
+    NS_TEST_ASSERT_MSG_EQ(ant2->IsChannelOutOfDate(ant),
+                          true,
+                          "Expecting update, antenna parameter changed");
+    NS_TEST_ASSERT_MSG_EQ(
+        ant->IsChannelOutOfDate(ant2),
+        false,
+        "Not expecting update, since the pair was just updated and no settings changed");
+    ant->SetAlpha(DegreesToRadians(90));
+    NS_TEST_ASSERT_MSG_EQ(
+        ant->IsChannelOutOfDate(ant2),
+        false,
+        "Not expecting update, since the pair was just updated and angle was not changed");
+    ant->SetAlpha(DegreesToRadians(85));
+    NS_TEST_ASSERT_MSG_EQ(ant2->IsChannelOutOfDate(ant),
+                          true,
+                          "Expecting update, antenna parameter changed");
+    NS_TEST_ASSERT_MSG_EQ(
+        ant->IsChannelOutOfDate(ant2),
+        false,
+        "Not expecting update, since the pair was just updated and angle was not changed");
+    ant->SetAlpha(DegreesToRadians(80));
+    NS_TEST_ASSERT_MSG_EQ(ant->IsChannelOutOfDate(ant2),
+                          true,
+                          "Expecting update, antenna parameter changed");
+}
+
+/**
+ * @ingroup antenna-tests
+ *
+ * @brief UniformPlanarArray Test Suite
  */
 class UniformPlanarArrayTestSuite : public TestSuite
 {
@@ -376,6 +460,10 @@ UniformPlanarArrayTestSuite::UniformPlanarArrayTestSuite()
                                                DegreesToRadians(45),
                                                Angles(DegreesToRadians(0), DegreesToRadians(135)),
                                                28.0),
+                TestCase::Duration::QUICK);
+    AddTestCase(new UpdateOnChangeTestCase(tgpp,
+                                           "Test IsChannelOutOfDate() and InvalidateChannels() for "
+                                           "UniformPlanarArray with 3GPP antenna element"),
                 TestCase::Duration::QUICK);
 }
 

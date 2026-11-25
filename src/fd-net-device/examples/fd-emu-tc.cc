@@ -84,7 +84,7 @@ main(int argc, char* argv[])
     std::string emuMode("netmap");
 #endif
 
-    CommandLine cmd;
+    CommandLine cmd(__FILE__);
     cmd.AddValue("deviceName0", "Device name", deviceName0);
     cmd.AddValue("deviceName1", "Device name", deviceName1);
     cmd.AddValue("ip0", "Local IP address", ip0);
@@ -299,7 +299,7 @@ main(int argc, char* argv[])
     }
 
     NS_LOG_INFO("Run Emulation.");
-    Simulator::Stop(Seconds(50.0));
+    Simulator::Stop(Seconds(50));
     Simulator::Run();
     Simulator::Destroy();
     delete helper0;

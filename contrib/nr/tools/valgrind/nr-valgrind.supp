@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+#
+# SPDX-License-Identifier: GPL-2.0-only
+
+# Extra valgrind suppressions for the CI grind job, appended to ns-3's
+# .ns3.supp. test.py -g passes --errors-for-leak-kinds=all, which counts
+# blocks still reachable at exit (framework and singleton allocations) as
+# errors. Definite and possible leaks are still reported.
+{
+   nr-still-reachable-at-exit
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*
+}

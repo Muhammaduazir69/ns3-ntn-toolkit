@@ -26,6 +26,7 @@
  *              --czml=orphans.czml --netSim=orphans.json"
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/box.h"
 #include "ns3/core-module.h"
@@ -371,6 +372,8 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(5.0), &LinkProbe);
     Simulator::Schedule(MilliSeconds(100), &TrackHapsLeoDelay);
     Simulator::Stop(Seconds(duration));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
 
     // ---- Measured KPIs: in-band sink primitives + FlowMonitor ----
@@ -403,6 +406,9 @@ main(int argc, char* argv[])
         rec->Stop();
         std::cout << "  scene events: " << rec->GetEventCount() << "\n";
     }
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "ntn-sagin-orphan-mobility-showcase", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

@@ -1,0 +1,16 @@
+
+diagram {
+
+          NrGnbRrc; NrUeManager; NrEpcGnbApplication; NrEpcMmeApplication; NrEpcSgwApplication; NrEpcPgwApplication; NrUeInfo;
+
+          NrGnbRrc ->> NrUeManager [label="RecvIdealUeContext\nRemoveRequest (rnti)"];
+          NrUeManager ->> NrEpcGnbApplication [label="DoSendReleaseIndication\n(Imsi, rnti, flowId)"];
+          NrEpcGnbApplication ->> NrEpcMmeApplication [label="ErabReleaseIndication\n(imsi, rnti, erabToBeReleaseIndication)"];
+          NrEpcMmeApplication ->> NrEpcSgwApplication [label="DeleteFlowCommand"];
+          NrEpcSgwApplication ->> NrEpcPgwApplication [label="DeleteFlowCommand"];
+          NrEpcSgwApplication <<- NrEpcPgwApplication [label="DeleteFlowRequest"];
+          NrEpcMmeApplication <<- NrEpcSgwApplication [label="DeleteFlowRequest"];
+          NrEpcMmeApplication ->> NrEpcSgwApplication [label="DeleteFlowResponse"];
+          NrEpcSgwApplication ->> NrEpcPgwApplication [label="DeleteFlowResponse"];
+          NrEpcPgwApplication ->> NrUeInfo [label="RemoveFlow (qosFlowId)"];
+}

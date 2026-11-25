@@ -7,8 +7,9 @@
 
 #include "nr-rrc-sap.h"
 
-#include <ns3/object.h>
-#include <ns3/ptr.h>
+#include "ns3/nr-export.h"
+#include "ns3/object.h"
+#include "ns3/ptr.h"
 
 #include <map>
 
@@ -21,52 +22,52 @@ class NrGnbRrcSapProvider;
 class NrUeRrc;
 
 /**
- * \ingroup ue
- * \ingroup gnb
+ * @ingroup ue
+ * @ingroup gnb
  *
- * \brief RRC message passing from the UE to the GNB
+ * @brief RRC message passing from the UE to the GNB
  *
  * Models the transmission of RRC messages from the UE to the gNB in
  * an ideal fashion, without errors and without consuming any radio
  * resources.
  *
  */
-class NrUeRrcProtocolIdeal : public Object
+class NR_EXPORT NrUeRrcProtocolIdeal : public Object
 {
     friend class MemberNrUeRrcSapUser<NrUeRrcProtocolIdeal>;
 
   public:
     /**
-     * \brief NrUeRrcProtocolIdeal constructor
+     * @brief NrUeRrcProtocolIdeal constructor
      */
     NrUeRrcProtocolIdeal();
     /**
-     * \brief ~NrUeRrcProtocolIdeal
+     * @brief ~NrUeRrcProtocolIdeal
      */
     ~NrUeRrcProtocolIdeal() override;
 
     // inherited from Object
     void DoDispose() override;
     /**
-     * \brief GetTypeId
-     * \return the type id of the object
+     * @brief GetTypeId
+     * @return the type id of the object
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief SetNrUeRrcSapProvider
-     * \param p
+     * @brief SetNrUeRrcSapProvider
+     * @param p
      */
     void SetNrUeRrcSapProvider(NrUeRrcSapProvider* p);
     /**
-     * \brief GetNrUeRrcSapUser
-     * \return
+     * @brief GetNrUeRrcSapUser
+     * @return
      */
     NrUeRrcSapUser* GetNrUeRrcSapUser();
 
     /**
-     * \brief SetUeRrc
-     * \param rrc
+     * @brief SetUeRrc
+     * @param rrc
      */
     void SetUeRrc(Ptr<NrUeRrc> rrc);
 
@@ -83,15 +84,23 @@ class NrUeRrcProtocolIdeal : public Object
         NrRrcSap::RrcConnectionReestablishmentComplete msg);
     void DoSendMeasurementReport(NrRrcSap::MeasurementReport msg);
     /**
-     * \brief Send Ideal UE context remove request function
+     * @brief Send Ideal UE context remove request function
      *
      * Notify eNodeB to release UE context once radio link failure
      * or random access failure is detected. It is needed since no
      * RLF detection mechanism at eNodeB is implemented
      *
-     * \param rnti the RNTI of the UE
+     * @param rnti the RNTI of the UE
      */
     void DoSendIdealUeContextRemoveRequest(uint16_t rnti);
+
+    /**
+     * @brief Send the UE's same-cell primary-BWP switch indication to the gNB.
+     *
+     * @param rnti  the RNTI of the UE
+     * @param bwpId the new primary BWP/CC index the UE switched to
+     */
+    void DoSendIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId);
 
     void SetGnbRrcSapProvider();
 
@@ -108,7 +117,7 @@ class NrUeRrcProtocolIdeal : public Object
  * resources.
  *
  */
-class NrGnbRrcProtocolIdeal : public Object
+class NR_EXPORT NrGnbRrcProtocolIdeal : public Object
 {
     friend class MemberNrGnbRrcSapUser<NrGnbRrcProtocolIdeal>;
 

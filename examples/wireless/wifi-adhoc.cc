@@ -21,9 +21,19 @@
 #include "ns3/yans-wifi-channel.h"
 #include "ns3/yans-wifi-helper.h"
 
+/**
+ * @file
+ * @ingroup wifi
+ * Adhoc example
+ */
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("Wifi-Adhoc");
+
+/** Unnamed namespace, to disambiguate class Experiment. */
+namespace
+{
 
 /**
  * WiFi adhoc experiment class.
@@ -36,17 +46,17 @@ class Experiment
     Experiment();
     /**
      * Constructor.
-     * \param name The name of the experiment.
+     * @param name The name of the experiment.
      */
     Experiment(std::string name);
 
     /**
      * Run an experiment.
-     * \param wifi      //!< The WifiHelper class.
-     * \param wifiPhy   //!< The YansWifiPhyHelper class.
-     * \param wifiMac   //!< The WifiMacHelper class.
-     * \param wifiChannel //!< The YansWifiChannelHelper class.
-     * \return a 2D dataset of the experiment data.
+     * @param wifi      //!< The WifiHelper class.
+     * @param wifiPhy   //!< The YansWifiPhyHelper class.
+     * @param wifiMac   //!< The WifiMacHelper class.
+     * @param wifiChannel //!< The YansWifiChannelHelper class.
+     * @return a 2D dataset of the experiment data.
      */
     Gnuplot2dDataset Run(const WifiHelper& wifi,
                          const YansWifiPhyHelper& wifiPhy,
@@ -56,30 +66,30 @@ class Experiment
   private:
     /**
      * Receive a packet.
-     * \param socket The receiving socket.
+     * @param socket The receiving socket.
      */
     void ReceivePacket(Ptr<Socket> socket);
     /**
      * Set the position of a node.
-     * \param node The node.
-     * \param position The position of the node.
+     * @param node The node.
+     * @param position The position of the node.
      */
     void SetPosition(Ptr<Node> node, Vector position);
     /**
      * Get the position of a node.
-     * \param node The node.
-     * \return the position of the node.
+     * @param node The node.
+     * @return the position of the node.
      */
     Vector GetPosition(Ptr<Node> node);
     /**
      * Move a node by 1m on the x axis, stops at 210m.
-     * \param node The node.
+     * @param node The node.
      */
     void AdvancePosition(Ptr<Node> node);
     /**
      * Setup the receiving socket.
-     * \param node The receiving node.
-     * \return the socket.
+     * @param node The receiving node.
+     * @return the socket.
      */
     Ptr<Socket> SetupPacketReceive(Ptr<Node> node);
 
@@ -124,7 +134,7 @@ Experiment::AdvancePosition(Ptr<Node> node)
         return;
     }
     SetPosition(node, pos);
-    Simulator::Schedule(Seconds(1.0), &Experiment::AdvancePosition, this, node);
+    Simulator::Schedule(Seconds(1), &Experiment::AdvancePosition, this, node);
 }
 
 void
@@ -186,7 +196,7 @@ Experiment::Run(const WifiHelper& wifi,
 
     ApplicationContainer apps = onoff.Install(c.Get(0));
     apps.Start(Seconds(0.5));
-    apps.Stop(Seconds(250.0));
+    apps.Stop(Seconds(250));
 
     Simulator::Schedule(Seconds(1.5), &Experiment::AdvancePosition, this, c.Get(1));
     Ptr<Socket> recvSink = SetupPacketReceive(c.Get(1));
@@ -197,6 +207,8 @@ Experiment::Run(const WifiHelper& wifi,
 
     return m_output;
 }
+
+} // unnamed namespace
 
 int
 main(int argc, char* argv[])

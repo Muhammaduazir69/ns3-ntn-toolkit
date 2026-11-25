@@ -40,15 +40,15 @@
  * 6) Scanning of the remaining channels 13 and 14 is cancelled.
  */
 
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/core-module.h>
-#include <ns3/log.h>
-#include <ns3/lr-wpan-module.h>
-#include <ns3/packet.h>
-#include <ns3/propagation-delay-model.h>
-#include <ns3/propagation-loss-model.h>
-#include <ns3/simulator.h>
-#include <ns3/single-model-spectrum-channel.h>
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/core-module.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-module.h"
+#include "ns3/packet.h"
+#include "ns3/propagation-delay-model.h"
+#include "ns3/propagation-loss-model.h"
+#include "ns3/simulator.h"
+#include "ns3/single-model-spectrum-channel.h"
 
 #include <iostream>
 
@@ -109,6 +109,10 @@ OrphanIndication(Ptr<LrWpanNetDevice> device, MlmeOrphanIndicationParams params)
 int
 main(int argc, char* argv[])
 {
+    // CommandLine options required by PyViz visualizer
+    CommandLine cmd(__FILE__);
+    cmd.Parse(argc, argv);
+
     LogComponentEnableAll(LogLevel(LOG_PREFIX_TIME | LOG_PREFIX_FUNC));
 
     // Create 2 PAN coordinator nodes, and 1 end device
@@ -146,12 +150,12 @@ main(int argc, char* argv[])
     Ptr<ConstantPositionMobilityModel> coord1Mobility =
         CreateObject<ConstantPositionMobilityModel>();
     coord1Mobility->SetPosition(Vector(0, 0, 0));
-    coord1NetDevice->GetPhy()->SetMobility(coord1Mobility);
+    coord1->AggregateObject(coord1Mobility);
 
     Ptr<ConstantPositionMobilityModel> endNodeMobility =
         CreateObject<ConstantPositionMobilityModel>();
     endNodeMobility->SetPosition(Vector(100, 0, 0));
-    endNodeNetDevice->GetPhy()->SetMobility(endNodeMobility);
+    endNode->AggregateObject(endNodeMobility);
 
     // MAC layer Callbacks hooks
     endNodeNetDevice->GetMac()->SetMlmeScanConfirmCallback(
@@ -173,7 +177,7 @@ main(int argc, char* argv[])
     params.m_sfrmOrd = 15;
     params.m_logCh = 12;
     Simulator::ScheduleWithContext(1,
-                                   Seconds(2.0),
+                                   Seconds(2),
                                    &LrWpanMac::MlmeStartRequest,
                                    coord1NetDevice->GetMac(),
                                    params);
@@ -192,7 +196,7 @@ main(int argc, char* argv[])
     scanParams.m_scanChannels = 0x7800;
     scanParams.m_scanType = MLMESCAN_ORPHAN;
     Simulator::ScheduleWithContext(1,
-                                   Seconds(3.0),
+                                   Seconds(3),
                                    &LrWpanMac::MlmeScanRequest,
                                    endNodeNetDevice->GetMac(),
                                    scanParams);

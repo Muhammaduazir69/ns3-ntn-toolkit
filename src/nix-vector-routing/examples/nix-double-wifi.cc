@@ -25,7 +25,7 @@
  * two Wifi networks on the same channel.
  *
  * IPv4 Network Topology
- * \verbatim
+ * @verbatim
     Wifi 10.1.1.0/24
                    AP
     *    *    *    *
@@ -35,9 +35,9 @@
                                      *    *    *    *
                                     AP
                                       Wifi 10.1.3.0/24
-   \endverbatim
+   @endverbatim
  *
- * \verbatim
+ * @verbatim
     Wifi 2001:1::/64
                    AP
     *    *    *    *
@@ -47,26 +47,26 @@
                                      *    *    *    *
                                     AP
                                       Wifi 2001:3::/64
-   \endverbatim
+   @endverbatim
  *
  * Expected Outputs:
  * IPv4:
- * \verbatim
+ * @verbatim
    Time: +7s, Nix Routing
    Route path from Node 4 to Node 7, Nix Vector: 100011 (6 bits left)
    10.1.1.3                 (Node 4)  ---->   10.1.1.4                 (Node 0)
    10.1.2.1                 (Node 0)  ---->   10.1.2.2                 (Node 1)
    10.1.3.4                 (Node 1)  ---->   10.1.3.3                 (Node 7)
-   \endverbatim
+   @endverbatim
  *
  * IPv6:
- * \verbatim
+ * @verbatim
    Time: +7s, Nix Routing
    Route path from Node 4 to Node 7, Nix Vector: 100011 (6 bits left)
    2001:1::200:ff:fe00:5    (Node 4)  ---->   fe80::200:ff:fe00:6      (Node 0)
    fe80::200:ff:fe00:1      (Node 0)  ---->   fe80::200:ff:fe00:2      (Node 1)
    fe80::200:ff:fe00:a      (Node 1)  ---->   2001:3::200:ff:fe00:9    (Node 7)
-   \endverbatim
+   @endverbatim
  */
 
 using namespace ns3;
@@ -238,19 +238,19 @@ main(int argc, char* argv[])
     UdpEchoServerHelper echoServer(9);
 
     ApplicationContainer serverApps = echoServer.Install(wifiStaNodes2.Get(2));
-    serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(10.0));
+    serverApps.Start(Seconds(1));
+    serverApps.Stop(Seconds(10));
 
     UdpEchoClientHelper echoClient(udpServerAddress, 9);
     echoClient.SetAttribute("MaxPackets", UintegerValue(1));
-    echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
+    echoClient.SetAttribute("Interval", TimeValue(Seconds(1)));
     echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 
     ApplicationContainer clientApps = echoClient.Install(wifiStaNodes1.Get(2));
-    clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(10.0));
+    clientApps.Start(Seconds(2));
+    clientApps.Stop(Seconds(10));
 
-    Simulator::Stop(Seconds(10.0));
+    Simulator::Stop(Seconds(10));
 
     Simulator::Run();
     Simulator::Destroy();

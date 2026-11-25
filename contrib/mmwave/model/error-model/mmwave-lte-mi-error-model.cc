@@ -937,11 +937,6 @@ MmWaveLteMiErrorModel::GetTypeId(void)
     return tid;
 }
 
-TypeId
-MmWaveLteMiErrorModel::GetInstanceTypeId() const
-{
-    return MmWaveLteMiErrorModel::GetTypeId();
-}
 
 double
 MmWaveLteMiErrorModel::Mib(const SpectrumValue& sinr, const std::vector<int>& map, uint8_t mcs)

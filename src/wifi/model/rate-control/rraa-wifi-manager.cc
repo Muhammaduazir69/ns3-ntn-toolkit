@@ -14,15 +14,13 @@
 #include "ns3/wifi-mac.h"
 #include "ns3/wifi-phy.h"
 
-#define Min(a, b) ((a < b) ? a : b)
-
 namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("RraaWifiManager");
 
 /**
- * \brief hold per-remote-station state for RRAA Wifi manager.
+ * @brief hold per-remote-station state for RRAA Wifi manager.
  *
  * This struct extends from WifiRemoteStation struct to hold additional
  * information required by the RRAA Wifi manager
@@ -120,8 +118,8 @@ RraaWifiManager::SetupPhy(const Ptr<WifiPhy> phy)
         txVector.SetMode(mode);
         txVector.SetPreambleType(WIFI_PREAMBLE_LONG);
         /* Calculate the TX Time of the Data and the corresponding Ack */
-        Time dataTxTime = phy->CalculateTxDuration(m_frameLength, txVector, phy->GetPhyBand());
-        Time ackTxTime = phy->CalculateTxDuration(m_ackLength, txVector, phy->GetPhyBand());
+        Time dataTxTime = WifiPhy::CalculateTxDuration(m_frameLength, txVector, phy->GetPhyBand());
+        Time ackTxTime = WifiPhy::CalculateTxDuration(m_ackLength, txVector, phy->GetPhyBand());
         NS_LOG_DEBUG("Calculating TX times: Mode= " << mode << " DataTxTime= " << dataTxTime
                                                     << " AckTxTime= " << ackTxTime);
         AddCalcTxTime(mode, dataTxTime + ackTxTime);
@@ -347,9 +345,9 @@ RraaWifiManager::DoGetDataTxVector(WifiRemoteStation* st, MHz_u allowedWidth)
     NS_LOG_FUNCTION(this << st << allowedWidth);
     auto station = static_cast<RraaWifiRemoteStation*>(st);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     CheckInit(station);
     WifiMode mode = GetSupported(station, station->m_rateIndex);
@@ -377,9 +375,9 @@ RraaWifiManager::DoGetRtsTxVector(WifiRemoteStation* st)
     NS_LOG_FUNCTION(this << st);
     auto station = static_cast<RraaWifiRemoteStation*>(st);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     WifiMode mode;
     if (!GetUseNonErpProtection())

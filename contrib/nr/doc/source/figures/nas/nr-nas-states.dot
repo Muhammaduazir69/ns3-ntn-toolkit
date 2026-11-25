@@ -1,0 +1,23 @@
+digraph NrEpcUeNasStates {
+
+    rankdir=LR;
+    node [shape="box", width=2, style="filled", fillcolor="white", fontname="Helvetica"];
+    edge [fontname="Helvetica", fontsize=10];
+
+    // ---- States (NrEpcUeNas::State, model/nr-epc-ue-nas.h) ----
+    // Only OFF and ACTIVE are ever entered by the current code.
+    OFF    [fillcolor="lightblue", label="OFF\n(detached / disconnected)"]
+    ACTIVE [fillcolor="lightblue", label="ACTIVE\n(NAS Active: EMM-Registered,\nECM/RRC-Connected)"]
+
+    // Declared for completeness but never entered.
+    ATTACHING         [style="filled,dashed", fillcolor="gray92",
+                       label="ATTACHING\n(declared, never entered)"]
+    IDLE_REGISTERED   [style="filled,dashed", fillcolor="gray92",
+                       label="IDLE_REGISTERED\n(declared, never entered)"]
+    CONNECTING_TO_EPC [style="filled,dashed", fillcolor="gray92",
+                       label="CONNECTING_TO_EPC\n(declared, never entered)"]
+
+    OFF -> ACTIVE [label="NotifyConnectionSuccessful\n(RRC connection established)"]
+    ACTIVE -> OFF [color="red", fontcolor="red",
+                   label="Disconnect() /\nNotifyConnectionReleased (e.g. RLF)"]
+}

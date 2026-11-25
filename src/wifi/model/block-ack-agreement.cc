@@ -21,10 +21,10 @@ NS_LOG_COMPONENT_DEFINE("BlockAckAgreement");
 
 BlockAckAgreement::BlockAckAgreement(Mac48Address peer, uint8_t tid)
     : m_peer(peer),
-      m_amsduSupported(0),
+      m_amsduSupported(false),
       m_blockAckPolicy(1),
       m_tid(tid),
-      m_htSupported(0),
+      m_htSupported(false),
       m_inactivityEvent()
 {
     NS_LOG_FUNCTION(this << peer << +tid);
@@ -134,7 +134,7 @@ BlockAckAgreement::IsImmediateBlockAck() const
 bool
 BlockAckAgreement::IsAmsduSupported() const
 {
-    return m_amsduSupported == 1;
+    return m_amsduSupported;
 }
 
 uint16_t
@@ -153,7 +153,7 @@ BlockAckAgreement::SetHtSupported(bool htSupported)
 bool
 BlockAckAgreement::IsHtSupported() const
 {
-    return m_htSupported == 1;
+    return m_htSupported;
 }
 
 BlockAckType
@@ -169,7 +169,8 @@ BlockAckAgreement::GetBlockAckType() const
     auto it = lengths.lower_bound(m_bufferSize);
     NS_ASSERT_MSG(it != lengths.cend(), "Buffer size too large: " << m_bufferSize);
     // Multi-TID Block Ack is not currently supported
-    return {BlockAckType::COMPRESSED, {static_cast<uint8_t>(*it / 8)}};
+    return {m_gcrGroupAddress ? BlockAckType::GCR : BlockAckType::COMPRESSED,
+            {static_cast<uint8_t>(*it / 8)}};
 }
 
 BlockAckReqType
@@ -188,6 +189,18 @@ BlockAckAgreement::GetDistance(uint16_t seqNumber, uint16_t startingSeqNumber)
 {
     NS_ASSERT(seqNumber < SEQNO_SPACE_SIZE && startingSeqNumber < SEQNO_SPACE_SIZE);
     return (seqNumber - startingSeqNumber + SEQNO_SPACE_SIZE) % SEQNO_SPACE_SIZE;
+}
+
+void
+BlockAckAgreement::SetGcrGroupAddress(const Mac48Address& gcrGroupAddress)
+{
+    m_gcrGroupAddress = gcrGroupAddress;
+}
+
+const std::optional<Mac48Address>&
+BlockAckAgreement::GetGcrGroupAddress() const
+{
+    return m_gcrGroupAddress;
 }
 
 } // namespace ns3

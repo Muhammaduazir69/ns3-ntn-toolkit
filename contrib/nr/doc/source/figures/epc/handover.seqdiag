@@ -1,0 +1,24 @@
+diagram {
+   edge_length = 300;
+   Ue; SrcGnb; TgtGnb; Mme; Sgw; Pgw;
+
+   === X2 handover preparation ===
+   SrcGnb ->> TgtGnb [label="X2 HANDOVER REQUEST"]
+   SrcGnb <<- TgtGnb [label="X2 HANDOVER REQUEST ACK\n(RRC handover command)"]
+   Ue <<- SrcGnb [label="RRC Reconfiguration (handover command)"]
+   SrcGnb ->> TgtGnb [label="X2 SN STATUS TRANSFER (AM DRBs)"]
+   SrcGnb ->> TgtGnb [label="X2-U downlink data forwarding (GTP-U)"]
+
+   === UE accesses target, S1 path switch ===
+   Ue ->> TgtGnb [label="non-contention RACH +\nRRC Reconfiguration Complete"]
+   TgtGnb ->> Mme [label="S1-AP PATH SWITCH REQUEST"]
+   Mme ->> Sgw [label="GTP-C Modify Flow Request (S11)"]
+   Sgw ->> Pgw [label="GTP-C Modify Flow Request (S5)"]
+   Sgw <<- Pgw [label="GTP-C Modify Flow Response (S5)\n(DL path switched to target gNB)"]
+   Mme <<- Sgw [label="GTP-C Modify Flow Response (S11)"]
+   TgtGnb <<- Mme [label="S1-AP PATH SWITCH REQUEST ACK"]
+
+   === Source release ===
+   TgtGnb ->> SrcGnb [label="X2 UE CONTEXT RELEASE"]
+   SrcGnb => SrcGnb [label="RemoveUe;\nfree S1-U TEIDs"]
+}

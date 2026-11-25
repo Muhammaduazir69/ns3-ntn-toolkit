@@ -81,6 +81,24 @@ NrIntfNormChanMat::ComputeMse(const ComplexMatrixArray& precMats) const
     }
 }
 
+NrIntfNormChanMat
+NrIntfNormChanMat::GetWidebandChannel() const
+{
+    auto div = std::complex<double>{1.0 / m_numPages, 0.0};
+    auto Havg = ComplexMatrixArray(m_numRows, m_numCols, 1);
+    for (size_t subband = 0; subband < m_numPages; subband++)
+    {
+        for (size_t row = 0; row < m_numRows; row++)
+        {
+            for (size_t col = 0; col < m_numCols; col++)
+            {
+                Havg(row, col, 0) += this->Elem(row, col, subband) * div;
+            }
+        }
+    }
+    return Havg;
+}
+
 uint8_t
 NrSinrMatrix::GetRank() const
 {
@@ -93,4 +111,20 @@ NrSinrMatrix::GetNumRbs() const
     return GetNumCols();
 }
 
+SpectrumValue
+NrSinrMatrix::GetVectorizedSpecVal() const
+{
+    // Convert the 2D SINR matrix into a one-dimensional SpectrumValue
+    auto bands = std::vector<BandInfo>(GetNumRows() * GetNumCols());
+    auto specModel = Create<SpectrumModel>(bands);
+    auto vectorizedSinr = SpectrumValue{specModel};
+    auto idx = size_t{0};
+    for (auto it = vectorizedSinr.ValuesBegin(); it != vectorizedSinr.ValuesEnd(); it++)
+    {
+        auto& itVal = *it;
+        itVal = m_values[idx];
+        idx++;
+    }
+    return vectorizedSinr;
+}
 } // namespace ns3

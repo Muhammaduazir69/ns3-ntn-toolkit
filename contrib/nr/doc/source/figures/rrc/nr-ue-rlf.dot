@@ -1,0 +1,21 @@
+digraph NrUeRlf {
+
+    rankdir=LR;
+    node [shape="box", style="filled", fillcolor="lightblue", fontname="Helvetica", fontsize=10];
+    edge [fontname="Helvetica", fontsize=9];
+
+    OK   [label="In sync\n(CONNECTED_NORMALLY,\nno RLF procedure)"]
+    T310 [label="Out of sync,\nT310 running (default 1000 ms)", fillcolor="lightyellow"]
+    RLF  [shape="ellipse", fillcolor="mistyrose", label="RadioLinkFailureDetected"]
+    PHY  [label="CONNECTED_PHY_PROBLEM\n(reestablishment, then\nNAS recovery to idle)"]
+    IDLE [label="IDLE_CELL_SEARCH\n(direct reconnect)"]
+
+    OK -> T310 [label="N310 (6) consecutive\nout-of-sync indications\n=> start T310"]
+    T310 -> OK [color="darkgreen", fontcolor="darkgreen",
+                label="N311 (2) consecutive\nin-sync indications\n=> ResetRlfParams (cancel T310)"]
+    T310 -> RLF [color="red", fontcolor="red", label="T310 expiry"]
+    OK -> RLF [color="red", fontcolor="red", style="dashed",
+               label="RLC-AM max-retx (optional,\nRlcMaxRetxTriggersRlf):\ncancel any T310, declare RLF"]
+    RLF -> PHY [label="UseRrcReestablishment\n= true"]
+    RLF -> IDLE [label="UseRrcReestablishment\n= false"]
+}

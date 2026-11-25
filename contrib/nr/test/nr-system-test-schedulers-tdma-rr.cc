@@ -6,19 +6,21 @@
 
 #include "ns3/test.h"
 
+#include <map>
+
 using namespace ns3;
 
 /**
- * \file nr-system-test-schedulers-tdma-rr.cc
- * \ingroup test
+ * @file nr-system-test-schedulers-tdma-rr.cc
+ * @ingroup test
  *
- * \brief System test for TDMA - Round Robin scheduler. It checks that all the
+ * @brief System test for TDMA - Round Robin scheduler. It checks that all the
  * packets sent are delivered correctly.
  */
 
 /**
- * \brief The TDMA RR scheduler system test suite
- * \ingroup test
+ * @brief The TDMA RR scheduler system test suite
+ * @ingroup test
  *
  * It will check Tdma RR with:
  *
@@ -31,7 +33,7 @@ class NrSystemTestSchedulerTdmaRrDlSuite : public TestSuite
 {
   public:
     /**
-     * \brief constructor
+     * @brief constructor
      */
     NrSystemTestSchedulerTdmaRrDlSuite();
 };
@@ -47,6 +49,12 @@ NrSystemTestSchedulerTdmaRrDlSuite::NrSystemTestSchedulerTdmaRrDlSuite()
         "DL",
     };
     std::list<uint32_t> uesPerBeamList = {1, 2, 4, 8};
+    std::map<uint32_t, Duration> durationForUesPerBeam = {
+        {1, Duration::QUICK},
+        {2, Duration::QUICK},
+        {4, Duration::EXTENSIVE},
+        {8, Duration::EXTENSIVE},
+    };
     std::list<uint32_t> beams = {1, 2};
     std::list<uint32_t> numerologies = {
         0,
@@ -83,7 +91,7 @@ NrSystemTestSchedulerTdmaRrDlSuite::NrSystemTestSchedulerTdmaRrDlSuite()
                                                                 isDl,
                                                                 isUl,
                                                                 schedName.str()),
-                                        Duration::QUICK);
+                                        durationForUesPerBeam.at(uesPerBeam));
                         }
                     }
                 }
@@ -97,7 +105,7 @@ static NrSystemTestSchedulerTdmaRrDlSuite nrSystemTestSchedulerTdmaRrDlSuite;
 // ----------------------------------------------------------------------------
 
 /**
- * \brief The TDMA RR scheduler system test suite
+ * @brief The TDMA RR scheduler system test suite
  *
  * It will check Tdma RR with:
  *
@@ -110,7 +118,7 @@ class NrSystemTestSchedulerTdmaRrUlSuite : public TestSuite
 {
   public:
     /**
-     * \brief constructor
+     * @brief constructor
      */
     NrSystemTestSchedulerTdmaRrUlSuite();
 };
@@ -176,7 +184,7 @@ static NrSystemTestSchedulerTdmaRrUlSuite nrSystemTestSchedulerTdmaRrUlSuite;
 // ----------------------------------------------------------------------------
 
 /**
- * \brief The TDMA RR scheduler system test suite
+ * @brief The TDMA RR scheduler system test suite
  *
  * It will check Tdma RR with:
  *
@@ -189,7 +197,7 @@ class NrSystemTestSchedulerTdmaRrDlUlSuite : public TestSuite
 {
   public:
     /**
-     * \brief constructor
+     * @brief constructor
      */
     NrSystemTestSchedulerTdmaRrDlUlSuite();
 };

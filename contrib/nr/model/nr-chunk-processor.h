@@ -12,9 +12,10 @@
 #ifndef NR_CHUNK_PROCESSOR_H
 #define NR_CHUNK_PROCESSOR_H
 
-#include <ns3/nstime.h>
-#include <ns3/object.h>
-#include <ns3/ptr.h>
+#include "ns3/nr-export.h"
+#include "ns3/nstime.h"
+#include "ns3/object.h"
+#include "ns3/ptr.h"
 
 namespace ns3
 {
@@ -29,25 +30,25 @@ typedef Callback<void, const SpectrumValue&> NrChunkProcessorCallback;
  * SINR/interference/power chunk of a received NR signal
  * which was calculated by the NrInterference object.
  */
-class NrChunkProcessor : public SimpleRefCount<NrChunkProcessor>
+class NR_EXPORT NrChunkProcessor : public SimpleRefCount<NrChunkProcessor>
 {
   public:
     NrChunkProcessor();
     virtual ~NrChunkProcessor();
 
     /**
-     * \brief Add callback to list
+     * @brief Add callback to list
      *
      * This function adds callback c to list. Each callback pass
      * calculated value to its object and is called in
      * NrChunkProcessor::End().
      *
-     * \param c callback function
+     * @param c callback function
      */
     virtual void AddCallback(NrChunkProcessorCallback c);
 
     /**
-     * \brief Clear internal variables
+     * @brief Clear internal variables
      *
      * This function clears internal variables in the beginning of
      * calculation
@@ -55,17 +56,17 @@ class NrChunkProcessor : public SimpleRefCount<NrChunkProcessor>
     virtual void Start();
 
     /**
-     * \brief Collect SpectrumValue and duration of signal
+     * @brief Collect SpectrumValue and duration of signal
      *
      * Passed values are collected in m_sumValues and m_totDuration variables.
      *
-     * \param sinr the SINR
-     * \param duration the duration
+     * @param sinr the SINR
+     * @param duration the duration
      */
     virtual void EvaluateChunk(const SpectrumValue& sinr, Time duration);
 
     /**
-     * \brief Finish calculation and inform interested objects about calculated value
+     * @brief Finish calculation and inform interested objects about calculated value
      *
      * During this function all callbacks from list are executed
      * to inform interested object about calculated value. This
@@ -85,20 +86,20 @@ class NrChunkProcessor : public SimpleRefCount<NrChunkProcessor>
  * to save and later retrieve the latest reported value
  *
  */
-class NrSpectrumValueCatcher
+class NR_EXPORT NrSpectrumValueCatcher
 {
   public:
     /**
      * function to be plugged to NrChunkProcessor::AddCallback ()
      *
-     * \param value
+     * @param value
      */
     void ReportValue(const SpectrumValue& value);
 
     /**
      *
      *
-     * \return the latest value reported by the NrChunkProcessor
+     * @return the latest value reported by the NrChunkProcessor
      */
     Ptr<SpectrumValue> GetValue();
 

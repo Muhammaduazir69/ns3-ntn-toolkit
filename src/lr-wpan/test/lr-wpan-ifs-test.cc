@@ -7,16 +7,19 @@
  *  Alberto Gallegos Ramonet <ramonet@fc.ritsumei.ac.jp>
  */
 
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-csmaca.h"
+#include "ns3/lr-wpan-mac-header.h"
+#include "ns3/lr-wpan-net-device.h"
+#include "ns3/node.h"
+#include "ns3/packet.h"
+#include "ns3/propagation-delay-model.h"
+#include "ns3/propagation-loss-model.h"
 #include "ns3/rng-seed-manager.h"
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/core-module.h>
-#include <ns3/log.h>
-#include <ns3/lr-wpan-module.h>
-#include <ns3/packet.h>
-#include <ns3/propagation-delay-model.h>
-#include <ns3/propagation-loss-model.h>
-#include <ns3/simulator.h>
-#include <ns3/single-model-spectrum-channel.h>
+#include "ns3/simulator.h"
+#include "ns3/single-model-spectrum-channel.h"
+#include "ns3/test.h"
 
 #include <iomanip>
 #include <iostream>
@@ -27,10 +30,10 @@ using namespace ns3::lrwpan;
 NS_LOG_COMPONENT_DEFINE("lr-wpan-ifs-test");
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan Dataframe transmission with Interframe Space
+ * @brief LrWpan Dataframe transmission with Interframe Space
  */
 class LrWpanDataIfsTestCase : public TestCase
 {
@@ -40,50 +43,50 @@ class LrWpanDataIfsTestCase : public TestCase
 
   private:
     /**
-     * \brief Function called when DataConfirm is hit.
-     * \param testcase pointer to the testcase
-     * \param dev originating NetDevice
-     * \param params the MCPS params
+     * @brief Function called when DataConfirm is hit.
+     * @param testcase pointer to the testcase
+     * @param dev originating NetDevice
+     * @param params the MCPS params
      */
     static void DataConfirm(LrWpanDataIfsTestCase* testcase,
                             Ptr<LrWpanNetDevice> dev,
                             McpsDataConfirmParams params);
 
     /**
-     * \brief Function called when DataReceived is hit.
-     * \param testcase pointer to the testcase
-     * \param dev originating NetDevice
-     * \param p packet
+     * @brief Function called when DataReceived is hit.
+     * @param testcase pointer to the testcase
+     * @param dev originating NetDevice
+     * @param p packet
      */
     static void DataReceivedDev0(LrWpanDataIfsTestCase* testcase,
                                  Ptr<LrWpanNetDevice> dev,
                                  Ptr<const Packet> p);
 
     /**
-     * \brief Function called when PhyDataRxStart is hit.
-     * \param testcase pointer to the testcase
-     * \param dev originating NetDevice
-     * \param p packet
+     * @brief Function called when PhyDataRxStart is hit.
+     * @param testcase pointer to the testcase
+     * @param dev originating NetDevice
+     * @param p packet
      */
     static void PhyDataRxStart(LrWpanDataIfsTestCase* testcase,
                                Ptr<LrWpanNetDevice> dev,
                                Ptr<const Packet> p);
 
     /**
-     * \brief Function called when DataConfirm is hit.
-     * \param testcase pointer to the testcase
-     * \param dev originating NetDevice
-     * \param p packet
+     * @brief Function called when DataConfirm is hit.
+     * @param testcase pointer to the testcase
+     * @param dev originating NetDevice
+     * @param p packet
      */
     static void DataReceivedDev1(LrWpanDataIfsTestCase* testcase,
                                  Ptr<LrWpanNetDevice> dev,
                                  Ptr<const Packet>);
 
     /**
-     * \brief Function called when the IFS ends.
-     * \param testcase pointer to the testcase
-     * \param dev originating NetDevice
-     * \param IfsTime the IFS time
+     * @brief Function called when the IFS ends.
+     * @param testcase pointer to the testcase
+     * @param dev originating NetDevice
+     * @param IfsTime the IFS time
      */
     static void IfsEnd(LrWpanDataIfsTestCase* testcase, Ptr<LrWpanNetDevice> dev, Time IfsTime);
 
@@ -271,7 +274,7 @@ LrWpanDataIfsTestCase::DoRun()
     ////////////////////////  SIFS ///////////////////////////
 
     Simulator::ScheduleWithContext(1,
-                                   Seconds(0.0),
+                                   Seconds(0),
                                    &LrWpanMac::McpsDataRequest,
                                    dev0->GetMac(),
                                    params,
@@ -284,7 +287,7 @@ LrWpanDataIfsTestCase::DoRun()
     // SIFS = 12 symbols (192 Microseconds on a 2.4Ghz O-QPSK PHY)
     ifsSize = m_endIfs - m_lastTxTime;
     NS_TEST_EXPECT_MSG_EQ(ifsSize,
-                          Time(MicroSeconds(192)),
+                          MicroSeconds(192),
                           "Wrong Short InterFrame Space (SIFS) Size after dataframe Tx");
     std::cout << "----------------------------------\n";
 
@@ -293,7 +296,7 @@ LrWpanDataIfsTestCase::DoRun()
     p0 = Create<Packet>(8);
 
     Simulator::ScheduleWithContext(1,
-                                   Seconds(0.0),
+                                   Seconds(0),
                                    &LrWpanMac::McpsDataRequest,
                                    dev0->GetMac(),
                                    params,
@@ -306,7 +309,7 @@ LrWpanDataIfsTestCase::DoRun()
     // LIFS = 40 symbols (640 Microseconds on a 2.4Ghz O-QPSK PHY)
     ifsSize = m_endIfs - m_lastTxTime;
     NS_TEST_EXPECT_MSG_EQ(ifsSize,
-                          Time(MicroSeconds(640)),
+                          MicroSeconds(640),
                           "Wrong Long InterFrame Space (LIFS) Size after dataframe Tx");
     std::cout << "----------------------------------\n";
 
@@ -316,7 +319,7 @@ LrWpanDataIfsTestCase::DoRun()
     p0 = Create<Packet>(2);
 
     Simulator::ScheduleWithContext(1,
-                                   Seconds(0.0),
+                                   Seconds(0),
                                    &LrWpanMac::McpsDataRequest,
                                    dev0->GetMac(),
                                    params,
@@ -329,7 +332,7 @@ LrWpanDataIfsTestCase::DoRun()
     // SIFS = 12 symbols (192 Microseconds on a 2.4Ghz O-QPSK PHY)
     ifsSize = m_endIfs - m_ackRxTime;
     NS_TEST_EXPECT_MSG_EQ(ifsSize,
-                          Time(MicroSeconds(192)),
+                          MicroSeconds(192),
                           "Wrong Short InterFrame Space (SIFS) Size after ACK Rx");
     std::cout << "----------------------------------\n";
 
@@ -339,7 +342,7 @@ LrWpanDataIfsTestCase::DoRun()
     p0 = Create<Packet>(8);
 
     Simulator::ScheduleWithContext(1,
-                                   Seconds(0.0),
+                                   Seconds(0),
                                    &LrWpanMac::McpsDataRequest,
                                    dev0->GetMac(),
                                    params,
@@ -352,7 +355,7 @@ LrWpanDataIfsTestCase::DoRun()
     // LIFS = 40 symbols (640 Microseconds on a 2.4Ghz O-QPSK PHY)
     ifsSize = m_endIfs - m_ackRxTime;
     NS_TEST_EXPECT_MSG_EQ(ifsSize,
-                          Time(MicroSeconds(640)),
+                          MicroSeconds(640),
                           "Wrong Long InterFrame Space (LIFS) Size after ACK Rx");
     std::cout << "----------------------------------\n";
 
@@ -377,7 +380,7 @@ LrWpanDataIfsTestCase::DoRun()
     params.m_msduHandle = 0;
 
     Simulator::ScheduleWithContext(1,
-                                   Seconds(0.0),
+                                   Seconds(0),
                                    &LrWpanMac::McpsDataRequest,
                                    dev0->GetMac(),
                                    params,
@@ -391,14 +394,28 @@ LrWpanDataIfsTestCase::DoRun()
 
     //////////////////////////////////////////////////////////////////////////////////
 
+    // Disconnect traces to eliminate Valgrid errors
+    dev0->GetMac()->TraceDisconnectWithoutContext(
+        "IfsEnd",
+        MakeBoundCallback(&LrWpanDataIfsTestCase::IfsEnd, this, dev0));
+    dev0->GetMac()->TraceDisconnectWithoutContext(
+        "MacRx",
+        MakeBoundCallback(&LrWpanDataIfsTestCase::DataReceivedDev0, this, dev0));
+    dev0->GetPhy()->TraceDisconnectWithoutContext(
+        "PhyRxBegin",
+        MakeBoundCallback(&LrWpanDataIfsTestCase::PhyDataRxStart, this, dev0));
+    dev1->GetMac()->TraceDisconnectWithoutContext(
+        "MacRx",
+        MakeBoundCallback(&LrWpanDataIfsTestCase::DataReceivedDev1, this, dev1));
+
     Simulator::Destroy();
 }
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan IFS TestSuite
+ * @brief LrWpan IFS TestSuite
  */
 
 class LrWpanIfsTestSuite : public TestSuite

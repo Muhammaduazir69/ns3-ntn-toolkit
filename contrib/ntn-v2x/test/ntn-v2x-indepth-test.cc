@@ -423,7 +423,7 @@ class V2xSlUrbanNlosLawTest : public TestCase
 {
   public:
     V2xSlUrbanNlosLawTest()
-        : TestCase("Urban TR 37.885 LOS/NLOS path-loss means and their effect on measured PRR")
+        : TestCase("Urban TR 37.885 LOS-NLOS path-loss means and their effect on measured PRR")
     {
     }
 
@@ -643,7 +643,9 @@ class V2xRelayTracksMobilityTest : public TestCase
             });
         }
         Simulator::Run();
-        Simulator::Destroy();
+        // Destroy only after the post-run geometric checks below: it resets simulated time to 0,
+        // and the constant-velocity vehicles (last updated at t = 33 s) would then see time run
+        // backwards (ns-3 asserts on it; release builds hid this).
         // the peer crosses 1500 m at (1500 - 500)/30 = 33.3 s
         NS_TEST_ASSERT_MSG_EQ_TOL(lostAt, 34.0, 0.5, "relay drops when the peer leaves range");
         NS_TEST_ASSERT_MSG_EQ(relayedSamples, 34u, "relayed for t = 0..33 s");
@@ -658,6 +660,7 @@ class V2xRelayTracksMobilityTest : public TestCase
             NS_TEST_ASSERT_MSG_EQ(d.relayPeerId.empty(), true,
                                   "and no peer can relay to it either");
         }
+        Simulator::Destroy();
     }
 };
 

@@ -2,10 +2,22 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file slot-output-stats.cc
+ *
+ * @brief Implementation of SlotOutputStats, used by the lena-lte-comparison example to record
+ * per-slot scheduling statistics of every gNB into the SQLite output database (table
+ * "slotStats"). Fed by the NrGnbPhy "SlotDataStats" trace, each row stores frame/subframe/slot,
+ * the number of scheduled UEs, used REGs and symbols, available RBs and symbols, and the BWP and
+ * cell IDs, keyed by RNG seed and run number, from which per-cell resource utilization over time
+ * can be computed. Samples are cached in memory and written to disk in batches.
+ */
+
 #include "slot-output-stats.h"
 
-#include <ns3/abort.h>
-#include <ns3/rng-seed-manager.h>
+#include "ns3/abort.h"
+#include "ns3/rng-seed-manager.h"
 
 namespace ns3
 {

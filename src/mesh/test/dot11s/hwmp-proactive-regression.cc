@@ -13,6 +13,7 @@
 #include "ns3/internet-stack-helper.h"
 #include "ns3/ipv4-address-helper.h"
 #include "ns3/ipv4-interface-container.h"
+#include "ns3/log.h"
 #include "ns3/mesh-helper.h"
 #include "ns3/mobility-helper.h"
 #include "ns3/mobility-model.h"
@@ -27,6 +28,8 @@
 #include <sstream>
 
 using namespace ns3;
+
+NS_LOG_COMPONENT_DEFINE("HwmpProactiveRegression");
 
 /// Unique PCAP file name prefix
 const char* const PREFIX = "hwmp-proactive-regression-test";
@@ -113,6 +116,8 @@ void
 HwmpProactiveRegressionTest::CreateDevices()
 {
     int64_t streamsUsed = 0;
+    int64_t streamNumber = 0;
+    int64_t streamIncrement = 1000;
     // 1. setup WiFi
     YansWifiPhyHelper wifiPhy;
     // This test suite output was originally based on YansErrorRateModel
@@ -134,16 +139,19 @@ HwmpProactiveRegressionTest::CreateDevices()
     mesh.SetNumberOfInterfaces(1);
     NetDeviceContainer meshDevices = mesh.Install(wifiPhy, *m_nodes);
     // Five devices, 10 streams per device
-    streamsUsed += mesh.AssignStreams(meshDevices, streamsUsed);
+    streamsUsed = mesh.AssignStreams(meshDevices, streamNumber);
+    streamNumber += streamIncrement;
     NS_TEST_ASSERT_MSG_EQ(streamsUsed, (meshDevices.GetN() * 10), "Stream mismatch");
     // No streams used here, by default, so streamsUsed should not change
-    streamsUsed += wifiChannel.AssignStreams(chan, streamsUsed);
-    NS_TEST_ASSERT_MSG_EQ(streamsUsed, (meshDevices.GetN() * 10), "Stream mismatch");
+    streamsUsed = wifiChannel.AssignStreams(chan, streamNumber);
+    streamNumber += streamIncrement;
+    NS_TEST_ASSERT_MSG_EQ(streamsUsed, 0, "No stream assignments expected for WifiChannel");
 
     // 3. setup TCP/IP
     InternetStackHelper internetStack;
+    internetStack.SetIpv6StackInstall(false);
     internetStack.Install(*m_nodes);
-    streamsUsed += internetStack.AssignStreams(*m_nodes, streamsUsed);
+    internetStack.AssignStreams(*m_nodes, streamNumber);
     Ipv4AddressHelper address;
     address.SetBase("10.1.1.0", "255.255.255.0");
     m_interfaces = address.Assign(meshDevices);
@@ -167,6 +175,7 @@ HwmpProactiveRegressionTest::SendData(Ptr<Socket> socket)
     {
         socket->Send(Create<Packet>(100));
         m_sentPktsCounter++;
+        NS_LOG_INFO("Send packet; total sent = " << m_sentPktsCounter);
         Simulator::ScheduleWithContext(socket->GetNode()->GetId(),
                                        Seconds(0.5),
                                        &HwmpProactiveRegressionTest::SendData,
@@ -182,6 +191,8 @@ HwmpProactiveRegressionTest::HandleReadServer(Ptr<Socket> socket)
     Address from;
     while ((packet = socket->RecvFrom(from)))
     {
+        NS_LOG_INFO("Receive packet from " << InetSocketAddress::ConvertFrom(from).GetIpv4()
+                                           << "; return to sender");
         packet->RemoveAllPacketTags();
         packet->RemoveAllByteTags();
 
@@ -196,5 +207,6 @@ HwmpProactiveRegressionTest::HandleReadClient(Ptr<Socket> socket)
     Address from;
     while ((packet = socket->RecvFrom(from)))
     {
+        NS_LOG_INFO("Receive packet from " << InetSocketAddress::ConvertFrom(from).GetIpv4());
     }
 }

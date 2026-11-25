@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ntn-real-stack-helper.h"
+#include <cstdlib>
+#include "ns3/flent-helper.h"
+#include "ns3/nr-channel-helper.h"
+#include "ns3/node-list.h"
 
 #include "ns3/ntn-spectrum-seam-model.h"
 
@@ -17,6 +21,7 @@
 #include "ns3/lte-ue-rrc.h"
 #include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mmwave-ue-net-device.h"
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/ntn-repro-manifest.h"
 #include "ns3/rng-seed-manager.h"
 #include "ns3/ipv4-static-routing-helper.h"
@@ -76,6 +81,7 @@
 #include "ns3/integer.h"
 
 #include <algorithm>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <sstream>
@@ -188,6 +194,50 @@ static GlobalValue g_ntnRealStackFrequencyReuse(
     StringValue("Auto"),
     MakeStringChecker());
 
+// ns-3.48 port: opt-in SSB/PDCCH cell beam for every scenario that does not call SetSsbCellBeam.
+// Off by default: the beam is steered at the sub-satellite point along the geocentric radial, so
+// it needs ECEF geometry (a local Cartesian scene with a +x-boresight array was mis-steered,
+// measured -21 dB control SINR); making it the default needs every example's frame validated.
+static GlobalValue g_ntnFlentTest(
+    "NtnRealStackFlentTest",
+    "Run the ns-3.49 Flent benchmark between UE 0 and the remote host: ping, tcp_upload, "
+    "tcp_download or rrul; empty (default) = off. Output: <outputDir>/flent-<test>.flent.",
+    StringValue(""),
+    MakeStringChecker());
+
+static GlobalValue g_ntnFlentStart("NtnRealStackFlentStartS",
+                                   "Flent test start (s of simulated time)",
+                                   DoubleValue(1.0),
+                                   MakeDoubleChecker<double>(0.0));
+
+static GlobalValue g_ntnFlentLength("NtnRealStackFlentLengthS",
+                                    "Flent test length (s); Flent adds its own cool-down",
+                                    DoubleValue(10.0),
+                                    MakeDoubleChecker<double>(0.1));
+
+static GlobalValue g_ntnNrLinkFilter(
+    "NtnRealStackNrLinkFilter",
+    "nr backend: install 5G-LENA v5.2's NrSidelinkFilter on the NR spectrum channels (skip "
+    "gNB-gNB and UE-UE links) when the duplexing makes it exact (FDD, or a TDD pattern of pure "
+    "DL/UL slots). The toolkit's PC5 sidelink uses its own channel and is unaffected.",
+    BooleanValue(true),
+    MakeBooleanChecker());
+
+static GlobalValue g_ntnInterUeSc(
+    "NtnRealStackInterUeSpatialConsistency",
+    "Ns3Tr38811 channel: ns-3.49 drop-based inter-UE spatial consistency (TR 38.901 7.6.3.1) "
+    "of the LOS state, shadowing and channel parameters.",
+    BooleanValue(true),
+    MakeBooleanChecker());
+
+static GlobalValue g_ntnRealStackSsbCellBeam(
+    "NtnRealStackSsbCellBeam",
+    "nr backend: every gNB transmits its control region (PSS/SSB, PDCCH) on a cell beam steered "
+    "at its sub-satellite point (Earth-moving cell) instead of quasi-omni, unless a scenario "
+    "calls SetSsbCellBeam. Needs ECEF positions. Off under NtnRealStackLinkBudget=Legacy.",
+    BooleanValue(false),
+    MakeBooleanChecker());
+
 // Wave 11: SSB beam grid for Earth-moving cells (TS 38.213 4.1, TS 38.331 5.5.3.3).
 static GlobalValue g_ntnRealStackSsbBeamGrid(
     "NtnRealStackSsbBeamGrid",
@@ -218,7 +268,7 @@ static GlobalValue g_ntnRealStackUeKpiPeriod(
 namespace
 {
 // Map a 5QI to the BwpManagerAlgorithmStatic attribute that routes that QCI to a
-// BWP index (Enabler C). The NrEpsBearer::Qci enum value IS the 5QI number, and
+// BWP index (Enabler C). The NrQosFlow::FiveQi enum value IS the 5QI number, and
 // each Qci has a same-named "route to BWP" attribute on the static BWP manager.
 // Returns "" for a 5QI without a dedicated routing attribute (falls back to BWP 0).
 std::string
@@ -247,14 +297,6 @@ NtnRealStackHelper::~NtnRealStackHelper()
     if (!m_prevElevationModel.empty())
     {
         GlobalValue::Bind("GeocentricElevationModel", StringValue(m_prevElevationModel));
-    }
-    if (m_prevRsrpLinear >= 0)
-    {
-        GlobalValue::Bind("NrUeRsrpLinearAverage", BooleanValue(m_prevRsrpLinear == 1));
-    }
-    if (m_prevRsrqFromRssi >= 0)
-    {
-        GlobalValue::Bind("NrUeRsrqFromRssi", BooleanValue(m_prevRsrqFromRssi == 1));
     }
 }
 
@@ -478,6 +520,182 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
     //      terms (and optional sat beam) onto whichever backend's base loss, so
     //      the MEASURED SINR carries the elevation-dependent physics on both. ----
     ApplyNtnChannelExtras();
+
+    // Globe plan L4: every helper-built run records its own scene (see StartAutoScene).
+    Simulator::ScheduleNow(&NtnRealStackHelper::StartAutoScene, this);
+    Simulator::ScheduleDestroy(&NtnRealStackHelper::StopAutoScene, this);
+
+    InstallFlentFromGlobals();
+}
+
+void
+NtnRealStackHelper::InstallFlentFromGlobals()
+{
+    // ns-3.49 FlentApplication on every helper-built run, opt-in through GlobalValues so any
+    // example takes it from its command line (--NtnRealStackFlentTest=rrul): the Flent
+    // benchmark (ping, tcp_upload, tcp_download, rrul = 4 TCP up + 4 TCP down + UDP/ICMP RTT
+    // probes) between UE 0 and the remote host, over the whole NTN user plane (radio, satellite
+    // delay, core). It writes a standard .flent JSON file that flent itself can plot.
+    StringValue test;
+    GlobalValue::GetValueByName("NtnRealStackFlentTest", test);
+    if (test.Get().empty() || m_ue.GetN() == 0 || !m_remoteHost)
+    {
+        return;
+    }
+    DoubleValue startS;
+    DoubleValue lengthS;
+    GlobalValue::GetValueByName("NtnRealStackFlentStartS", startS);
+    GlobalValue::GetValueByName("NtnRealStackFlentLengthS", lengthS);
+    FlentHelper flent(test.Get(), InetSocketAddress(m_remoteHostAddr));
+    flent.SetTestStartTime(Seconds(startS.Get()));
+    flent.SetTestLength(Seconds(lengthS.Get()));
+    flent.SetAttribute("OutputFilename",
+                       StringValue(m_outputDir + "/flent-" + test.Get() + ".flent"));
+    m_flentApps = flent.Install(m_ue.Get(0));
+    NS_LOG_INFO("NtnRealStackHelper: Flent " << test.Get() << " UE 0 <-> remote host, "
+                                             << lengthS.Get() << " s from " << startS.Get()
+                                             << " s");
+}
+
+void
+NtnRealStackHelper::StartAutoScene()
+{
+    if (std::getenv("NTN_SCENE_OFF") || ntnobs::NtnSceneRecorder::ActiveCount() > 0 || m_autoScene)
+    {
+        return; // the scenario records its own scene, or recording is switched off
+    }
+    m_autoScene = CreateObject<ntnobs::NtnSceneRecorder>();
+    double lat0 = 0, lon0 = 0, alt0 = 0;
+    const bool enu = ntnobs::ConfigureSceneFrame(m_autoScene, lat0, lon0, alt0); // ECEF, or ENU about the projection origin
+    m_autoScene->SetSampleInterval(Seconds(1.0));
+    m_autoScene->SetFrameBudget(150);
+    // Only positions that can be placed on the Earth: in the ECEF frame a node must sit
+    // between 6,200 and 50,000 km from the geocentre (a local Cartesian scenario without a
+    // geographic anchor records no scene rather than one at the Earth's centre).
+    auto placeable = [enu](Ptr<Node> n) {
+        Ptr<MobilityModel> mm = n->GetObject<MobilityModel>();
+        if (!mm)
+        {
+            return false;
+        }
+        const Vector p = mm->GetPosition();
+        const double r = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+        return enu ? r < 5.0e7 : (r > 6.2e6 && r < 5.0e7);
+    };
+    uint32_t sats = 0;
+    std::vector<std::pair<uint32_t, uint16_t>> cellSeries; // (series id, cell id) per gNB satellite
+    for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
+    {
+        if (placeable(m_gnb.Get(i)))
+        {
+            m_autoScene->TrackNode(m_gnb.Get(i), ntnobs::NtnSceneRecorder::Sat, "sat-" + std::to_string(i));
+            ++sats;
+            // The cell id this satellite serves, so traces keyed by cell id (CHO decisions,
+            // SIB19 broadcasts, RIC actions) can be placed on the right satellite.
+            const uint16_t cell = GetGnbCellId(i);
+            if (cell != 0)
+            {
+                cellSeries.emplace_back(m_autoScene->TrackKpiSeries(m_gnb.Get(i)->GetId(),
+                                                                    ntnobs::NtnSceneRecorder::Info,
+                                                                    "cell_id"),
+                                        cell);
+            }
+        }
+    }
+    if (sats == 0)
+    {
+        m_autoScene = nullptr;
+        return;
+    }
+    for (uint32_t i = 0; i < m_ue.GetN(); ++i)
+    {
+        if (placeable(m_ue.Get(i)))
+        {
+            m_autoScene->TrackNode(m_ue.Get(i), ntnobs::NtnSceneRecorder::Ue, "ue-" + std::to_string(i));
+        }
+    }
+    // Context satellites: other orbiting nodes the scenario created but did not hand to the radio
+    // stack (O-RAN handover candidates, constellation neighbours) are part of what the run
+    // reasons about, so they are drawn too. ECEF only (a local frame cannot tell an orbit), at
+    // least 150 km above the Earth's surface. Named "ctx-sat-<node id>": the globe draws them as
+    // satellites, while the cell-id -> satellite mapping (gNB order) never counts them.
+    if (!enu)
+    {
+        std::set<uint32_t> tracked;
+        for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
+        {
+            tracked.insert(m_gnb.Get(i)->GetId());
+        }
+        for (uint32_t i = 0; i < m_ue.GetN(); ++i)
+        {
+            tracked.insert(m_ue.Get(i)->GetId());
+        }
+        uint32_t ctx = 0;
+        for (uint32_t id = 0; id < NodeList::GetNNodes() && ctx < 400; ++id)
+        {
+            Ptr<Node> n = NodeList::GetNode(id);
+            if (tracked.count(id) || !placeable(n))
+            {
+                continue;
+            }
+            const Vector p = n->GetObject<MobilityModel>()->GetPosition();
+            if (std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z) > 6.371e6 + 1.5e5)
+            {
+                m_autoScene->TrackNode(n, ntnobs::NtnSceneRecorder::Sat, "ctx-sat-" + std::to_string(id));
+                ++ctx;
+            }
+        }
+    }
+    // Serving edges from the initial attachment: every UE starts on gNB 0's cell in the
+    // single-cell scenarios; handovers move the edge (OnHandover in NrHandoverEndOk).
+    if (m_gnb.GetN() > 0 && placeable(m_gnb.Get(0)))
+    {
+        for (uint32_t i = 0; i < m_ue.GetN(); ++i)
+        {
+            if (placeable(m_ue.Get(i)))
+            {
+                m_autoScene->TrackBeam(m_gnb.Get(0)->GetId(), m_ue.Get(i)->GetId());
+                m_autoServing[m_ue.Get(i)->GetId()] = m_gnb.Get(0)->GetId();
+            }
+        }
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(m_outputDir, ec);
+    m_autoScene->EnableCzml(m_outputDir + "/scene.czml");
+    const char* live = std::getenv("NTN_LIVE_SCENE");
+    if (live && std::string(live) == "1")
+    {
+        m_autoScene->EnableLiveStdout(true);
+    }
+    m_autoScene->Start();
+    for (const auto& [sid, cell] : cellSeries)
+    {
+        m_autoScene->RecordKpi(sid, cell);
+    }
+}
+
+void
+NtnRealStackHelper::StopAutoScene()
+{
+    if (m_autoScene)
+    {
+        m_autoScene->Stop();
+        m_autoScene = nullptr;
+    }
+}
+
+uint32_t
+NtnRealStackHelper::GnbNodeIdOfCell(uint16_t cellId) const
+{
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        Ptr<NrGnbNetDevice> d = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+        if (d && d->GetCellId() == cellId)
+        {
+            return d->GetNode()->GetId();
+        }
+    }
+    return 0;
 }
 
 void
@@ -768,6 +986,12 @@ NtnRealStackHelper::ApplyNtnChannelExtras()
 void
 NtnRealStackHelper::BuildNrRadio()
 {
+    if (!m_ssbCellBeamSet)
+    {
+        BooleanValue gv;
+        GlobalValue::GetValueByName("NtnRealStackSsbCellBeam", gv);
+        m_ssbCellBeam = gv.Get() && GetLinkBudgetProfile() != LinkBudgetProfile::Legacy;
+    }
     // WF-13: relax the RLC-AM / RRC timers on THIS backend too.
     //
     // ConfigureNtnRlcRrcTimers() was called only from BuildMmwaveRadio(), so on
@@ -790,10 +1014,26 @@ NtnRealStackHelper::BuildNrRadio()
 
     // Big RLC buffers so a saturating DL flow is not buffer-limited (nr RLC UM).
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
+    // ns-3.48 port: PDCP discardTimer = infinity (TS 38.331 PDCP-Config allows it), as every
+    // ns-3.43 run effectively had. 5G-LENA v3.3's "PDCP discarding" logged and traced a discard
+    // when the head-of-line delay exceeded the packet delay budget but still queued the SDU (no
+    // return); v5.1 really drops it, and it drops the NEW arrival while the late head stays,
+    // which is not TS 38.323 5.2.2 (each SDU expires on its own timer). Measured on the overload
+    // test: 51 % mid-stream sequence gaps on v5.1 vs none on v3.3. A scenario that wants
+    // PDB-based shedding sets ns3::NrRlcUm::EnablePdcpDiscarding (or DiscardTimerMs) itself.
+    Config::SetDefault("ns3::NrRlcUm::EnablePdcpDiscarding", BooleanValue(false));
 
     m_nrEpc = CreateObject<NrPointToPointEpcHelper>();
     m_nrBeamforming = CreateObject<IdealBeamformingHelper>();
     m_nr = CreateObject<NrHelper>();
+    // ns-3.48 port: 5G-LENA v5.1 runs radio link monitoring (Qout/Qin, N310/T310) on the DL
+    // control SINR every slot; v3.3 called it only from a measurement path these scenarios never
+    // reached, so on ns-3.43 it never ran. On the quasi-omni control beam a satellite's control
+    // lacks its array gain (~18 dB at 8x8) and off-nadir UEs of a multi-satellite scene sat at
+    // -6 to -12 dB, below Qout (-5 dB), and declared RLF while their data beam was strong (no
+    // real UE sees a satellite's PDCCH without the beam). Monitoring is therefore enabled only
+    // where the control region is beamformed (SetSsbCellBeam / NtnRealStackSsbCellBeam).
+    m_nr->SetUePhyAttribute("EnableRlfDetection", BooleanValue(m_ssbCellBeam));
     m_nr->SetBeamformingHelper(m_nrBeamforming);
     m_nr->SetEpcHelper(m_nrEpc);
 
@@ -831,17 +1071,21 @@ NtnRealStackHelper::BuildNrRadio()
         // contrib/nr/model/nr-mac-scheduler-tdma.cc (AssignRBGTDMA).
         break;
     }
+    // ns-3.48 port: OLLA (nr patch 13) now defaults to off in the NR library, as upstream
+    // behaves; the toolkit has always run with it on (ns-3.43 datasets), so enable it here.
+    m_nr->SetSchedulerAttribute("OllaEnabled", BooleanValue(true));
 
     // ---- Enabler A: NR inter-cell handover algorithm --------------------
-    // NOTE: the vendored 5G-LENA v3.3 NrHelper keeps a handover-algorithm
-    // factory (SetHandoverAlgorithmType) but never instantiates it or wires it
-    // to the gNB RRC -- the x2-handover tests are commented out of that module's
-    // build, i.e. helper-driven handover is unfinished upstream. Calling
-    // SetHandoverAlgorithmType here would therefore be a no-op. We instead build
-    // and cross-wire the A3-RSRP algorithm per gNB ourselves, after the devices
-    // exist (the RRC then knows its carrier count) and before the UEs attach
-    // (so the EVENT_A3 measurement config is in place when they connect). See
-    // the wiring block after InstallGnbDevice below.
+    // 5G-LENA v5.1 instantiates the configured handover algorithm per gNB and wires it to the
+    // RRC itself (NrHelper::InstallSingleGnbDevice; v3.3 kept the factory but never used it,
+    // so this helper used to build and cross-wire the A3 algorithm by hand). Configure it
+    // through NrHelper before the devices are installed.
+    if (m_handover && m_hoAutonomous && m_gnb.GetN() >= 2)
+    {
+        m_nr->SetHandoverAlgorithmType("ns3::NrA3RsrpHandoverAlgorithm");
+        m_nr->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(m_hoHystDb));
+        m_nr->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(m_hoTtt));
+    }
 
     // ---- Enabler D: NTN-stretched NR HARQ process pool (before install) --
     ConfigureNtnHarqProfileNr();
@@ -946,8 +1190,7 @@ NtnRealStackHelper::BuildNrRadio()
     CcBwpCreator ccBwpCreator;
     CcBwpCreator::SimpleOperationBandConf bandConf(m_freqHz,
                                                    m_bwHz,
-                                                   nBwp,
-                                                   BandwidthPartInfo::UMi_StreetCanyon);
+                                                   nBwp);
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
     OperationBandInfo ulBand;
     if (m_fddApplied)
@@ -955,8 +1198,7 @@ NtnRealStackHelper::BuildNrRadio()
         // The UL carrier has the DL channel bandwidth (symmetric FDD).
         CcBwpCreator::SimpleOperationBandConf ulConf(m_ulFreqHzApplied,
                                                      m_bwHz,
-                                                     nBwp,
-                                                     BandwidthPartInfo::UMi_StreetCanyon);
+                                                     nBwp);
         ulBand = ccBwpCreator.CreateOperationBandContiguousCc(ulConf);
     }
     // BWP i < nBwp: DL (or TDD) of slice i; BWP nBwp + i: UL of slice i (FDD).
@@ -989,8 +1231,9 @@ NtnRealStackHelper::BuildNrRadio()
     // A scenario that genuinely wants a frozen channel can still ask for 0.
     Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod",
                        TimeValue(m_channelUpdatePeriod));
-    m_nr->SetChannelConditionModelAttribute("UpdatePeriod",
-                                            TimeValue(m_channelUpdatePeriod));
+    // (5G-LENA v3.3 also set this on NrHelper's probabilistic UMi condition model, which the
+    // AlwaysLos override below then replaced, so it never took effect. v5.1 builds channels
+    // with NrChannelHelper; the condition models the toolkit creates set their own period.)
     // A9. SRS configuration indices, not spectrum, are what caps how many UEs a
     // gNB can admit. NrGnbRrc::SrsPeriodicity defaults to 40 and the toolkit
     // never set it, so DoAllocateTemporaryCellRnti started returning 0 once the
@@ -1028,7 +1271,11 @@ NtnRealStackHelper::BuildNrRadio()
             }
         }
         srs = std::max(srs, kDefaultPeriodicity);
-        Config::SetDefault("ns3::NrGnbRrc::SrsPeriodicity", UintegerValue(srs));
+        // 5G-LENA v4.x removed NrGnbRrc::SrsPeriodicity in favor of
+        // NrMacSchedulerSrsDefault::StartingPeriodicity (default 80; the RRC now also adapts
+        // SRS timings itself, IsMaxSrsReached). Keep the v3.3 floor of 40 so SRS timing, and
+        // every uplink result that depends on it, matches the ns-3.43 datasets.
+        Config::SetDefault("ns3::NrMacSchedulerSrsDefault::StartingPeriodicity", UintegerValue(srs));
         NS_LOG_INFO("SrsPeriodicity set to " << srs << " for " << m_ue.GetN() << " UEs");
     }
     if (!m_tddPattern.empty())
@@ -1037,7 +1284,8 @@ NtnRealStackHelper::BuildNrRadio()
         NS_LOG_INFO("NtnRealStackHelper: TDD pattern " << m_tddPattern);
     }
 
-    m_nr->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    // (v3.3 set ShadowingEnabled=false on NrHelper's ThreeGppPropagationLossModel, which every
+    // BWP replaced with the toolkit's own large-scale loss below; nothing to port.)
 
     // Friis large-scale loss on EVERY BWP (frame-independent, valid at LEO
     // range); InitializeOperationBand keeps the 3GPP spatial model for array
@@ -1080,21 +1328,63 @@ NtnRealStackHelper::BuildNrRadio()
             GlobalValue::Bind("GeocentricElevationModel", StringValue("Wgs84LowerEnd"));
         }
     }
+    // 5G-LENA v5.1 (ns-3.48 port): every BWP gets its own MultiModelSpectrumChannel from
+    // NrChannelHelper (at the BWP's centre frequency, with nr's CSI-RS filter). With small-scale
+    // fading on the Legacy model the channel carries the 3GPP spatial model with UMi tables and
+    // an AlwaysLos condition ("LOS"), what v3.3 produced with InitializeOperationBand plus the
+    // GAP S4 AlwaysLos override. The toolkit then adds its own large-scale loss (per-BWP Friis or
+    // the TR 38.811 models) and, where it owns the spatial model too (TR 38.811 fading, or the
+    // deterministic LOS plane wave without small-scale fading), that model.
+    {
+        Ptr<NrChannelHelper> chHelper = CreateObject<NrChannelHelper>();
+        // 5G-LENA v5.2 NrSidelinkFilter: skip the gNB-gNB and UE-UE links before their
+        // propagation loss and 3GPP matrices are computed. Physically exact when no slot can be
+        // DL at one node and UL at another: FDD (separate DL/UL channels) or a TDD pattern of
+        // pure DL and UL slots, aligned in every cell. NR's default all-flexible pattern can
+        // produce cross-link interference, so it keeps the full computation. The toolkit's PC5
+        // sidelink (ntn-v2x) runs on its own NtnSlChannel, which the filter does not touch.
+        bool pureSlots = m_fddApplied;
+        if (!m_fddApplied && !m_tddPattern.empty())
+        {
+            pureSlots = m_tddPattern.find('F') == std::string::npos &&
+                        m_tddPattern.find('S') == std::string::npos;
+        }
+        BooleanValue filterGv(true);
+        GlobalValue::GetValueByName("NtnRealStackNrLinkFilter", filterGv);
+        m_nrLinkFilterApplied = pureSlots && filterGv.Get();
+        chHelper->SetAttribute(
+            "AddFilters",
+            UintegerValue(NrChannelHelper::CSIRS |
+                          (m_nrLinkFilterApplied ? NrChannelHelper::SIDELINK : 0)));
+        const bool legacyFading = (m_channelModel == ChannelModel::Legacy) && m_smallScaleFading;
+        if (legacyFading)
+        {
+            chHelper->ConfigureFactories("UMi", "LOS", "ThreeGpp");
+        }
+        std::vector<std::reference_wrapper<OperationBandInfo>> bands{band};
+        if (m_fddApplied)
+        {
+            bands.emplace_back(ulBand);
+        }
+        chHelper->AssignChannelsToBands(bands, legacyFading ? NrChannelHelper::INIT_FADING : 0);
+    }
     for (uint8_t cc = 0; cc < nBwpAll; ++cc)
     {
         BandwidthPartInfoPtr& bwp = *bwpRefs[cc];
         // Each BWP sits at its own centre frequency; using the band centre for
         // all of them mis-scales Friis across a wide multi-BWP band.
         const double bwpFreqHz = (bwp->m_centralFrequency > 0.0) ? bwp->m_centralFrequency : m_freqHz;
+        Ptr<PropagationLossModel> largeScale;
+        Ptr<PhasedArraySpectrumPropagationLossModel> spatial;
         if (m_channelModel == ChannelModel::Ns3Tr38811)
         {
-            ApplyNs3Tr38811Channel(bwp.get());
+            ApplyNs3Tr38811Channel(bwp.get(), largeScale, spatial);
         }
         else
         {
             Ptr<FriisPropagationLossModel> friis = CreateObject<FriisPropagationLossModel>();
             friis->SetAttribute("Frequency", DoubleValue(bwpFreqHz));
-            bwp->m_propagation = friis;
+            largeScale = friis;
         }
         if (!m_smallScaleFading)
         {
@@ -1105,52 +1395,27 @@ NtnRealStackHelper::BuildNrRadio()
             los->SetAttribute("Frequency", DoubleValue(bwpFreqHz));
             los->SetAttribute("UpdatePeriod", TimeValue(m_channelUpdatePeriod));
             sp->SetChannelModel(los);
-            bwp->m_3gppChannel = sp;
+            spatial = sp;
         }
-        m_nrBaseLossPerBwp[cc] = bwp->m_propagation;
+        Ptr<SpectrumChannel> ch = bwp->GetChannel();
+        NS_ABORT_MSG_IF(!ch, "NrChannelHelper did not create a channel for BWP " << +cc);
+        ch->AddPropagationLossModel(largeScale);
+        if (spatial)
+        {
+            ch->AddPhasedArraySpectrumPropagationLossModel(spatial);
+        }
+        m_nrBaseLossPerBwp[cc] = largeScale;
         if (cc == 0)
         {
-            m_nrBaseLoss = bwp->m_propagation; // back-compat head
+            m_nrBaseLoss = largeScale; // back-compat head
         }
-    }
-
-    m_nr->InitializeOperationBand(&band);
-    if (m_fddApplied)
-    {
-        m_nr->InitializeOperationBand(&ulBand);
     }
 
     // ---- GAP S4 FIX: NTN geometry is always line-of-sight ------------------
-    // InitializeOperationBand attaches a UMi-StreetCanyon *probabilistic*
-    // channel-condition model (the scenario enum above only selects a parameter
-    // set; 5G-LENA has no NTN scenario in v3.3). Evaluated on ECEF coordinates a
-    // LEO link has d2D of hundreds-to-thousands of km, so the UMi LOS formula
-    // returns NLOS essentially always, and the fading draw then comes from UMi
-    // NLOS cluster tables with "antenna heights" of ~6.37e6 m. That is not
-    // TR 38.811 §6.7 NTN fading in any sense, and it is why the nr backend
-    // needed a physically impossible EIRP to close the link.
-    //
-    // A service link to a satellite above the minimum elevation is LOS by
-    // construction (TR 38.811 §6.6.1: LOS probability -> 1 at high elevation;
-    // the toolkit gates candidates on elevation anyway). Force it, mirroring
-    // what the mmwave backend already does, until a real TR 38.811 NTN-TDL
-    // spectrum model exists.
-    for (uint8_t cc = 0; cc < nBwpAll; ++cc)
-    {
-        if (m_channelModel != ChannelModel::Legacy || !m_smallScaleFading)
-        {
-            break; // C3: the TR 38.811 condition model / LOS-only model own this
-        }
-        BandwidthPartInfoPtr& bwp = *bwpRefs[cc];
-        Ptr<ThreeGppSpectrumPropagationLossModel> sp =
-            DynamicCast<ThreeGppSpectrumPropagationLossModel>(bwp->m_3gppChannel);
-        if (sp)
-        {
-            sp->SetChannelModelAttribute(
-                "ChannelConditionModel",
-                PointerValue(CreateObject<AlwaysLosChannelConditionModel>()));
-        }
-    }
+    // A service link to a satellite above the minimum elevation is LOS by construction
+    // (TR 38.811 6.6.1); UMi's probabilistic LOS formula on ECEF distances returns NLOS
+    // almost always. On 5G-LENA v5.1 the Legacy fading channel above is built with the
+    // AlwaysLos condition directly (NrChannelHelper "LOS"), so no override pass is needed.
 
     // ---- GAP S2 FIX: real propagation delay on the air interface -----------
     // 5G-LENA creates each BWP SpectrumChannel with loss models only, so
@@ -1188,7 +1453,7 @@ NtnRealStackHelper::BuildNrRadio()
         for (uint8_t cc = 0; cc < nBwpAll; ++cc)
         {
             BandwidthPartInfoPtr& bwp = *bwpRefs[cc];
-            Ptr<SpectrumChannel> ch = bwp->m_channel;
+            Ptr<SpectrumChannel> ch = bwp->GetChannel();
             if (ch && !ch->GetPropagationDelayModel())
             {
                 ch->SetPropagationDelayModel(CreateObject<ConstantSpeedPropagationDelayModel>());
@@ -1222,7 +1487,7 @@ NtnRealStackHelper::BuildNrRadio()
     m_nrBwpChannels.clear();
     for (const auto& bwp : allBwps)
     {
-        m_nrBwpChannels.push_back(bwp.get()->m_channel);
+        m_nrBwpChannels.push_back(bwp.get()->GetChannel());
     }
     // Per-BWP RB count (for the measured PRB-utilisation fraction). SCS grows
     // with numerology; each BWP carries m_bwHz/nBwp of the band.
@@ -1289,6 +1554,20 @@ NtnRealStackHelper::BuildNrRadio()
     // subband from the channel matrix, so UM-MIMO capacity becomes measured.
     if (m_mimo)
     {
+        // Two antenna ports per side, one per polarization (cross-polarized arrays), as the
+        // two-port Type-I codebook of the PMI search needs: with the single-port default the
+        // search finds no precoder, the UE reports no usable CQI and the gNB stays at its
+        // starting MCS 0 (measured on 5G-LENA v5.1/v5.2: MCS 0, 0.2 Mbit/s at 22 dB SINR).
+        // Rank 2 needs two ports on both ends.
+        for (const bool gnb : {true, false})
+        {
+            auto set = [this, gnb](const std::string& n, const AttributeValue& v) {
+                gnb ? m_nr->SetGnbAntennaAttribute(n, v) : m_nr->SetUeAntennaAttribute(n, v);
+            };
+            set("IsDualPolarized", BooleanValue(true));
+            set("NumHorizontalPorts", UintegerValue(1));
+            set("NumVerticalPorts", UintegerValue(1));
+        }
         NrHelper::MimoPmiParams mp;
         mp.pmSearchMethod = "ns3::NrPmSearchFull";
         mp.rankLimit = m_mimoRank;
@@ -1322,9 +1601,20 @@ NtnRealStackHelper::BuildNrRadio()
                                                      std::ceil(rttS * 1e3))));
         }
         m_retxBsrTimerApplied = t;
+        // ns-3.48 port: 5G-LENA v5.1 has no separate retxBSR-Timer. Its UE re-arms the SR on every
+        // buffer status report while backlogged (TS 38.321 5.4.4/5.4.5), which keeps a starved
+        // uplink asking, so the value above is reported (manifest) but drives nothing. It used to
+        // be copied into sr-ProhibitTimer, which is a different timer (TS 38.331: the minimum
+        // spacing of SR transmissions, not a BSR re-trigger). sr-ProhibitTimer follows the Rel-17
+        // NTN rule instead
+        // (sr-ProhibitTimer-v1700): long enough that the SR is not repeated before the grant can
+        // return over the round trip, never below nr's 10 ms default.
         if (t.IsStrictlyPositive())
         {
-            m_nr->SetUeMacAttribute("RetxBsrTimer", TimeValue(t));
+            const double rttMs = 2.0 * WorstCaseSlantM() / 299792458.0 * 1e3;
+            const Time srProhibit =
+                std::max(MilliSeconds(10), MilliSeconds(static_cast<uint64_t>(std::ceil(rttMs)) + 1));
+            m_nr->SetUeMacAttribute("SrProhibitTimer", TimeValue(srProhibit));
         }
     }
 
@@ -1397,14 +1687,26 @@ NtnRealStackHelper::BuildNrRadio()
             on = gv.Get() && GetLinkBudgetProfile() != LinkBudgetProfile::Legacy;
         }
         m_hoRobustMcsApplied = on;
-        if (on)
-        {
-            m_nr->SetUePhyAttribute("HandoverRxFlush", BooleanValue(true));
-        }
+        // ns-3.48 port: the UE-side handover RX flush (nr patch 20a) is not ported to 5G-LENA
+        // v5.1 yet, pending a measurement of per-handover loss on v5.1 (its RLC transmitting-
+        // entity tagging and UM re-establishment fixes may cover the stale-PDU case). The robust
+        // MCS until the first CSI (patch 20b, SetUeDlMcsUntilCsi) is applied as before.
     }
 
     // Install devices on the caller's mobility-carrying nodes.
     m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
+    // ns-3.48 / 5G-LENA v5.1: a UE searches for its cell on a 6-RB initial bandwidth at the
+    // carrier centre, which misses a cell whose SSB sits in a reuse sub-band away from the
+    // centre (nr patch 19), so it never decodes that cell's MIB. With frequency reuse, open
+    // the initial window to the whole BWP (nr's own RB rule: bandwidth less RbOverhead).
+    if (ResolveFrequencyReuse(m_gnb.GetN()) > 1 && m_enbDevs.GetN() > 0)
+    {
+        const double oh = m_nr->GetGnbPhy(m_enbDevs.Get(0), 0)->GetRbOverhead();
+        const double scs = 15.0e3 * std::pow(2.0, m_numerology);
+        const double bwpHz = std::floor((m_bwHz / nBwp) / 1e5 + 1e-9) * 1e5;
+        const auto rbs = std::max<uint32_t>(6, static_cast<uint32_t>(bwpHz * (1.0 - oh) / (12.0 * scs)));
+        m_nr->SetUePhyAttribute("InitialBandwidthRbs", UintegerValue(rbs));
+    }
     m_ueDevs = m_nr->InstallUeDevice(m_ue, allBwps);
     // RRU.PrbAvailDl (TS 28.552 5.1.1.2) is the PRB count the PHY can schedule. nr removes its RbOverhead (4 % by
     // default) before dividing by the RB width, so a 20 MHz BWP at 30 kHz has 53 PRBs, not the 55 of bandwidth /
@@ -1438,11 +1740,12 @@ NtnRealStackHelper::BuildNrRadio()
         for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
         {
             Ptr<NrUeNetDevice> ue = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
-            ue->SetAttribute("PrimaryUlIndex", UintegerValue(nBwp));
-            ue->GetRrc()->SetPrimaryUlIndex(nBwp);
+            // 5G-LENA v5.1: the UE learns its BWP-manager mapping and the UL pairing of the
+            // FDD carriers from the gNB's dedicated RRC configuration (and picks the primary
+            // UL carrier itself at attach), so the v3.3-era manual UE-side pairing
+            // (PrimaryUlIndex, UE SetOutputLink) is no longer set here; it conflicted with it.
             for (uint8_t k = 0; k < nBwp; ++k)
             {
-                m_nr->GetBwpManagerUe(m_ueDevs.Get(i))->SetOutputLink(k, nBwp + k);
                 // TS 38.213 7.1.1: the PUSCH path loss PL_b,f,c(q_d) is
                 // estimated on a DL reference signal. Under FDD the UL BWP's
                 // PHY receives no DL signal at all (the gNB routes the UL DCI
@@ -1676,6 +1979,11 @@ NtnRealStackHelper::BuildNrRadio()
                 pc->SetAttribute("PoNominalPusch",
                                  IntegerValue(static_cast<int16_t>(m_ulP0Applied)));
                 pc->SetAttribute("PoUePusch", IntegerValue(0));
+                // 5G-LENA v5.2 power-controls the SRS (TS 38.213 7.3.1) with its own p0
+                // (SRS-Config p0, default -80 dBm). The gNB derives the UL CQI/MCS from the SRS,
+                // so the SRS gets the PUSCH target: same p0 and alpha, i.e. the same received
+                // PSD per PRB as the PUSCH it sounds for.
+                pc->SetAttribute("P0Srs", DoubleValue(m_ulP0Applied));
                 phy->SetAttribute("EnableUplinkPowerControl", BooleanValue(true));
             }
         }
@@ -1692,32 +2000,17 @@ NtnRealStackHelper::BuildNrRadio()
     // the per-BWP powers above, which it scales to the cell's sub-band.
     ApplyFrequencyReuse();
 
-    // ---- Enabler A: instantiate + cross-wire the A3-RSRP handover algorithm.
-    // This is the wiring the vendored NrHelper omits (see the note above). It
-    // must run AFTER InstallGnbDevice -- the RRC now knows its component-carrier
-    // count, which AddUeMeasReportConfig needs -- and BEFORE AttachToClosestGnb,
-    // so the EVENT_A3 report config that the algorithm's DoInitialize() registers
-    // on the gNB RRC is delivered to the UE in its connection reconfiguration.
-    // Without this, SetHandoverAlgorithmType alone leaves the RRC on the no-op
-    // SAP and the UE never emits neighbour measurement reports (handover count
-    // stays 0 regardless of geometry).
+    // ---- Enabler A: the A3-RSRP algorithm NrHelper created per gNB (configured before
+    // InstallGnbDevice above). Its DoInitialize registers the EVENT_A3 report config on the
+    // gNB RRC before any UE connects, so it reaches the UE in the connection reconfiguration.
     if (m_handover && m_hoAutonomous && m_gnb.GetN() >= 2)
     {
+        // Keep a handle on each gNB's A3 algorithm (created and wired by NrHelper on v5.1).
         for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
         {
-            Ptr<NrGnbNetDevice> gnbDev = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
-            Ptr<NrGnbRrc> rrc = gnbDev->GetRrc();
-            Ptr<NrA3RsrpHandoverAlgorithm> algo = CreateObject<NrA3RsrpHandoverAlgorithm>();
-            algo->SetAttribute("Hysteresis", DoubleValue(m_hoHystDb));
-            algo->SetAttribute("TimeToTrigger", TimeValue(m_hoTtt));
-            // Cross-wire the handover-management SAP (RRC <-> algorithm), exactly
-            // as LteHelper::InstallSingleEnbDevice does for the LTE stack.
-            rrc->SetNrHandoverManagementSapProvider(algo->GetNrHandoverManagementSapProvider());
-            algo->SetNrHandoverManagementSapUser(rrc->GetNrHandoverManagementSapUser());
-            // Initialize() -> DoInitialize() registers the EVENT_A3 RSRP report
-            // config on this gNB's RRC now (before any UE connects).
-            algo->Initialize();
-            m_hoAlgos.push_back(algo);
+            PointerValue algo;
+            m_enbDevs.Get(i)->GetAttribute("NrHandoverAlgorithm", algo);
+            m_hoAlgos.push_back(algo.Get<NrHandoverAlgorithm>());
         }
     }
 
@@ -1734,10 +2027,8 @@ NtnRealStackHelper::BuildNrRadio()
     if (m_periodicMeas)
     {
         // nr patch 08: real SS-RSRQ (TS 38.215 5.1.3) in the reports.
-        BooleanValue prevRsrq;
-        GlobalValue::GetValueByName("NrUeRsrqFromRssi", prevRsrq);
-        m_prevRsrqFromRssi = prevRsrq.Get() ? 1 : 0;
-        GlobalValue::Bind("NrUeRsrqFromRssi", BooleanValue(true));
+        // (5G-LENA v5.1 computes SS-RSRQ from RSSI natively; nr patch 08's
+        // NrUeRsrqFromRssi GlobalValue no longer exists.)
         NrRrcSap::ReportConfigEutra rc;
         rc.triggerType = NrRrcSap::ReportConfigEutra::PERIODICAL;
         rc.purpose = NrRrcSap::ReportConfigEutra::REPORT_STRONGEST_CELLS;
@@ -1821,6 +2112,7 @@ NtnRealStackHelper::BuildNrRadio()
     }
 
     m_nr->AttachToClosestGnb(m_ueDevs, m_enbDevs);
+    PrimeNrChannelOrientation();
     ApplyRaWindowOffsets();
     if (m_nrBeamforming)
     {
@@ -1953,13 +2245,8 @@ NtnRealStackHelper::BuildNrRadio()
     if (m_ssbCellBeam)
     {
         // C2: cell (SSB) beam per gNB, re-steered as the satellites move.
-        if (m_prevRsrpLinear < 0) // Wave 11: reuse may have saved it already
-        {
-            BooleanValue prev;
-            GlobalValue::GetValueByName("NrUeRsrpLinearAverage", prev);
-            m_prevRsrpLinear = prev.Get() ? 1 : 0;
-        }
-        GlobalValue::Bind("NrUeRsrpLinearAverage", BooleanValue(true));
+        // (5G-LENA v5.1 averages L1 RSRP linearly natively; nr patch 08's
+        // NrUeRsrpLinearAverage GlobalValue no longer exists.)
         // Wave 11: Earth-moving cells sweep their SSB over a beam grid.
         BuildSsbBeamGrid();
         RefreshCellBeams();
@@ -2161,6 +2448,20 @@ NtnRealStackHelper::NrHandoverEndOk(std::string /*ctx*/,
         const uint16_t src = (it == m_lastCellOfImsi.end()) ? 0 : it->second;
         m_hoRecords.push_back({Simulator::Now(), static_cast<uint32_t>(std::max(ue, 0)), src, cellId});
         m_lastCellOfImsi[imsi] = cellId;
+        if (m_autoScene && ue >= 0 && static_cast<uint32_t>(ue) < m_ue.GetN())
+        {
+            // Source = the node this UE was last drawn on (not cell 0 -> node 0, which
+            // collides with the first satellite's node id).
+            const uint32_t ueNode = m_ue.Get(ue)->GetId();
+            const uint32_t to = GnbNodeIdOfCell(cellId);
+            auto sv = m_autoServing.find(ueNode);
+            const uint32_t from = sv != m_autoServing.end() ? sv->second : GnbNodeIdOfCell(src);
+            if (from != to)
+            {
+                m_autoScene->OnHandover(ueNode, from, to);
+            }
+            m_autoServing[ueNode] = to;
+        }
     }
     // 5G-LENA registers an ideal-beamforming task only at attach
     // (NrHelper::AttachToGnb), so after an X2 handover the TARGET gNB had no
@@ -2227,6 +2528,61 @@ NtnRealStackHelper::NrHandoverEndOk(std::string /*ctx*/,
             ue->GetPhy(cc)->GetSpectrumPhy()->GetBeamManager()->ChangeBeamformingVector(gnb);
         }
     }
+}
+
+void
+NtnRealStackHelper::PrimeNrChannelOrientation()
+{
+    // A gNB's beamforming vector is built for the s (transmit, unconjugated) side of the 3GPP
+    // long-term component and a UE's for the u side; the matrix orientation must follow that,
+    // not which end happens to transmit first (on a paired FDD uplink carrier, the UE). Measured
+    // without this: PUSCH 21.7 dB below ns-3.43 (gNB array gain lost), TBLER 1, no TCP.
+    uint32_t primed = 0;
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+        if (!gnb)
+        {
+            continue;
+        }
+        Ptr<MobilityModel> gMob = gnb->GetNode()->GetObject<MobilityModel>();
+        for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+        {
+            Ptr<NrUeNetDevice> ue = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(u));
+            if (!ue)
+            {
+                continue;
+            }
+            Ptr<MobilityModel> uMob = ue->GetNode()->GetObject<MobilityModel>();
+            const std::size_t nCc = std::min(gnb->GetCcMapSize(), ue->GetCcMapSize());
+            for (std::size_t cc = 0; cc < nCc; ++cc)
+            {
+                Ptr<NrSpectrumPhy> gSp = gnb->GetPhy(cc)->GetSpectrumPhy();
+                Ptr<NrSpectrumPhy> uSp = ue->GetPhy(cc)->GetSpectrumPhy();
+                Ptr<const PhasedArrayModel> gAnt = DynamicCast<const PhasedArrayModel>(gSp->GetAntenna());
+                Ptr<const PhasedArrayModel> uAnt = DynamicCast<const PhasedArrayModel>(uSp->GetAntenna());
+                Ptr<SpectrumChannel> ch = gSp->GetSpectrumChannel();
+                if (!gMob || !uMob || !gAnt || !uAnt || !ch)
+                {
+                    continue;
+                }
+                for (Ptr<PhasedArraySpectrumPropagationLossModel> m =
+                         ch->GetPhasedArraySpectrumPropagationLossModel();
+                     m;
+                     m = m->GetNext())
+                {
+                    Ptr<ThreeGppSpectrumPropagationLossModel> tg =
+                        DynamicCast<ThreeGppSpectrumPropagationLossModel>(m);
+                    if (tg && tg->GetChannelModel())
+                    {
+                        tg->GetChannelModel()->GetChannel(gMob, uMob, gAnt, uAnt);
+                        ++primed;
+                    }
+                }
+            }
+        }
+    }
+    NS_LOG_INFO("primed " << primed << " gNB->UE channel matrices (gNB on the s side)");
 }
 
 void
@@ -2808,13 +3164,14 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
         (!m_slices.empty() || m_scheduler == Scheduler::OfdmaQos);
     if (perQosBearers && !QciAttrName(fiveQi).empty())
     {
-        NrEpsBearer bearer(static_cast<NrEpsBearer::Qci>(fiveQi));
-        Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-        NrEpcTft::PacketFilter pf;
+        // 5G-LENA v4+: EPS bearer / TFT became QoS flow / QoS rule (same 5QI semantics).
+        NrQosFlow flow(static_cast<NrQosFlow::FiveQi>(fiveQi));
+        Ptr<NrQosRule> rule = Create<NrQosRule>();
+        NrQosRule::PacketFilter pf;
         pf.localPortStart = dlPort;
         pf.localPortEnd = dlPort;
-        tft->Add(pf);
-        m_nr->ActivateDedicatedEpsBearer(m_ueDevs.Get(ueIdx), bearer, tft);
+        rule->Add(pf);
+        m_nr->ActivateDedicatedQosFlow(m_ueDevs.Get(ueIdx), flow, rule);
     }
 
     sink->SetStartTime(Seconds(0.0));
@@ -3331,7 +3688,16 @@ NtnRealStackHelper::ExportAiFlowMonitor()
     {
         return;
     }
-    const std::filesystem::path prefix(m_aiMonitorPrefix);
+    // A bare prefix ("sagin-aeronautical") used to land in the process working
+    // directory, outside the run's output directory, so the KPM series never
+    // reached the dataset. A prefix without a directory part now goes into the
+    // helper's output directory, like sim_health.csv.
+    std::filesystem::path prefix(m_aiMonitorPrefix);
+    if (!prefix.has_parent_path() && !m_outputDir.empty())
+    {
+        prefix = std::filesystem::path(m_outputDir) / prefix;
+        m_aiMonitorPrefix = prefix.string();
+    }
     if (prefix.has_parent_path())
     {
         std::error_code ec;
@@ -4652,6 +5018,8 @@ NtnRealStackHelper::WriteHealthReport()
         uint64_t dataDrops = 0;
         uint64_t srsDrops = 0;
         uint64_t dlCtrlDrops = 0;
+        uint64_t ulCtrlRxDrops = 0;
+        uint64_t dlCtrlRxDrops = 0;
         const uint8_t nBwpHealth = GetNrBwpCount();
         for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
         {
@@ -4663,6 +5031,8 @@ NtnRealStackHelper::WriteHealthReport()
                     dataDrops += sp->GetDataDropCount();
                     srsDrops += sp->GetSrsDropCount();
                     dlCtrlDrops += sp->GetDlCtrlDropCount();
+                    ulCtrlRxDrops += sp->GetUlCtrlRxDropCount();
+                    dlCtrlRxDrops += sp->GetDlCtrlRxDropCount();
                 }
             }
         }
@@ -4676,6 +5046,8 @@ NtnRealStackHelper::WriteHealthReport()
                     dataDrops += sp->GetDataDropCount();
                     srsDrops += sp->GetSrsDropCount();
                     dlCtrlDrops += sp->GetDlCtrlDropCount();
+                    ulCtrlRxDrops += sp->GetUlCtrlRxDropCount();
+                    dlCtrlRxDrops += sp->GetDlCtrlRxDropCount();
                 }
             }
         }
@@ -4683,6 +5055,10 @@ NtnRealStackHelper::WriteHealthReport()
         out << "halfduplex_data_drops," << dataDrops << ",-,-,measured\n";
         out << "halfduplex_srs_rx_drops," << srsDrops << ",-,-,measured\n";
         out << "halfduplex_dlctrl_drops," << dlCtrlDrops << ",-,-,measured\n";
+        // Receive side (ns-3.48 port): UL CTRL arriving at a transmitting gNB, DL CTRL arriving at
+        // a transmitting UE (no Timing Advance over NTN, see nr-spectrum-phy.cc).
+        out << "halfduplex_ulctrl_rx_drops," << ulCtrlRxDrops << ",-,-,measured\n";
+        out << "halfduplex_dlctrl_rx_drops," << dlCtrlRxDrops << ",-,-,measured\n";
     }
     out << "carrier_hz," << m_freqHz << ",-,-,config\n";
     // Wave 9: the duplex the nr carrier ran, and the paired UL carrier.
@@ -4717,8 +5093,8 @@ NtnRealStackHelper::WriteHealthReport()
             out << "ho_robust_mcs_mean," << sum / m_hoRobustMcsList.size() << ",-,"
                 << m_hoRobustMcsList.size() << ",nr-patch-20\n";
         }
-        out << "ho_aborted_dl_rx," << GetHandoverAbortedDlRxCount() << ",-,-,nr-patch-20\n";
-        out << "ho_flushed_reports," << GetHandoverFlushedReportCount() << ",-,-,nr-patch-20\n";
+        out << "ho_aborted_dl_rx,,-,-,not-measured (nr v5.1 port: patch 20a pending)\n";
+        out << "ho_flushed_reports,,-,-,not-measured (nr v5.1 port: patch 20a pending)\n";
     }
     // Wave 11: reuse factor and SSB beams per satellite.
     out << "frequency_reuse," << +m_frfApplied << ",-,-,"
@@ -4881,17 +5257,29 @@ NtnRealStackHelper::WriteHealthReport()
     out << "gnbs," << m_gnb.GetN() << ",-,-,config\n";
     out << "run_tag," << m_runTag << ",-,-,config\n";
     // ---- Wave 1 rows (appended so existing row order is unchanged) ----
-    out << "app_ipdv_mean_abs_ms," << (std::isnan(m_ipdvMeanAbsMs) ? std::string("nan") : std::to_string(m_ipdvMeanAbsMs))
-        << ",-,-,rfc3393-consecutive-seq\n";
-    out << "app_ipdv_p95_abs_ms," << (std::isnan(m_ipdvP95AbsMs) ? std::string("nan") : std::to_string(m_ipdvP95AbsMs))
-        << ",-,-,rfc3393-consecutive-seq-hist0.01ms\n";
+    // Undefined when no flow carries consecutive sequence numbers (e.g. NR-TV video): an
+    // empty value with a "not-measured" provenance, not a NaN that reads as a broken number.
+    out << "app_ipdv_mean_abs_ms," << (std::isnan(m_ipdvMeanAbsMs) ? std::string("") : std::to_string(m_ipdvMeanAbsMs))
+        << ",-,-," << (std::isnan(m_ipdvMeanAbsMs) ? "not-measured (no consecutive-sequence flows)" : "rfc3393-consecutive-seq") << "\n";
+    out << "app_ipdv_p95_abs_ms," << (std::isnan(m_ipdvP95AbsMs) ? std::string("") : std::to_string(m_ipdvP95AbsMs))
+        << ",-,-," << (std::isnan(m_ipdvP95AbsMs) ? "not-measured (no consecutive-sequence flows)" : "rfc3393-consecutive-seq-hist0.01ms") << "\n";
     out << "channel_model,"
         << (m_channelModel == ChannelModel::Ns3Tr38811 ? "ns3-tr38811-ntn" : "legacy-friis+excess")
         << ",-,-," << (m_smallScaleFading ? "fading-on" : "los-only-no-fading") << "\n";
+    // Upstream stack and the v5.2 transmit filter, so a dataset row states the simulator it
+    // came from and whether gNB-gNB/UE-UE links were evaluated.
+    out << "sim_stack,ns-3.49+5G-LENA-v5.2,-,-,ntn-integration-v4\n";
+    if (m_backend == RadioBackend::Nr)
+    {
+        out << "nr_link_filter," << (m_nrLinkFilterApplied ? 1 : 0) << ",-,-,"
+            << (m_nrLinkFilterApplied ? "NrSidelinkFilter (exact: FDD or pure DL/UL TDD)"
+                                      : "full link set (flexible TDD slots or disabled)")
+            << "\n";
+    }
     if (m_blockageModel)
     {
         out << "earth_blockage_blocked_evals," << m_blockageModel->GetBlockedCount() << ",-,-,"
-            << "geometry-wgs84 (clear " << m_blockageModel->GetClearCount() << ", non-geocentric "
+            << "geometry-wgs84 (clear " << m_blockageModel->GetClearCount() << "; non-geocentric "
             << m_blockageModel->GetNonGeocentricCount() << ")\n";
     }
     else
@@ -4906,7 +5294,7 @@ NtnRealStackHelper::WriteHealthReport()
         out << "ue_element_gain_dbi," << gUe << ",-,-,config\n";
         // G/T of one branch with T_ant = 290 K (the stack's noise model).
         out << "ue_g_over_t_dbk," << (gUe - nf - 10.0 * std::log10(290.0)) << ",-,-,"
-            << "derived (NF " << nf << " dB, T0 290 K)\n";
+            << "derived (NF " << nf << " dB; T0 290 K)\n";
     }
     if (m_feederGw && m_feederSat)
     {
@@ -4938,9 +5326,15 @@ NtnRealStackHelper::WriteHealthReport()
     out << "app_seq_gap_loss_ratio," << m_appSeqGapLossRatio << ",-,-,inband-seq\n";
     // Caller-supplied provenance rows, emitted last so they cannot displace a
     // gated row if a module picks a colliding name.
+    // Caller text is free-form: keep the file at exactly five fields per row (ntn-dataset@1).
+    auto cell = [](std::string v) {
+        std::replace(v.begin(), v.end(), ',', ';');
+        std::replace(v.begin(), v.end(), '\n', ' ');
+        return v;
+    };
     for (const auto& [metric, value, prov] : m_extraHealthRows)
     {
-        out << metric << "," << value << ",-,-," << prov << "\n";
+        out << cell(metric) << "," << cell(value) << ",-,-," << cell(prov) << "\n";
     }
     out.close();
 
@@ -4966,10 +5360,62 @@ NtnRealStackHelper::WriteHealthReport()
         // would make this helper depend on ntn-constellation, which closes a
         // build cycle, so the scenario declares it through
         // SetTleProvenance() and the helper carries it into the manifest.
+        // ntn-dataset@1: when the scenario did not declare its element sets, read them
+        // off every node's SGP4 mobility through its read-only attributes (FromRealTle,
+        // NoradId, ElementEpochUnix), so every example records them without code changes.
+        // A generated (Walker) shell is recorded as such.
+        std::string tleSource = m_tleEpochUtc.empty() ? "none" : "declared";
+        if (m_tleEpochUtc.empty() && m_noradIds.empty())
+        {
+            std::vector<double> epochs;
+            uint32_t generated = 0;
+            for (uint32_t n = 0; n < NodeList::GetNNodes(); ++n)
+            {
+                Ptr<MobilityModel> mob = NodeList::GetNode(n)->GetObject<MobilityModel>();
+                if (!mob)
+                {
+                    continue;
+                }
+                BooleanValue real;
+                if (!mob->GetAttributeFailSafe("FromRealTle", real))
+                {
+                    continue;
+                }
+                if (!real.Get())
+                {
+                    ++generated;
+                    continue;
+                }
+                UintegerValue id;
+                DoubleValue ep;
+                mob->GetAttributeFailSafe("NoradId", id);
+                mob->GetAttributeFailSafe("ElementEpochUnix", ep);
+                m_noradIds.push_back(static_cast<uint32_t>(id.Get()));
+                epochs.push_back(ep.Get());
+            }
+            if (!epochs.empty())
+            {
+                std::sort(epochs.begin(), epochs.end());
+                const auto iso = [](double u) {
+                    std::time_t t = static_cast<std::time_t>(u);
+                    char b[32];
+                    std::strftime(b, sizeof b, "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&t));
+                    return std::string(b);
+                };
+                m_tleEpochUtc = iso(epochs[epochs.size() / 2]);
+                tleSource = "sgp4-mobility (median of " + std::to_string(epochs.size()) +
+                            " element sets, " + iso(epochs.front()) + " to " + iso(epochs.back()) + ")";
+            }
+            else if (generated > 0)
+            {
+                tleSource = "generated shell (" + std::to_string(generated) + " satellites, no real TLE)";
+            }
+        }
         if (!m_tleEpochUtc.empty())
         {
             manifest.SetTleEpoch(m_tleEpochUtc);
         }
+        manifest.AddExtra("element_sets", tleSource);
         for (uint32_t id : m_noradIds)
         {
             manifest.AddNoradId(id);
@@ -4992,7 +5438,21 @@ NtnRealStackHelper::WriteHealthReport()
                                                  : std::to_string(m_dlSinrDbMean))
             .AddExtra("mean_dl_tbler", std::to_string(m_dlTblerMean))
             .AddExtra("phy_rx_tb", std::to_string(m_phyRxTb))
-            .AddExtra("air_interface", airTag);
+            .AddExtra("air_interface", airTag)
+            // ntn-dataset@1 (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md): the standard
+            // release and the specifications the data plane follows, recorded per run.
+            .AddExtra("dataset_schema", "ntn-dataset@1")
+            .AddExtra("threegpp_release", "Rel-17 NR-NTN")
+            .AddExtra("standards",
+                      "TS 38.300; TS 38.211; TS 38.213; TS 38.214; TS 38.321; TS 38.331; "
+                      "TR 38.811; TR 38.821; RFC 7680")
+            .AddExtra("kpm_series",
+                      m_aiMonitorPrefix.empty()
+                          ? std::string("none")
+                          : (std::filesystem::path(m_aiMonitorPrefix).has_parent_path()
+                                 ? m_aiMonitorPrefix
+                                 : (std::filesystem::path(m_outputDir) / m_aiMonitorPrefix).string()) +
+                                "_kpm_series.csv");
         if (!manifest.WriteJson(m_outputDir + "/repro-manifest.json"))
         {
             NS_LOG_WARN("could not write " << m_outputDir << "/repro-manifest.json");
@@ -5017,7 +5477,9 @@ NtnRealStackHelper::WriteHealthReport()
 // ===================== Wave 1 (16 Nov 2026) =====================
 
 void
-NtnRealStackHelper::ApplyNs3Tr38811Channel(BandwidthPartInfo* bwp)
+NtnRealStackHelper::ApplyNs3Tr38811Channel(const BandwidthPartInfo* bwp,
+                                           Ptr<PropagationLossModel>& plOut,
+                                           Ptr<PhasedArraySpectrumPropagationLossModel>& spOut)
 {
     // C3: ns-3 mainline TR 38.811 channel on one BWP. One condition model is
     // shared by the path loss and the fast fading so both see the same
@@ -5051,9 +5513,15 @@ NtnRealStackHelper::ApplyNs3Tr38811Channel(BandwidthPartInfo* bwp)
         break;
     }
     cond->SetAttribute("UpdatePeriod", TimeValue(m_channelUpdatePeriod));
+    // ns-3.49: drop-based (inter-UE) spatial consistency per TR 38.901 7.6.3.1 - nearby
+    // terminals share correlated LOS state, shadow fading and, in the channel model, large-scale
+    // and cluster parameters instead of independent draws per link.
+    BooleanValue interUe(true);
+    GlobalValue::GetValueByName("NtnRealStackInterUeSpatialConsistency", interUe);
+    cond->SetAttribute("InterUeSpatialConsistency", interUe);
     pl->SetAttribute("Frequency", DoubleValue(f));
     pl->SetChannelConditionModel(cond);
-    bwp->m_propagation = pl;
+    plOut = pl;
     if (m_smallScaleFading)
     {
         Ptr<ThreeGppSpectrumPropagationLossModel> sp =
@@ -5062,7 +5530,7 @@ NtnRealStackHelper::ApplyNs3Tr38811Channel(BandwidthPartInfo* bwp)
         sp->SetChannelModelAttribute("Scenario", StringValue(scen));
         sp->SetChannelModelAttribute("ChannelConditionModel", PointerValue(cond));
         sp->SetChannelModelAttribute("UpdatePeriod", TimeValue(m_channelUpdatePeriod));
-        bwp->m_3gppChannel = sp;
+        spOut = sp;
     }
 }
 
@@ -5639,6 +6107,7 @@ NtnRealStackHelper::SetSsbCellBeam(bool enable, Ptr<MobilityModel> cellCenter, T
 {
     NS_ABORT_MSG_IF(m_built, "SetSsbCellBeam must be called before Build()");
     m_ssbCellBeam = enable;
+    m_ssbCellBeamSet = true;
     m_cellBeamCenter = cellCenter;
     m_cellBeamRefresh = refresh;
 }
@@ -5812,7 +6281,10 @@ NtnRealStackHelper::ApplyFrequencyReuse()
             Ptr<NrMacSchedulerNs3> sched =
                 DynamicCast<NrMacSchedulerNs3>(m_nr->GetScheduler(m_enbDevs.Get(i), b));
             NS_ABORT_MSG_IF(!phy || !mac || !sched, "frequency reuse needs an nr ns-3 scheduler");
-            const uint32_t nRb = phy->GetRbNum();
+            // 5G-LENA v5.1 sets the PHY's RB count later in initialization than v3.3 did, so
+            // at this point it can still read 0; the BWP's RB count is then the helper's own
+            // (BWP bandwidth / 12 subcarriers at the numerology's SCS, m_nrBandRb).
+            const uint32_t nRb = phy->GetRbNum() > 0 ? phy->GetRbNum() : m_nrBandRb;
             const uint32_t rbPerRbg = std::max<uint32_t>(1, mac->GetNumRbPerRbg());
             const uint32_t nRbg = nRb / rbPerRbg;
             NS_ABORT_MSG_IF(nRbg < k,
@@ -5821,10 +6293,10 @@ NtnRealStackHelper::ApplyFrequencyReuse()
             // Equal RBG shares, contiguous: sub-band c = RBGs [c G/k, (c+1) G/k).
             const uint32_t g0 = c * nRbg / k;
             const uint32_t g1 = (c + 1) * nRbg / k;
-            std::vector<uint8_t> mask(nRbg, 0);
+            std::vector<bool> mask(nRbg, false); // 5G-LENA v5.1: RBG masks are vector<bool>
             for (uint32_t g = g0; g < g1; ++g)
             {
-                mask[g] = 1;
+                mask[g] = true;
             }
             const uint32_t rbFirst = g0 * rbPerRbg;
             const uint32_t rbCount = (g1 - g0) * rbPerRbg;
@@ -5861,13 +6333,7 @@ NtnRealStackHelper::ApplyFrequencyReuse()
     // to cycle three cells 94 times in ntn-cho-full-constellation (none with the
     // linear average, measured). So reuse turns the linear average on, as the
     // SSB cell beam already does.
-    if (m_prevRsrpLinear < 0)
-    {
-        BooleanValue prev;
-        GlobalValue::GetValueByName("NrUeRsrpLinearAverage", prev);
-        m_prevRsrpLinear = prev.Get() ? 1 : 0;
-        GlobalValue::Bind("NrUeRsrpLinearAverage", BooleanValue(true));
-    }
+    // (5G-LENA v5.1 averages L1 RSRP linearly natively; no GlobalValue to set.)
     for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
     {
         for (uint8_t b = 0; b < nBwpAll; ++b)
@@ -6238,28 +6704,9 @@ NtnRealStackHelper::GetDlHarqFeedbackSuppressedCount() const
 uint64_t
 NtnRealStackHelper::GetDlSoftBufferFlushCount() const
 {
-    uint64_t n = 0;
-    if (m_backend != RadioBackend::Nr)
-    {
-        return 0;
-    }
-    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
-    {
-        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
-        if (!dev)
-        {
-            continue;
-        }
-        for (uint32_t b = 0; b < dev->GetCcMapSize(); ++b)
-        {
-            Ptr<NrUePhy> phy = dev->GetPhy(b);
-            if (phy && phy->GetSpectrumPhy())
-            {
-                n += phy->GetSpectrumPhy()->GetDlSoftBufferFlushCount();
-            }
-        }
-    }
-    return n;
+    // ns-3.48 port: 5G-LENA v5.1 flushes the DL soft buffer on new data natively (NrSpectrumPhy,
+    // nr-test-harq-flush); ntn-patch 15b is obsolete and v5.1 keeps no counter.
+    return 0;
 }
 
 Ipv4Address
@@ -6459,72 +6906,25 @@ NtnRealStackHelper::GetPhrReceivedCount() const
 uint64_t
 NtnRealStackHelper::GetBsrRetriggerCount() const
 {
-    uint64_t n = 0;
-    if (m_backend != RadioBackend::Nr)
-    {
-        return 0;
-    }
-    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
-    {
-        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
-        if (!dev)
-        {
-            continue;
-        }
-        for (uint32_t b = 0; b < dev->GetCcMapSize(); ++b)
-        {
-            Ptr<NrUeMac> mac = DynamicCast<NrUeMac>(dev->GetMac(b));
-            if (mac)
-            {
-                n += mac->GetBsrRetriggerCount();
-            }
-        }
-    }
-    return n;
+    // ns-3.48 port: 5G-LENA v5.1 re-arms the SR natively (SrProhibitTimer / SrTransMax); ntn-patch 15c
+    // (retxBSR-Timer counter) is obsolete and v5.1 keeps no counter.
+    return 0;
 }
 
 uint64_t
 NtnRealStackHelper::GetHandoverAbortedDlRxCount() const
 {
-    uint64_t n = 0;
-    if (m_backend != RadioBackend::Nr || !m_nr)
-    {
-        return 0;
-    }
-    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
-    {
-        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
-        for (uint32_t b = 0; dev && b < dev->GetCcMapSize(); ++b)
-        {
-            if (Ptr<NrUePhy> phy = dev->GetPhy(b))
-            {
-                n += phy->GetSpectrumPhy()->GetDlDataRxAbortedCount();
-            }
-        }
-    }
-    return n;
+    // ns-3.48 port: ntn-patch 20a (handover RX flush) is not ported to 5G-LENA v5.1 pending a measurement
+    // of per-handover loss on v5.1 (its RLC fixes may cover it); no counter until then.
+    return 0;
 }
 
 uint64_t
 NtnRealStackHelper::GetHandoverFlushedReportCount() const
 {
-    uint64_t n = 0;
-    if (m_backend != RadioBackend::Nr || !m_nr)
-    {
-        return 0;
-    }
-    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
-    {
-        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
-        for (uint32_t b = 0; dev && b < dev->GetCcMapSize(); ++b)
-        {
-            if (Ptr<NrUePhy> phy = dev->GetPhy(b))
-            {
-                n += phy->GetHandoverFlushedReportCount();
-            }
-        }
-    }
-    return n;
+    // ns-3.48 port: ntn-patch 20a (handover RX flush) is not ported to 5G-LENA v5.1 pending a measurement
+    // of per-handover loss on v5.1 (its RLC fixes may cover it); no counter until then.
+    return 0;
 }
 
 uint64_t

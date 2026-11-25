@@ -22,7 +22,6 @@
 
 // ns3 includes
 #ifdef __WIN32__
-#include "ns3/bs-net-device.h"
 #include "ns3/csma-net-device.h"
 #endif
 #include "animation-interface.h"
@@ -49,7 +48,6 @@
 #include "ns3/wifi-mac.h"
 #include "ns3/wifi-net-device.h"
 #include "ns3/wifi-psdu.h"
-#include "ns3/wimax-mac-header.h"
 
 namespace ns3
 {
@@ -71,11 +69,11 @@ AnimationInterface::AnimationInterface(const std::string fn)
       m_writeCallback(nullptr),
       m_started(false),
       m_enablePacketMetadata(false),
-      m_startTime(Seconds(0)),
+      m_startTime(),
       m_stopTime(Seconds(3600 * 1000)),
       m_maxPktsPerFile(MAX_PKTS_PER_TRACE_FILE),
       m_originalFileName(fn),
-      m_routingStopTime(Seconds(0)),
+      m_routingStopTime(),
       m_routingFileName(""),
       m_routingPollInterval(Seconds(5)),
       m_trackPackets(true)
@@ -95,11 +93,10 @@ AnimationInterface::AnimationInterface(const std::string fn)
      * The .dll.a/.lib however, only gets linked if we instantiate at
      * least one symbol exported by the .dll.
      *
-     * To ensure TypeIds from the Csma, Uan, Wifi and Wimax
+     * To ensure TypeIds from the Csma, Uan, and Wifi
      * modules are registered during runtime, we need to instantiate
      * at least one symbol exported by each of these module libraries.
      */
-    static BaseStationNetDevice b;
     static CsmaNetDevice c;
     static WifiNetDevice w;
     static UanNetDevice u;
@@ -477,7 +474,6 @@ AnimationInterface::MobilityAutoCheck()
     if (!Simulator::IsFinished())
     {
         PurgePendingPackets(AnimationInterface::WIFI);
-        PurgePendingPackets(AnimationInterface::WIMAX);
         PurgePendingPackets(AnimationInterface::LTE);
         PurgePendingPackets(AnimationInterface::CSMA);
         PurgePendingPackets(AnimationInterface::LRWPAN);
@@ -984,7 +980,7 @@ AnimationInterface::WifiPhyRxBeginTrace(std::string context,
         AddPendingPacket(AnimationInterface::WIFI, animUid, pktInfo);
         NS_LOG_WARN("WifiPhyRxBegin: unknown Uid, but we are adding a wifi packet");
     }
-    /// \todo NS_ASSERT (WifiPacketIsPending (animUid) == true);
+    /// @todo NS_ASSERT (WifiPacketIsPending (animUid) == true);
     m_pendingWifiPackets[animUid].ProcessRxBegin(ndev, Simulator::Now().GetSeconds());
     OutputWirelessPacketRxInfo(p, m_pendingWifiPackets[animUid], animUid);
 }
@@ -1066,20 +1062,6 @@ AnimationInterface::LrWpanPhyRxBeginTrace(std::string context, Ptr<const Packet>
     UpdatePosition(n);
     m_pendingLrWpanPackets[animUid].ProcessRxBegin(ndev, Simulator::Now().GetSeconds());
     OutputWirelessPacketRxInfo(p, m_pendingLrWpanPackets[animUid], animUid);
-}
-
-void
-AnimationInterface::WimaxTxTrace(std::string context, Ptr<const Packet> p, const Mac48Address& m)
-{
-    NS_LOG_FUNCTION(this);
-    return GenericWirelessTxTrace(context, p, AnimationInterface::WIMAX);
-}
-
-void
-AnimationInterface::WimaxRxTrace(std::string context, Ptr<const Packet> p, const Mac48Address& m)
-{
-    NS_LOG_FUNCTION(this);
-    return GenericWirelessRxTrace(context, p, AnimationInterface::WIMAX);
 }
 
 void
@@ -1190,7 +1172,7 @@ AnimationInterface::CsmaPhyTxEndTrace(std::string context, Ptr<const Packet> p)
         AddPendingPacket(AnimationInterface::CSMA, animUid, pktInfo);
         NS_LOG_WARN("Unknown Uid, but adding Csma Packet anyway");
     }
-    /// \todo NS_ASSERT (IsPacketPending (AnimUid) == true);
+    /// @todo NS_ASSERT (IsPacketPending (AnimUid) == true);
     AnimPacketInfo& pktInfo = m_pendingCsmaPackets[animUid];
     pktInfo.m_lbTx = Simulator::Now().GetSeconds();
 }
@@ -1209,7 +1191,7 @@ AnimationInterface::CsmaPhyRxEndTrace(std::string context, Ptr<const Packet> p)
         NS_LOG_WARN("CsmaPhyRxEndTrace: unknown Uid");
         return;
     }
-    /// \todo NS_ASSERT (CsmaPacketIsPending (AnimUid) == true);
+    /// @todo NS_ASSERT (CsmaPacketIsPending (AnimUid) == true);
     AnimPacketInfo& pktInfo = m_pendingCsmaPackets[animUid];
     pktInfo.ProcessRxBegin(ndev, Simulator::Now().GetSeconds());
     NS_LOG_INFO("CsmaPhyRxEndTrace for packet:" << animUid);
@@ -1230,7 +1212,7 @@ AnimationInterface::CsmaMacRxTrace(std::string context, Ptr<const Packet> p)
         NS_LOG_WARN("CsmaMacRxTrace: unknown Uid");
         return;
     }
-    /// \todo NS_ASSERT (CsmaPacketIsPending (AnimUid) == true);
+    /// @todo NS_ASSERT (CsmaPacketIsPending (AnimUid) == true);
     AnimPacketInfo& pktInfo = m_pendingCsmaPackets[animUid];
     NS_LOG_INFO("MacRxTrace for packet:" << animUid << " complete");
     OutputCsmaPacket(p, pktInfo);
@@ -1346,10 +1328,6 @@ AnimationInterface::ProtocolTypeToPendingPackets(AnimationInterface::ProtocolTyp
         pendingPackets = &m_pendingCsmaPackets;
         break;
     }
-    case AnimationInterface::WIMAX: {
-        pendingPackets = &m_pendingWimaxPackets;
-        break;
-    }
     case AnimationInterface::LTE: {
         pendingPackets = &m_pendingLtePackets;
         break;
@@ -1378,10 +1356,6 @@ AnimationInterface::ProtocolTypeToString(AnimationInterface::ProtocolType protoc
     }
     case AnimationInterface::CSMA: {
         result = "CSMA";
-        break;
-    }
-    case AnimationInterface::WIMAX: {
-        result = "WIMAX";
         break;
     }
     case AnimationInterface::LTE: {
@@ -1614,10 +1588,6 @@ AnimationInterface::ConnectCallbacks()
     Config::ConnectWithoutContextFailSafe(
         "/NodeList/*/$ns3::MobilityModel/CourseChange",
         MakeCallback(&AnimationInterface::MobilityCourseChangeTrace, this));
-    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::WimaxNetDevice/Tx",
-                            MakeCallback(&AnimationInterface::WimaxTxTrace, this));
-    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::WimaxNetDevice/Rx",
-                            MakeCallback(&AnimationInterface::WimaxRxTrace, this));
     Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::LteNetDevice/Tx",
                             MakeCallback(&AnimationInterface::LteTxTrace, this));
     Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::LteNetDevice/Rx",
@@ -1634,7 +1604,7 @@ AnimationInterface::ConnectCallbacks()
                             MakeCallback(&AnimationInterface::UanPhyGenTxTrace, this));
     Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::UanNetDevice/Phy/PhyRxBegin",
                             MakeCallback(&AnimationInterface::UanPhyGenRxTrace, this));
-    Config::ConnectFailSafe("/NodeList/*/$ns3::BasicEnergySource/RemainingEnergy",
+    Config::ConnectFailSafe("/NodeList/*/$ns3::energy::BasicEnergySource/RemainingEnergy",
                             MakeCallback(&AnimationInterface::RemainingEnergyTrace, this));
 
     ConnectLte();
@@ -1690,17 +1660,17 @@ AnimationInterface::ConnectCallbacks()
                             MakeCallback(&AnimationInterface::WifiPhyRxDropTrace, this));
 
     // LrWpan
-    Config::ConnectFailSafe("NodeList/*/DeviceList/*/$ns3::LrWpanNetDevice/Phy/PhyTxBegin",
+    Config::ConnectFailSafe("NodeList/*/DeviceList/*/$ns3::lrwpan::LrWpanNetDevice/Phy/PhyTxBegin",
                             MakeCallback(&AnimationInterface::LrWpanPhyTxBeginTrace, this));
-    Config::ConnectFailSafe("NodeList/*/DeviceList/*/$ns3::LrWpanNetDevice/Phy/PhyRxBegin",
+    Config::ConnectFailSafe("NodeList/*/DeviceList/*/$ns3::lrwpan::LrWpanNetDevice/Phy/PhyRxBegin",
                             MakeCallback(&AnimationInterface::LrWpanPhyRxBeginTrace, this));
-    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::LrWpanNetDevice/Mac/MacTx",
+    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::lrwpan::LrWpanNetDevice/Mac/MacTx",
                             MakeCallback(&AnimationInterface::LrWpanMacTxTrace, this));
-    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::LrWpanNetDevice/Mac/MacTxDrop",
+    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::lrwpan::LrWpanNetDevice/Mac/MacTxDrop",
                             MakeCallback(&AnimationInterface::LrWpanMacTxDropTrace, this));
-    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::LrWpanNetDevice/Mac/MacRx",
+    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::lrwpan::LrWpanNetDevice/Mac/MacRx",
                             MakeCallback(&AnimationInterface::LrWpanMacRxTrace, this));
-    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::LrWpanNetDevice/Mac/MacRxDrop",
+    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/$ns3::lrwpan::LrWpanNetDevice/Mac/MacRxDrop",
                             MakeCallback(&AnimationInterface::LrWpanMacRxDropTrace, this));
 }
 
@@ -2518,9 +2488,8 @@ AnimationInterface::WriteXmlRp(uint32_t nodeId,
     element.AddAttribute("id", nodeId);
     element.AddAttribute("d", destination.c_str());
     element.AddAttribute("c", rpElements.size());
-    for (auto i = rpElements.begin(); i != rpElements.end(); ++i)
+    for (const auto& rpElement : rpElements)
     {
-        Ipv4RoutePathElement rpElement = *i;
         AnimXmlElement rpeElement("rpe");
         rpeElement.AddAttribute("n", rpElement.nodeId);
         rpeElement.AddAttribute("nH", rpElement.nextHop.c_str());

@@ -28,14 +28,14 @@ EhtMacCapabilities::Serialize(Buffer::Iterator& start) const
                    (triggeredTxopSharingMode2Support << 3) | (restrictedTwtSupport << 4) |
                    (scsTrafficDescriptionSupport << 5) | (maxMpduLength << 6) |
                    (maxAmpduLengthExponentExtension << 8);
-    start.WriteHtolsbU16(val);
+    start.WriteU16(val);
 }
 
 uint16_t
 EhtMacCapabilities::Deserialize(Buffer::Iterator start)
 {
     Buffer::Iterator i = start;
-    uint16_t val = i.ReadLsbtohU16();
+    uint16_t val = i.ReadU16();
     epcsPriorityAccessSupported = val & 0x0001;
     ehtOmControlSupport = (val >> 1) & 0x0001;
     triggeredTxopSharingMode1Support = (val >> 2) & 0x0001;
@@ -87,7 +87,7 @@ EhtPhyCapabilities::Serialize(Buffer::Iterator& start) const
         (static_cast<uint64_t>(muBeamformer320Mhz) << 62) |
         (static_cast<uint64_t>(tbSoundingFeedbackRateLimit) << 63);
     uint8_t val2 = rx1024QamInWiderBwDlOfdmaSupport | (rx4096QamInWiderBwDlOfdmaSupport << 1);
-    start.WriteHtolsbU64(val1);
+    start.WriteU64(val1);
     start.WriteU8(val2);
 }
 
@@ -95,7 +95,7 @@ uint16_t
 EhtPhyCapabilities::Deserialize(Buffer::Iterator start)
 {
     Buffer::Iterator i = start;
-    uint64_t val1 = i.ReadLsbtohU64();
+    uint64_t val1 = i.ReadU64();
     uint8_t val2 = i.ReadU8();
 
     support320MhzIn6Ghz = (val1 >> 1) & 0x0001;
@@ -415,7 +415,7 @@ EhtCapabilities::ElementIdExt() const
 void
 EhtCapabilities::Print(std::ostream& os) const
 {
-    os << "EHT Capabilities="; // TODO
+    os << "EHT Capabilities=[]"; // TODO
 }
 
 uint16_t
@@ -594,7 +594,7 @@ EhtCapabilities::SetSupportedTxEhtMcsAndNss(EhtMcsAndNssSet::EhtMcsMapType mapTy
 }
 
 uint8_t
-EhtCapabilities::GetHighestSupportedRxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType)
+EhtCapabilities::GetHighestSupportedRxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType) const
 {
     const auto it = m_supportedEhtMcsAndNssSet.supportedEhtMcsAndNssSet.find(mapType);
     if (it == m_supportedEhtMcsAndNssSet.supportedEhtMcsAndNssSet.cend())
@@ -629,7 +629,7 @@ EhtCapabilities::GetHighestSupportedRxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType
 }
 
 uint8_t
-EhtCapabilities::GetHighestSupportedTxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType)
+EhtCapabilities::GetHighestSupportedTxMcs(EhtMcsAndNssSet::EhtMcsMapType mapType) const
 {
     const auto it = m_supportedEhtMcsAndNssSet.supportedEhtMcsAndNssSet.find(mapType);
     if (it == m_supportedEhtMcsAndNssSet.supportedEhtMcsAndNssSet.cend())

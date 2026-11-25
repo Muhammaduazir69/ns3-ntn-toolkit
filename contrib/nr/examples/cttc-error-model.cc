@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include "ns3/antenna-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-apps-module.h"
@@ -13,14 +14,13 @@
 #include "ns3/nr-module.h"
 #include "ns3/nr-point-to-point-epc-helper.h"
 #include "ns3/point-to-point-helper.h"
-#include <ns3/antenna-module.h>
 
 #include <chrono>
 
 /**
- * \file cttc-error-model.cc
- * \ingroup examples
- * \brief Error model example with fixed MCS: 1 gNB and 1 UE, multiple packets with varying fading
+ * @file cttc-error-model.cc
+ * @ingroup examples
+ * @brief Error model example with fixed MCS: 1 gNB and 1 UE, multiple packets with varying fading
  * conditions.
  *
  * This example allows the user to test the end-to-end performance with the new
@@ -164,15 +164,19 @@ main(int argc, char* argv[])
      * - IdealBeamformingHelper, which takes care of the beamforming part
      * - NrHelper, which takes care of creating and connecting the various
      * part of the NR stack
+     * - NrChannelHelper, which will setup the spectrum channel
      */
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
 
     // Put the pointers inside nrHelper
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
 
+    // Set the channel using UMi scenario
+    channelHelper->ConfigureFactories("UMi", "Default", "ThreeGpp");
     /*
      * Spectrum division. We create one operational band, with one CC, and the CC with a single
      * bandwidth part.
@@ -183,22 +187,15 @@ main(int argc, char* argv[])
 
     CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequencyBand,
                                                    bandwidthBand,
-                                                   numCcPerBand,
-                                                   BandwidthPartInfo::UMi_StreetCanyon);
+                                                   numCcPerBand);
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-
-    /*
-     * Attributes of ThreeGppChannelModel still cannot be set in our way.
-     * TODO: Coordinate with Tommaso
-     */
+    // Set attributes of the channel
     Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(updateChannelInterval));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
-    /*
-     * Initialize channel and pathloss, plus other things inside band.
-     */
-    nrHelper->InitializeOperationBand(&band);
+    // Set and create the channel in the band
+    channelHelper->AssignChannelsToBands({band});
     allBwps = CcBwpCreator::GetAllBwps({band});
 
     Packet::EnableChecking();
@@ -248,15 +245,10 @@ main(int argc, char* argv[])
     // gNb routing between Bearer and bandwidh part
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpId));
 
-    // Ue routing between Bearer and bandwidth part
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpId));
-
     NetDeviceContainer gnbNetDev = nrHelper->InstallGnbDevice(gNbNodes, allBwps);
     NetDeviceContainer ueNetDev = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+    nrHelper->AssignStreams({.gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     /*
      * Case (iii): Go node for node and change the attributes we have to setup
@@ -265,55 +257,20 @@ main(int argc, char* argv[])
 
     // Get the first netdevice (gnbNetDev.Get (0)) and the first bandwidth part (0)
     // and set the attribute.
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("Numerology", UintegerValue(numerologyBwp));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("TxPower", DoubleValue(totalTxPower));
-
-    // When all the configuration is done, explicitly call UpdateConfig ()
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("TxPower", DoubleValue(totalTxPower));
 
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
+    NodeContainer remoteHostContainer(remoteHost);
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
     internet.Install(ueNodes);
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // assign IP address to UEs, and install UDP downlink applications
     uint16_t dlPort = 1234;
@@ -322,17 +279,21 @@ main(int argc, char* argv[])
     ApplicationContainer sinkApps;
     NodeContainer txNodes;
     NodeContainer sinkNodes;
-    Ipv4InterfaceContainer sinkIps;
+    std::vector<Ipv4Address> sinkIps;
 
     if (isUl)
     {
-        sinkIps.Add(internetIpIfaces.Get(1));
+        sinkIps.push_back(remoteHostIpv4Address);
         sinkNodes = remoteHostContainer;
         txNodes = ueNodes;
     }
     else
     {
-        sinkIps = ueIpIface;
+        sinkIps.resize(ueIpIface.GetN());
+        for (uint32_t i = 0; i < ueIpIface.GetN(); i++)
+        {
+            sinkIps[i] = ueIpIface.GetAddress(i);
+        }
         sinkNodes = ueNodes;
         txNodes = remoteHostContainer;
     }
@@ -342,7 +303,7 @@ main(int argc, char* argv[])
     {
         for (uint32_t j = 0; j < sinkNodes.GetN(); ++j)
         {
-            UdpClientHelper dlClient(sinkIps.GetAddress(j), dlPort);
+            UdpClientHelper dlClient(sinkIps[j], dlPort);
             dlClient.SetAttribute("MaxPackets", UintegerValue(packets));
             dlClient.SetAttribute("PacketSize", UintegerValue(pktSize));
             dlClient.SetAttribute("Interval", TimeValue(packetInterval));
@@ -358,7 +319,7 @@ main(int argc, char* argv[])
         NS_ASSERT(client != nullptr);
         std::stringstream ss;
         ss << j;
-        client->TraceConnect("Rx", ss.str(), MakeCallback(&PrintRxPkt));
+        client->TraceConnect("RxWithoutAddress", ss.str(), MakeCallback(&PrintRxPkt));
     }
 
     // start UDP server and client apps

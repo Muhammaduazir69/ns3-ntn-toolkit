@@ -69,8 +69,15 @@ EmuEpcHelper::EmuEpcHelper()
       m_s1apUdpPort(36412)
 {
     NS_LOG_FUNCTION(this);
-    // To access the attribute value within the constructor
-    ObjectBase::ConstructSelf(AttributeConstructionList());
+}
+
+void
+EmuEpcHelper::NotifyConstructionCompleted()
+{
+    // ns-3.45+: CreateObject sets the TypeId and attributes after the constructor, so the
+    // attribute-dependent setup that used ConstructSelf() in the constructor runs here.
+    EpcHelper::NotifyConstructionCompleted();
+    NS_LOG_FUNCTION(this);
 }
 
 EmuEpcHelper::~EmuEpcHelper()
@@ -124,11 +131,6 @@ EmuEpcHelper::GetTypeId(void)
     return tid;
 }
 
-TypeId
-EmuEpcHelper::GetInstanceTypeId() const
-{
-    return GetTypeId();
-}
 
 void
 EmuEpcHelper::DoInitialize()

@@ -11,11 +11,11 @@
 
 #include "generic-battery-model.h"
 
-#include <ns3/assert.h>
-#include <ns3/double.h>
-#include <ns3/log.h>
-#include <ns3/simulator.h>
-#include <ns3/trace-source-accessor.h>
+#include "ns3/assert.h"
+#include "ns3/double.h"
+#include "ns3/log.h"
+#include "ns3/simulator.h"
+#include "ns3/trace-source-accessor.h"
 
 #include <cmath>
 
@@ -88,7 +88,7 @@ GenericBatteryModel::GetTypeId()
                           MakeDoubleChecker<double>())
             .AddAttribute("PeriodicEnergyUpdateInterval",
                           "Time between two consecutive periodic energy updates.",
-                          TimeValue(Seconds(1.0)),
+                          TimeValue(Seconds(1)),
                           MakeTimeAccessor(&GenericBatteryModel::SetEnergyUpdateInterval,
                                            &GenericBatteryModel::GetEnergyUpdateInterval),
                           MakeTimeChecker())
@@ -114,7 +114,7 @@ GenericBatteryModel::GenericBatteryModel()
       m_currentFiltered(0),
       m_entn(0),
       m_expZone(0),
-      m_lastUpdateTime(Seconds(0.0))
+      m_lastUpdateTime()
 {
     NS_LOG_FUNCTION(this);
 }

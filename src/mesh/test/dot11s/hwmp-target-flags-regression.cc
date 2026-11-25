@@ -121,7 +121,7 @@ HwmpDoRfRegressionTest::InstallApplications()
     m_clientSocketB->Connect(InetSocketAddress(m_interfaces.GetAddress(0), 9));
     m_clientSocketB->SetRecvCallback(MakeCallback(&HwmpDoRfRegressionTest::HandleReadClient, this));
     Simulator::ScheduleWithContext(m_clientSocketB->GetNode()->GetId(),
-                                   Seconds(2.0),
+                                   Seconds(2),
                                    &HwmpDoRfRegressionTest::SendDataB,
                                    this,
                                    m_clientSocketB);
@@ -143,6 +143,8 @@ void
 HwmpDoRfRegressionTest::CreateDevices()
 {
     int64_t streamsUsed = 0;
+    int64_t streamNumber = 0;
+    int64_t streamIncrement = 1000;
     // 1. setup WiFi
     YansWifiPhyHelper wifiPhy;
     // This test suite output was originally based on YansErrorRateModel
@@ -160,15 +162,18 @@ HwmpDoRfRegressionTest::CreateDevices()
     mesh.SetNumberOfInterfaces(1);
     NetDeviceContainer meshDevices = mesh.Install(wifiPhy, *m_nodes);
     // Four devices, ten streams per mac
-    streamsUsed += mesh.AssignStreams(meshDevices, streamsUsed);
+    streamsUsed = mesh.AssignStreams(meshDevices, streamNumber);
+    streamNumber += streamIncrement;
     NS_TEST_ASSERT_MSG_EQ(streamsUsed, (meshDevices.GetN() * 10), "Stream assignment mismatch");
-    streamsUsed += wifiChannel.AssignStreams(chan, streamsUsed);
-    NS_TEST_ASSERT_MSG_EQ(streamsUsed, (meshDevices.GetN() * 10), "Stream assignment mismatch");
+    streamsUsed = wifiChannel.AssignStreams(chan, streamNumber);
+    streamNumber += streamIncrement;
+    NS_TEST_ASSERT_MSG_EQ(streamsUsed, 0, "No stream assignments expected for WifiChannel");
 
     // 3. setup TCP/IP
     InternetStackHelper internetStack;
+    internetStack.SetIpv6StackInstall(false);
     internetStack.Install(*m_nodes);
-    streamsUsed += internetStack.AssignStreams(*m_nodes, streamsUsed);
+    internetStack.AssignStreams(*m_nodes, streamNumber);
     Ipv4AddressHelper address;
     address.SetBase("10.1.1.0", "255.255.255.0");
     m_interfaces = address.Assign(meshDevices);
@@ -193,7 +198,7 @@ HwmpDoRfRegressionTest::SendDataA(Ptr<Socket> socket)
         socket->Send(Create<Packet>(100));
         m_sentPktsCounterA++;
         Simulator::ScheduleWithContext(socket->GetNode()->GetId(),
-                                       Seconds(1.0),
+                                       Seconds(1),
                                        &HwmpDoRfRegressionTest::SendDataA,
                                        this,
                                        socket);
@@ -208,7 +213,7 @@ HwmpDoRfRegressionTest::SendDataB(Ptr<Socket> socket)
         socket->Send(Create<Packet>(100));
         m_sentPktsCounterB++;
         Simulator::ScheduleWithContext(socket->GetNode()->GetId(),
-                                       Seconds(1.0),
+                                       Seconds(1),
                                        &HwmpDoRfRegressionTest::SendDataB,
                                        this,
                                        socket);
@@ -223,7 +228,7 @@ HwmpDoRfRegressionTest::SendDataC(Ptr<Socket> socket)
         socket->Send(Create<Packet>(100));
         m_sentPktsCounterC++;
         Simulator::ScheduleWithContext(socket->GetNode()->GetId(),
-                                       Seconds(1.0),
+                                       Seconds(1),
                                        &HwmpDoRfRegressionTest::SendDataC,
                                        this,
                                        socket);

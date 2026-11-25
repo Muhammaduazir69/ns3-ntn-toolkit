@@ -77,8 +77,8 @@ class PointToPointEpcHelper : public EpcHelper
      *  \return The object TypeId.
      */
     static TypeId GetTypeId(void);
-    TypeId GetInstanceTypeId() const;
     virtual void DoDispose();
+    void NotifyConstructionCompleted() override;
 
     // inherited from EpcHelper
     virtual void AddEnb(Ptr<Node> enbNode, Ptr<NetDevice> lteEnbNetDevice, uint16_t cellId);

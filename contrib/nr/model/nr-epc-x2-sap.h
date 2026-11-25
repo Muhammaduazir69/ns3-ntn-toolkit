@@ -7,9 +7,10 @@
 #ifndef NR_EPC_X2_SAP_H
 #define NR_EPC_X2_SAP_H
 
-#include "nr-eps-bearer.h"
+#include "nr-qos-flow.h"
 
 #include "ns3/ipv4-address.h"
+#include "ns3/nr-export.h"
 #include "ns3/packet.h"
 
 #include <bitset>
@@ -31,9 +32,9 @@ class Node;
  */
 
 /**
- * \brief Common structures for NrEpcX2SapProvider and NrEpcX2SapUser
+ * @brief Common structures for NrEpcX2SapProvider and NrEpcX2SapUser
  */
-class NrEpcX2Sap
+class NR_EXPORT NrEpcX2Sap
 {
   public:
     virtual ~NrEpcX2Sap() = default;
@@ -43,16 +44,16 @@ class NrEpcX2Sap
      * it is used in the HANDOVER REQUEST message.
      * See section 9.1.1.1 for further info about the parameters
      */
-    struct ErabToBeSetupItem
+    struct NR_EXPORT ErabToBeSetupItem
     {
-        uint16_t erabId;                    ///< E-RAB ID
-        NrEpsBearer erabLevelQosParameters; ///< E-RAB level QOS parameters
-        bool dlForwarding;                  ///< DL forwarding
-        Ipv4Address transportLayerAddress;  ///< transport layer address
-        uint32_t gtpTeid;                   ///< TEID
+        uint16_t erabId;                   ///< E-RAB ID
+        NrQosFlow erabLevelQosParameters;  ///< E-RAB level QOS parameters
+        bool dlForwarding;                 ///< DL forwarding
+        Ipv4Address transportLayerAddress; ///< transport layer address
+        uint32_t gtpTeid;                  ///< TEID
 
         ErabToBeSetupItem()
-            : erabLevelQosParameters(NrEpsBearer(NrEpsBearer::GBR_CONV_VOICE))
+            : erabLevelQosParameters(NrQosFlow(NrQosFlow::GBR_CONV_VOICE))
         {
         }
     };
@@ -62,11 +63,11 @@ class NrEpcX2Sap
      * it is used in the HANDOVER REQUEST ACKNOWLEDGE message.
      * See section 9.1.1.2 for further info about the parameters
      */
-    struct ErabAdmittedItem
+    struct NR_EXPORT ErabAdmittedItem
     {
-        uint16_t erabId;    ///< E-RAB ID
-        uint32_t ulGtpTeid; ///< uplink GTP TEID
-        uint32_t dlGtpTeid; ///< downlink GTP TEID
+        uint16_t erabId{0};    ///< E-RAB ID
+        uint32_t ulGtpTeid{0}; ///< uplink GTP TEID
+        uint32_t dlGtpTeid{0}; ///< downlink GTP TEID
     };
 
     /**
@@ -74,7 +75,7 @@ class NrEpcX2Sap
      * it is used in the HANDOVER REQUEST ACKNOWLEDGE message.
      * See section 9.1.1.2 for further info about the parameters
      */
-    struct ErabNotAdmittedItem
+    struct NR_EXPORT ErabNotAdmittedItem
     {
         uint16_t erabId; ///< E-RAB ID
         uint16_t cause;  ///< cause
@@ -88,14 +89,14 @@ class NrEpcX2Sap
     static const uint16_t m_maxPdcpSn = 4096;
 
     /// ErabsSubjectToStatusTransferItem structure
-    struct ErabsSubjectToStatusTransferItem
+    struct NR_EXPORT ErabsSubjectToStatusTransferItem
     {
-        uint16_t erabId;                                    ///< ERAB ID
+        uint16_t erabId{0};                                 ///< ERAB ID
         std::bitset<m_maxPdcpSn> receiveStatusOfUlPdcpSdus; ///< receive status of UL PDCP SDUs
-        uint16_t ulPdcpSn;                                  ///< UL PDCP SN
-        uint32_t ulHfn;                                     ///< UL HFN
-        uint16_t dlPdcpSn;                                  ///< DL PDCP SN
-        uint32_t dlHfn;                                     ///< DL HFN
+        uint16_t ulPdcpSn{0};                               ///< UL PDCP SN
+        uint32_t ulHfn{0};                                  ///< UL HFN
+        uint16_t dlPdcpSn{0};                               ///< DL PDCP SN
+        uint32_t dlHfn{0};                                  ///< DL HFN
     };
 
     /**
@@ -115,7 +116,7 @@ class NrEpcX2Sap
      * it is used in the LOAD INFORMATION message.
      * See section 9.1.2.1 for further info about the parameters
      */
-    struct UlHighInterferenceInformationItem
+    struct NR_EXPORT UlHighInterferenceInformationItem
     {
         uint16_t targetCellId; ///< target cell ID
         std::vector<bool>
@@ -130,7 +131,7 @@ class NrEpcX2Sap
      * Note: You can use INT16_MIN value for -infinite value
      *       in the rntpThreshold field
      */
-    struct RelativeNarrowbandTxBand
+    struct NR_EXPORT RelativeNarrowbandTxBand
     {
         std::vector<bool> rntpPerPrbList;             ///< RNTP per prb list
         int16_t rntpThreshold{INT16_MIN};             ///< RNTP threshold
@@ -144,7 +145,7 @@ class NrEpcX2Sap
      * it is used in the LOAD INFORMATION message.
      * See section 9.1.2.1 for further info about the parameters
      */
-    struct CellInformationItem
+    struct NR_EXPORT CellInformationItem
     {
         uint16_t sourceCellId; ///< source cell ID
         std::vector<UlInterferenceOverloadIndicationItem>
@@ -172,7 +173,7 @@ class NrEpcX2Sap
      * it is used in the RESOURCE STATUS UPDATE message.
      * See section 9.2.45 for further info about the parameters
      */
-    struct CompositeAvailCapacity
+    struct NR_EXPORT CompositeAvailCapacity
     {
         uint16_t cellCapacityClassValue; ///< cell capacity class value
         uint16_t capacityValue;          ///< capacity value
@@ -183,7 +184,7 @@ class NrEpcX2Sap
      * it is used in the RESOURCE STATUS UPDATE message.
      * See section 9.1.2.14 for further info about the parameters
      */
-    struct CellMeasurementResultItem
+    struct NR_EXPORT CellMeasurementResultItem
     {
         uint16_t sourceCellId; ///< source cell id
 
@@ -212,11 +213,11 @@ class NrEpcX2Sap
     };
 
     /**
-     * \brief Parameters of the HANDOVER REQUEST message.
+     * @brief Parameters of the HANDOVER REQUEST message.
      *
      * See section 9.1.1.1 for further info about the parameters
      */
-    struct HandoverRequestParams
+    struct NR_EXPORT HandoverRequestParams
     {
         uint16_t oldGnbUeX2apId;                ///< old gNB UE X2 AP ID
         uint16_t cause;                         ///< cause
@@ -230,11 +231,11 @@ class NrEpcX2Sap
     };
 
     /**
-     * \brief Parameters of the HANDOVER REQUEST ACKNOWLEDGE message.
+     * @brief Parameters of the HANDOVER REQUEST ACKNOWLEDGE message.
      *
      * See section 9.1.1.2 for further info about the parameters
      */
-    struct HandoverRequestAckParams
+    struct NR_EXPORT HandoverRequestAckParams
     {
         uint16_t oldGnbUeX2apId;                             ///< old gNB UE X2 AP ID
         uint16_t newGnbUeX2apId;                             ///< new gNB UE X2 AP ID
@@ -246,11 +247,11 @@ class NrEpcX2Sap
     };
 
     /**
-     * \brief Parameters of the HANDOVER PREPARATION FAILURE message.
+     * @brief Parameters of the HANDOVER PREPARATION FAILURE message.
      *
      * See section 9.1.1.3 for further info about the parameters
      */
-    struct HandoverPreparationFailureParams
+    struct NR_EXPORT HandoverPreparationFailureParams
     {
         uint16_t oldGnbUeX2apId;         ///< old gNB UE X2 AP ID
         uint16_t sourceCellId;           ///< source cell ID
@@ -260,11 +261,11 @@ class NrEpcX2Sap
     };
 
     /**
-     * \brief Parameters of the SN STATUS TRANSFER message.
+     * @brief Parameters of the SN STATUS TRANSFER message.
      *
      * See section 9.1.1.4 for further info about the parameters
      */
-    struct SnStatusTransferParams
+    struct NR_EXPORT SnStatusTransferParams
     {
         uint16_t oldGnbUeX2apId; ///< old gNB UE X2 AP ID
         uint16_t newGnbUeX2apId; ///< new gNB UE X2 AP ID
@@ -275,11 +276,11 @@ class NrEpcX2Sap
     };
 
     /**
-     * \brief Parameters of the UE CONTEXT RELEASE message.
+     * @brief Parameters of the UE CONTEXT RELEASE message.
      *
      * See section 9.1.1.5 for further info about the parameters
      */
-    struct UeContextReleaseParams
+    struct NR_EXPORT UeContextReleaseParams
     {
         uint16_t oldGnbUeX2apId; ///< old gNB UE X2 AP ID
         uint16_t newGnbUeX2apId; ///< new gNB UE X2 AP ID
@@ -288,22 +289,22 @@ class NrEpcX2Sap
     };
 
     /**
-     * \brief Parameters of the LOAD INFORMATION message.
+     * @brief Parameters of the LOAD INFORMATION message.
      *
      * See section 9.1.2.1 for further info about the parameters
      */
-    struct LoadInformationParams
+    struct NR_EXPORT LoadInformationParams
     {
         uint16_t targetCellId{UINT16_MAX};                    ///< target cell ID
         std::vector<CellInformationItem> cellInformationList; ///< cell information list
     };
 
     /**
-     * \brief Parameters of the RESOURCE STATUS UPDATE message.
+     * @brief Parameters of the RESOURCE STATUS UPDATE message.
      *
      * See section 9.1.2.14 for further info about the parameters
      */
-    struct ResourceStatusUpdateParams
+    struct NR_EXPORT ResourceStatusUpdateParams
     {
         uint16_t targetCellId;      ///< target cell ID
         uint16_t gnb1MeasurementId; ///< gNB1 measurement ID
@@ -313,12 +314,12 @@ class NrEpcX2Sap
     };
 
     /**
-     * \brief Parameters of the UE DATA primitive
+     * @brief Parameters of the UE DATA primitive
      *
      * Forward UE data during the handover procedure from source gNB (sourceCellId)
      * to target gNB (targetCellId) using a GTP-U tunnel (gtpTeid)
      */
-    struct UeDataParams
+    struct NR_EXPORT UeDataParams
     {
         uint16_t sourceCellId; ///< source cell ID
         uint16_t targetCellId; ///< target cell ID
@@ -327,11 +328,11 @@ class NrEpcX2Sap
     };
 
     /**
-     * \brief Parameters of the HANDOVER CANCEL message.
+     * @brief Parameters of the HANDOVER CANCEL message.
      *
      * See section 9.1.1.6 for further info about the parameters
      */
-    struct HandoverCancelParams
+    struct NR_EXPORT HandoverCancelParams
     {
         uint16_t oldGnbUeX2apId; ///< old gNB UE X2 AP ID
         uint16_t newGnbUeX2apId; ///< new gNB UE X2 AP ID
@@ -345,7 +346,7 @@ class NrEpcX2Sap
  * These service primitives of this part of the X2 SAP
  * are provided by the X2 entity and issued by RRC entity
  */
-class NrEpcX2SapProvider : public NrEpcX2Sap
+class NR_EXPORT NrEpcX2SapProvider : public NrEpcX2Sap
 {
   public:
     //
@@ -354,55 +355,55 @@ class NrEpcX2SapProvider : public NrEpcX2Sap
 
     /**
      * Send handover request function
-     * \param params handover request parameters
+     * @param params handover request parameters
      */
     virtual void SendHandoverRequest(HandoverRequestParams params) = 0;
 
     /**
      * Send handover request ack function
-     * \param params the handover request ack parameters
+     * @param params the handover request ack parameters
      */
     virtual void SendHandoverRequestAck(HandoverRequestAckParams params) = 0;
 
     /**
      * Send handover preparation failure function
-     * \param params the handover preparation failure
+     * @param params the handover preparation failure
      */
     virtual void SendHandoverPreparationFailure(HandoverPreparationFailureParams params) = 0;
 
     /**
      * Send SN status transfer function
-     * \param params the SN status transfer parameters
+     * @param params the SN status transfer parameters
      */
     virtual void SendSnStatusTransfer(SnStatusTransferParams params) = 0;
 
     /**
      * Send UE context release function
-     * \param params the UE context release parameters
+     * @param params the UE context release parameters
      */
     virtual void SendUeContextRelease(UeContextReleaseParams params) = 0;
 
     /**
      * Send load information function
-     * \param params the load information parameters
+     * @param params the load information parameters
      */
     virtual void SendLoadInformation(LoadInformationParams params) = 0;
 
     /**
      * Send resource status update function
-     * \param params the resource statue update parameters
+     * @param params the resource statue update parameters
      */
     virtual void SendResourceStatusUpdate(ResourceStatusUpdateParams params) = 0;
 
     /**
      * Send UE data function
-     * \param params the UE data parameters
+     * @param params the UE data parameters
      */
     virtual void SendUeData(UeDataParams params) = 0;
 
     /**
-     * \brief Send handover Cancel to the target gNB
-     * \param params the handover cancel parameters
+     * @brief Send handover Cancel to the target gNB
+     * @param params the handover cancel parameters
      */
     virtual void SendHandoverCancel(HandoverCancelParams params) = 0;
 };
@@ -411,7 +412,7 @@ class NrEpcX2SapProvider : public NrEpcX2Sap
  * These service primitives of this part of the X2 SAP
  * are provided by the RRC entity and issued by the X2 entity
  */
-class NrEpcX2SapUser : public NrEpcX2Sap
+class NR_EXPORT NrEpcX2SapUser : public NrEpcX2Sap
 {
   public:
     /*
@@ -420,55 +421,55 @@ class NrEpcX2SapUser : public NrEpcX2Sap
 
     /**
      * Receive handover request function
-     * \param params the handover request parameters
+     * @param params the handover request parameters
      */
     virtual void RecvHandoverRequest(HandoverRequestParams params) = 0;
 
     /**
      * Receive handover request ack function
-     * \param params the handover request ack parameters
+     * @param params the handover request ack parameters
      */
     virtual void RecvHandoverRequestAck(HandoverRequestAckParams params) = 0;
 
     /**
      * Receive handover preparation failure function
-     * \param params the handover preparation failure parameters
+     * @param params the handover preparation failure parameters
      */
     virtual void RecvHandoverPreparationFailure(HandoverPreparationFailureParams params) = 0;
 
     /**
      * Receive SN status transfer function
-     * \param params the SN status transfer parameters
+     * @param params the SN status transfer parameters
      */
     virtual void RecvSnStatusTransfer(SnStatusTransferParams params) = 0;
 
     /**
      * Receive UE context release function
-     * \param params the receive UE context release parameters
+     * @param params the receive UE context release parameters
      */
     virtual void RecvUeContextRelease(UeContextReleaseParams params) = 0;
 
     /**
      * Receive load information function
-     * \param params the load information parameters
+     * @param params the load information parameters
      */
     virtual void RecvLoadInformation(LoadInformationParams params) = 0;
 
     /**
      * Receive resource status update function
-     * \param params the resource status update parameters
+     * @param params the resource status update parameters
      */
     virtual void RecvResourceStatusUpdate(ResourceStatusUpdateParams params) = 0;
 
     /**
      * Receive UE data function
-     * \param params UE data parameters
+     * @param params UE data parameters
      */
     virtual void RecvUeData(UeDataParams params) = 0;
 
     /**
      * Receive handover cancel function
-     * \param params the receive handover cancel parameters
+     * @param params the receive handover cancel parameters
      *
      */
     virtual void RecvHandoverCancel(HandoverCancelParams params) = 0;
@@ -486,7 +487,7 @@ class NrEpcX2SpecificEpcX2SapProvider : public NrEpcX2SapProvider
     /**
      * Constructor
      *
-     * \param x2 the owner class
+     * @param x2 the owner class
      */
     NrEpcX2SpecificEpcX2SapProvider(C* x2);
 
@@ -499,55 +500,55 @@ class NrEpcX2SpecificEpcX2SapProvider : public NrEpcX2SapProvider
 
     /**
      * Send handover request function
-     * \param params the handover request parameters
+     * @param params the handover request parameters
      */
     void SendHandoverRequest(HandoverRequestParams params) override;
 
     /**
      * Send handover request ack function
-     * \param params the handover request ack parameters
+     * @param params the handover request ack parameters
      */
     void SendHandoverRequestAck(HandoverRequestAckParams params) override;
 
     /**
      * Send handover preparation failure function
-     * \param params the handover preparation failure parameters
+     * @param params the handover preparation failure parameters
      */
     void SendHandoverPreparationFailure(HandoverPreparationFailureParams params) override;
 
     /**
      * Send SN status transfer function
-     * \param params the SN status transfer parameters
+     * @param params the SN status transfer parameters
      */
     void SendSnStatusTransfer(SnStatusTransferParams params) override;
 
     /**
      * Send UE context release function
-     * \param params the UE context release parameters
+     * @param params the UE context release parameters
      */
     void SendUeContextRelease(UeContextReleaseParams params) override;
 
     /**
      * Send load information function
-     * \param params the load information parameters
+     * @param params the load information parameters
      */
     void SendLoadInformation(LoadInformationParams params) override;
 
     /**
      * Send resource status update function
-     * \param params the resource status update parameters
+     * @param params the resource status update parameters
      */
     void SendResourceStatusUpdate(ResourceStatusUpdateParams params) override;
 
     /**
      * Send UE data function
-     * \param params the UE data parameters
+     * @param params the UE data parameters
      */
     void SendUeData(UeDataParams params) override;
 
     /**
-     * \brief Send handover Cancel to the target gNB
-     * \param params the handover cancel parameters
+     * @brief Send handover Cancel to the target gNB
+     * @param params the handover cancel parameters
      */
     void SendHandoverCancel(HandoverCancelParams params) override;
 
@@ -635,7 +636,7 @@ class NrEpcX2SpecificEpcX2SapUser : public NrEpcX2SapUser
     /**
      * Constructor
      *
-     * \param rrc RRC
+     * @param rrc RRC
      */
     NrEpcX2SpecificEpcX2SapUser(C* rrc);
 
@@ -648,55 +649,55 @@ class NrEpcX2SpecificEpcX2SapUser : public NrEpcX2SapUser
 
     /**
      * Receive handover request function
-     * \param params the receive handover request parameters
+     * @param params the receive handover request parameters
      */
     void RecvHandoverRequest(HandoverRequestParams params) override;
 
     /**
      * Receive handover request ack function
-     * \param params the receive handover request ack parameters
+     * @param params the receive handover request ack parameters
      */
     void RecvHandoverRequestAck(HandoverRequestAckParams params) override;
 
     /**
      * Receive handover preparation failure function
-     * \param params the receive handover preparation failure parameters
+     * @param params the receive handover preparation failure parameters
      */
     void RecvHandoverPreparationFailure(HandoverPreparationFailureParams params) override;
 
     /**
      * Receive SN status transfer function
-     * \param params the SN status transfer parameters
+     * @param params the SN status transfer parameters
      */
     void RecvSnStatusTransfer(SnStatusTransferParams params) override;
 
     /**
      * Receive UE context release function
-     * \param params the UE context release parameters
+     * @param params the UE context release parameters
      */
     void RecvUeContextRelease(UeContextReleaseParams params) override;
 
     /**
      * Receive load information function
-     * \param params the load information parameters
+     * @param params the load information parameters
      */
     void RecvLoadInformation(LoadInformationParams params) override;
 
     /**
      * Receive resource status update function
-     * \param params the receive resource status update
+     * @param params the receive resource status update
      */
     void RecvResourceStatusUpdate(ResourceStatusUpdateParams params) override;
 
     /**
      * Receive UE data function
-     * \param params the UE data parameters
+     * @param params the UE data parameters
      */
     void RecvUeData(UeDataParams params) override;
 
     /**
      * Receive handover cancel function
-     * \param params the receive handover cancel parameters
+     * @param params the receive handover cancel parameters
      *
      */
     void RecvHandoverCancel(HandoverCancelParams params) override;

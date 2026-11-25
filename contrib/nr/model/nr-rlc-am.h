@@ -10,7 +10,8 @@
 #include "nr-rlc-sequence-number.h"
 #include "nr-rlc.h"
 
-#include <ns3/event-id.h>
+#include "ns3/event-id.h"
+#include "ns3/nr-export.h"
 
 #include <map>
 #include <vector>
@@ -21,14 +22,14 @@ namespace ns3
 /**
  * LTE RLC Acknowledged Mode (AM), see 3GPP TS 36.322
  */
-class NrRlcAm : public NrRlc
+class NR_EXPORT NrRlcAm : public NrRlc
 {
   public:
     NrRlcAm();
     ~NrRlcAm() override;
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     void DoDispose() override;
@@ -36,14 +37,14 @@ class NrRlcAm : public NrRlc
     /**
      * RLC SAP
      *
-     * \param p packet
+     * @param p packet
      */
     void DoTransmitPdcpPdu(Ptr<Packet> p) override;
 
     /**
      * MAC SAP
      *
-     * \param txOpParams the NrMacSapUser::TxOpportunityParameters
+     * @param txOpParams the NrMacSapUser::TxOpportunityParameters
      */
     void DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams) override;
     /**
@@ -61,8 +62,8 @@ class NrRlcAm : public NrRlc
     void ExpireReorderingTimer();
     /// Expire poll retransmitter
     void ExpirePollRetransmitTimer();
-    /// Expire RBS timer
-    void ExpireRbsTimer();
+    /// Expire BSR timer
+    void ExpireBsrTimer();
 
     /**
      * method called when the T_status_prohibit timer expires
@@ -73,8 +74,8 @@ class NrRlcAm : public NrRlc
     /**
      * method called when the T_status_prohibit timer expires
      *
-     * \param seqNumber nr::SequenceNumber10
-     * \returns true is inside receiving window
+     * @param seqNumber nr::SequenceNumber10
+     * @returns true is inside receiving window
      */
     bool IsInsideReceivingWindow(nr::SequenceNumber10 seqNumber);
     //
@@ -82,28 +83,35 @@ class NrRlcAm : public NrRlc
     //   void ReassembleSnLessThan (uint16_t seqNumber);
     //
 
+    void ReestablishRxSide() override;
+
     /**
      * Reassemble and deliver
      *
-     * \param packet the packet
+     * @param packet the packet
      */
     void ReassembleAndDeliver(Ptr<Packet> packet);
 
     /**
-     * Report buffer status
+     * Buffer status report
      */
-    void DoReportBufferStatus();
+    void DoTransmitBufferStatusReport();
 
   private:
+    /// Grant the STATUS PDU robustness test access to private transmit window state
+    friend class NrRlcAmStaleStatusTestCase;
+    /// Grant the reassembly resynchronisation regression test access to private reassembly state
+    friend class NrRlcAmReassemblyResyncTestCase;
+
     /**
-     * \brief Store an incoming (from layer above us) PDU, waiting to transmit it
+     * @brief Store an incoming (from layer above us) PDU, waiting to transmit it
      */
-    struct TxPdu
+    struct NR_EXPORT TxPdu
     {
         /**
-         * \brief TxPdu default constructor
-         * \param pdu the PDU
-         * \param time the arrival time
+         * @brief TxPdu default constructor
+         * @param pdu the PDU
+         * @param time the arrival time
          */
         TxPdu(const Ptr<Packet>& pdu, const Time& time)
             : m_pdu(pdu),
@@ -120,7 +128,7 @@ class NrRlcAm : public NrRlc
     std::vector<TxPdu> m_txonBuffer; ///< Transmission buffer
 
     /// RetxPdu structure
-    struct RetxPdu
+    struct NR_EXPORT RetxPdu
     {
         Ptr<Packet> m_pdu;    ///< PDU
         uint16_t m_retxCount; ///< retransmit count
@@ -141,7 +149,7 @@ class NrRlcAm : public NrRlc
     uint32_t m_statusPduBufferSize; ///< status PDU buffer size
 
     /// PduBuffer structure
-    struct PduBuffer
+    struct NR_EXPORT PduBuffer
     {
         nr::SequenceNumber10 m_seqNumber;      ///< sequence number
         std::list<Ptr<Packet>> m_byteSegments; ///< byte segments
@@ -151,11 +159,7 @@ class NrRlcAm : public NrRlc
 
     std::map<uint16_t, PduBuffer> m_rxonBuffer; ///< Reception buffer
 
-    Ptr<Packet> m_controlPduBuffer; ///< Control PDU buffer (just one PDU)
-
     // SDU reassembly
-    //   std::vector < Ptr<Packet> > m_reasBuffer;     // Reassembling buffer
-    //
     std::list<Ptr<Packet>> m_sdusBuffer; ///< List of SDUs in a packet (PDU)
 
     /**
@@ -194,8 +198,8 @@ class NrRlcAm : public NrRlc
     Time m_reorderingTimerValue;     ///< reordering timer value
     EventId m_statusProhibitTimer;   ///< status prohibit timer
     Time m_statusProhibitTimerValue; ///< status prohibit timer value
-    EventId m_rbsTimer;              ///< RBS timer
-    Time m_rbsTimerValue;            ///< RBS timer value
+    EventId m_bsrTimer;              ///< BSR timer
+    Time m_bsrTimerValue;            ///< BSR timer value
 
     /**
      * Configurable parameters. See section 7.4 in TS 36.322
@@ -203,6 +207,10 @@ class NrRlcAm : public NrRlc
     uint16_t m_maxRetxThreshold; ///< \todo How these parameters are configured???
     uint16_t m_pollPdu;          ///< poll PDU
     uint16_t m_pollByte;         ///< poll byte
+
+    /// Set once the maxRetxThreshold has been reached and the RLF callback fired,
+    /// so the radio-link-failure indication is raised at most once per RLC entity.
+    bool m_maxRetxReachedNotified{false};
 
     bool m_txOpportunityForRetxAlwaysBigEnough; ///< transmit opportunity for retransmit?
     bool m_pollRetransmitTimerJustExpired;      ///< poll retransmit timer just expired?

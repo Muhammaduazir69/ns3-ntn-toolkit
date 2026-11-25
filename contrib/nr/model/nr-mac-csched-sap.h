@@ -8,14 +8,16 @@
 #include "beam-id.h"
 #include "nr-phy-mac-common.h"
 
+#include "ns3/nr-export.h"
+
 #include <vector>
 
 namespace ns3
 {
 
 /**
- * \ingroup scheduler
- * \brief Provides the CSCHED SAP
+ * @ingroup scheduler
+ * @brief Provides the CSCHED SAP
  *
  * This abstract class defines the MAC Scheduler interface specified in the
  * Femto Forum Technical Document:
@@ -27,11 +29,11 @@ namespace ns3
  * You can found an example of the implementation of this interface
  * in the SampleNrMacCschedSapProvider and SampleFfMacCschedSapuser classes
  */
-class NrMacCschedSapProvider
+class NR_EXPORT NrMacCschedSapProvider
 {
   public:
     /**
-     * \brief ~NrMacCschedSapProvider
+     * @brief ~NrMacCschedSapProvider
      */
     virtual ~NrMacCschedSapProvider()
     {
@@ -52,7 +54,7 @@ class NrMacCschedSapProvider
      * Parameters of the CSCHED_CELL_CONFIG_REQ primitive.
      * See section 4.1.1 for a detailed description of the parameters.
      */
-    struct CschedCellConfigReqParameters
+    struct NR_EXPORT CschedCellConfigReqParameters
     {
         uint8_t m_puschHoppingOffset;
 
@@ -122,7 +124,7 @@ class NrMacCschedSapProvider
      * Parameters of the CSCHED_UE_CONFIG_REQ primitive.
      * See section 4.1.3 for a detailed description of the parameters.
      */
-    struct CschedUeConfigReqParameters
+    struct NR_EXPORT CschedUeConfigReqParameters
     {
         uint16_t m_rnti;
         BeamId m_beamId; //!< Beam Id
@@ -181,7 +183,7 @@ class NrMacCschedSapProvider
      * Parameters of the CSCHED_LC_CONFIG_REQ primitive.
      * See section 4.1.5 for a detailed description of the parameters.
      */
-    struct CschedLcConfigReqParameters
+    struct NR_EXPORT CschedLcConfigReqParameters
     {
         uint16_t m_rnti;
         bool m_reconfigureFlag;
@@ -195,7 +197,7 @@ class NrMacCschedSapProvider
      * Parameters of the CSCHED_LC_RELEASE_REQ primitive.
      * See section 4.1.7 for a detailed description of the parameters.
      */
-    struct CschedLcReleaseReqParameters
+    struct NR_EXPORT CschedLcReleaseReqParameters
     {
         uint16_t m_rnti;
 
@@ -208,7 +210,7 @@ class NrMacCschedSapProvider
      * Parameters of the CSCHED_UE_RELEASE_REQ primitive.
      * See section 4.1.9 for a detailed description of the parameters.
      */
-    struct CschedUeReleaseReqParameters
+    struct NR_EXPORT CschedUeReleaseReqParameters
     {
         uint16_t m_rnti;
 
@@ -221,7 +223,7 @@ class NrMacCschedSapProvider
     //
 
     /**
-     * \brief CSCHED_CELL_CONFIG_REQ
+     * @brief CSCHED_CELL_CONFIG_REQ
      */
     virtual void CschedCellConfigReq(const struct CschedCellConfigReqParameters& params) = 0;
 
@@ -236,7 +238,7 @@ class NrMacCschedSapProvider
   private:
 };
 
-class NrMacCschedSapUser
+class NR_EXPORT NrMacCschedSapUser
 {
   public:
     virtual ~NrMacCschedSapUser()
@@ -258,7 +260,7 @@ class NrMacCschedSapUser
      * Parameters of the CSCHED_CELL_CONFIG_CNF primitive.
      * See section 4.1.2 for a detailed description of the parameters.
      */
-    struct CschedCellConfigCnfParameters
+    struct NR_EXPORT CschedCellConfigCnfParameters
     {
         Result_e m_result;
 
@@ -269,7 +271,7 @@ class NrMacCschedSapUser
      * Parameters of the CSCHED_UE_CONFIG_CNF primitive.
      * See section 4.1.4 for a detailed description of the parameters.
      */
-    struct CschedUeConfigCnfParameters
+    struct NR_EXPORT CschedUeConfigCnfParameters
     {
         uint16_t m_rnti;
         Result_e m_result;
@@ -281,7 +283,7 @@ class NrMacCschedSapUser
      * Parameters of the CSCHED_LC_CONFIG_CNF primitive.
      * See section 4.1.6 for a detailed description of the parameters.
      */
-    struct CschedLcConfigCnfParameters
+    struct NR_EXPORT CschedLcConfigCnfParameters
     {
         uint16_t m_rnti;
         Result_e m_result;
@@ -295,7 +297,7 @@ class NrMacCschedSapUser
      * Parameters of the CSCHED_LC_RELEASE_CNF primitive.
      * See section 4.1.8 for a detailed description of the parameters.
      */
-    struct CschedLcReleaseCnfParameters
+    struct NR_EXPORT CschedLcReleaseCnfParameters
     {
         uint16_t m_rnti;
         Result_e m_result;
@@ -309,7 +311,7 @@ class NrMacCschedSapUser
      * Parameters of the CSCHED_UE_RELEASE_CNF primitive.
      * See section 4.1.10 for a detailed description of the parameters.
      */
-    struct CschedUeReleaseCnfParameters
+    struct NR_EXPORT CschedUeReleaseCnfParameters
     {
         uint16_t m_rnti;
         Result_e m_result;
@@ -321,7 +323,7 @@ class NrMacCschedSapUser
      * Parameters of the CSCHED_UE_CONFIG_UPDATE_IND primitive.
      * See section 4.1.11 for a detailed description of the parameters.
      */
-    struct CschedUeConfigUpdateIndParameters
+    struct NR_EXPORT CschedUeConfigUpdateIndParameters
     {
         uint16_t m_rnti;
         uint8_t m_transmissionMode;
@@ -333,7 +335,7 @@ class NrMacCschedSapUser
      * Parameters of the CSCHED_CELL_CONFIG_UPDATE_IND primitive.
      * See section 4.1.12 for a detailed description of the parameters.
      */
-    struct CschedCellConfigUpdateIndParameters
+    struct NR_EXPORT CschedCellConfigUpdateIndParameters
     {
         uint8_t m_prbUtilizationDl;
         uint8_t m_prbUtilizationUl;

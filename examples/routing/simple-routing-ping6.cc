@@ -30,17 +30,17 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("SimpleRoutingPing6Example");
 
 /**
- * \class StackHelper
- * \brief Helper to set or get some IPv6 information about nodes.
+ * @class StackHelper
+ * @brief Helper to set or get some IPv6 information about nodes.
  */
 class StackHelper
 {
   public:
     /**
-     * \brief Add an address to a IPv6 node.
-     * \param n node
-     * \param interface interface index
-     * \param address IPv6 address to add
+     * @brief Add an address to a IPv6 node.
+     * @param n node
+     * @param interface interface index
+     * @param address IPv6 address to add
      */
     inline void AddAddress(Ptr<Node>& n, uint32_t interface, Ipv6Address address)
     {
@@ -49,8 +49,8 @@ class StackHelper
     }
 
     /**
-     * \brief Print the routing table.
-     * \param n the node
+     * @brief Print the routing table.
+     * @param n the node
      */
     inline void PrintRoutingTable(Ptr<Node>& n)
     {
@@ -136,8 +136,8 @@ main(int argc, char** argv)
     ping.SetAttribute("Count", UintegerValue(maxPacketCount));
     ping.SetAttribute("Size", UintegerValue(packetSize));
     ApplicationContainer apps = ping.Install(net1.Get(0));
-    apps.Start(Seconds(2.0));
-    apps.Stop(Seconds(20.0));
+    apps.Start(Seconds(2));
+    apps.Stop(Seconds(20));
 
     AsciiTraceHelper ascii;
     csma.EnableAsciiAll(ascii.CreateFileStream("simple-routing-ping6.tr"));

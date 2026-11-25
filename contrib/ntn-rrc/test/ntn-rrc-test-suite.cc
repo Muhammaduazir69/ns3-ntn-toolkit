@@ -85,7 +85,7 @@ class NtnTimingAdvanceRegenerativeTest : public TestCase
 {
   public:
     NtnTimingAdvanceRegenerativeTest()
-        : TestCase("Regenerative TA is the round-trip service-link 2 d / c")
+        : TestCase("Regenerative TA is the round-trip service-link 2 d - c")
     {
     }
 
@@ -483,7 +483,7 @@ class Sib19FieldsPopulatedAndInRangeTest : public TestCase
 {
   public:
     Sib19FieldsPopulatedAndInRangeTest()
-        : TestCase("RRC-6: SIB19 fills driftVariation/ulSyncValidity and clamps K_offset/kMac "
+        : TestCase("RRC-6: SIB19 fills driftVariation-ulSyncValidity and clamps K_offset-kMac "
                    "to their TS 38.331 ranges")
     {
     }
@@ -1633,7 +1633,7 @@ class DrxNtnHarqAndSrTimersTest : public TestCase
 {
   public:
     DrxNtnHarqAndSrTimersTest()
-        : TestCase("Wave 6A: DRX HARQ RTT / retransmission / SR timers extended by UE-gNB RTT")
+        : TestCase("Wave 6A: DRX HARQ RTT - retransmission - SR timers extended by UE-gNB RTT")
     {
     }
 

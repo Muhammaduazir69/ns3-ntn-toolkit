@@ -69,6 +69,7 @@ ScenarioParameters::SetScenarioParameters(const ScenarioParameters& scenario)
 {
     m_isd = scenario.m_isd;
     m_bsHeight = scenario.m_bsHeight;
+    m_picoBsHeight = scenario.m_picoBsHeight;
     m_utHeight = scenario.m_utHeight;
     m_sectorization = scenario.m_sectorization;
     m_minBsUtDistance = scenario.m_minBsUtDistance;
@@ -80,6 +81,7 @@ ScenarioParameters::SetUMaParameters()
 {
     m_isd = 1732;
     m_bsHeight = 30.0;
+    m_picoBsHeight = 10.0;
     m_utHeight = 1.5;
     m_sectorization = SiteSectorizationType::TRIPLE;
     m_minBsUtDistance = 30.203; // minimum 2D distance is 10 meters considering UE height of 1.5 m
@@ -91,6 +93,7 @@ ScenarioParameters::SetUMiParameters()
 {
     m_isd = 500;
     m_bsHeight = 10.0;
+    m_picoBsHeight = 3.0;
     m_utHeight = 1.5;
     m_sectorization = SiteSectorizationType::TRIPLE;
     m_minBsUtDistance = 10;
@@ -102,6 +105,7 @@ ScenarioParameters::SetRMaParameters()
 {
     m_isd = 7000;
     m_bsHeight = 45.0;
+    m_picoBsHeight = 10.0;
     m_utHeight = 1.5;
     m_sectorization = SiteSectorizationType::TRIPLE;
     m_minBsUtDistance = 44.63; // minimum 2D distance is 10 meters considering UE height of 1.5 m

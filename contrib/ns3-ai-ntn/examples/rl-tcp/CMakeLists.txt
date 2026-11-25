@@ -5,6 +5,8 @@ build_lib_example(
             use-gym/tcp-rl-env.cc
             use-gym/tcp-rl.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
+            ${libntn-constellation}
             ${libns3-ai-ntn}
             ${libcore}
             ${libpoint-to-point}
@@ -25,6 +27,8 @@ build_lib_example(
             use-msg/tcp-rl.cc
             use-msg/tcp-rl-env.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
+            ${libntn-constellation}
             ${libns3-ai-ntn}
             ${libcore}
             ${libpoint-to-point}
@@ -44,7 +48,9 @@ set_target_properties(ns3ai_rltcp_msg_py PROPERTIES
 target_link_libraries(ns3ai_rltcp_msg_py PRIVATE ${libns3-ai-ntn})
 
 # Build Python interface along with C++ lib
-add_dependencies(ns3ai_rltcp_msg ns3ai_rltcp_msg_py)
+if(TARGET ns3ai_rltcp_msg)
+  add_dependencies(ns3ai_rltcp_msg ns3ai_rltcp_msg_py)
+endif()
 
 # Check if libtorch exists, if true, enable the pure C++ example
 if(NS3AI_LIBTORCH_EXAMPLES)

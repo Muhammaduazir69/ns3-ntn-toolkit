@@ -27,6 +27,7 @@
 // back when the TPN switches the route to the rising satB.
 //
 // Quick test:  --simSeconds=120
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
@@ -314,6 +315,8 @@ main(int argc, char* argv[])
     });
 
     Simulator::Stop(Seconds(simSeconds));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 
     std::printf("# === summary ===  tpnSwitches=%u smoDecisions=%zu inferences=%lu\n",
@@ -328,6 +331,9 @@ main(int argc, char* argv[])
                         fs.LossRatio(), fs.ThroughputMbps());
         }
     }
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "oran-ntn-cross-domain-slice", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

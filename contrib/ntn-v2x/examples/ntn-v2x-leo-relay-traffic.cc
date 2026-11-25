@@ -44,6 +44,7 @@
  * Quick test:  --simSeconds=60 --bsmHz=10 --fcdTrace=<path/to/fcd.csv>
  *              --simSeconds=30 --v2v=pc5 --uplink=nr
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -484,6 +485,8 @@ RunPc5Nr(double simSeconds,
                 "server; %u background PC5 vehicles, BSM %.0f Hz x %u B, SPS %u ms\n",
                 nBackground, bsmHz, bsmBytes, prsvp);
     Simulator::Stop(Seconds(simSeconds + 1.0));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
@@ -802,6 +805,8 @@ main(int argc, char* argv[])
     // delay and ungated links.
     Simulator::Schedule(Seconds(0.0), &Tick);
     Simulator::Stop(Seconds(simSeconds + 1));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
 
     // KPIs measured from in-band NtnOranPayloadHeader primitives at the sink.
@@ -833,6 +838,8 @@ main(int argc, char* argv[])
     {
         g_csv.close();
     }
+    // ntn-dataset@1: the default (geometric relay) path is not built on the real-stack helper.
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "ntn-v2x-leo-relay-traffic", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

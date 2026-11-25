@@ -29,9 +29,37 @@ use this Python script to check and fix all formatting guidelines followed by |n
 Clang-format installation
 =========================
 
-Clang-format can be installed using your OS's package manager. Please note that you
-should install one of the supported versions of clang-format, which are listed in the
-following section.
+Clang-format can be installed using one of two methods.
+Please note that you should install one of the supported versions of clang-format,
+which are listed in the ``RELEASE_NOTES.md`` file.
+
+The first method is to install clang-format using the package manager available in the
+Linux distribution (e.g., Ubuntu's ``apt``).
+For example, in Ubuntu 24.04, clang-format 20 can be installed with the following command:
+
+.. sourcecode:: console
+
+  sudo apt install clang-format-20
+
+If the package manager does not provide one of the clang-format versions supported by |ns3|,
+users can install clang-format using Python's pip tool.
+
+The following command will install the latest version of clang-format:
+
+.. sourcecode:: console
+
+  pip3 install clang-format
+
+To install a specific version of clang-format, use the following command:
+
+.. sourcecode:: console
+
+  pip3 install clang-format==<version_number>
+
+where ``<version_number>`` is something like ``20.1.8`` (MAJOR.MINOR.PATCH).
+
+Starting with Python 3.11, pip requires users to either create a virtual environment (venv)
+or add the ``--break-system-packages`` flag to the installation commands above.
 
 Supported versions of clang-format
 ==================================
@@ -40,13 +68,8 @@ Since each new major version of clang-format can add or modify properties,
 newer versions of clang-format might produce different outputs compared to
 previous versions.
 
-The following list contains the set of clang-format versions that are verified
-to produce consistent output among themselves.
-
-* clang-format-17
-* clang-format-16
-* clang-format-15
-* clang-format-14
+The list of clang-format versions that are verified to produce consistent output
+among themselves are listed in the ``RELEASE_NOTES.md`` document.
 
 Integration with IDEs
 =====================
@@ -56,10 +79,11 @@ read the ``.clang-format`` file and automatically format the code on save or on 
 
 Please refer to the documentation of your IDE for more information.
 Some examples of IDE integration are provided in
-`clang-format documentation <https://clang.llvm.org/docs/ClangFormat.html>`_
+`clang-format documentation <https://clang.llvm.org/docs/ClangFormat.html>`_.
 
-As an example, VS Code can be configured to automatically format code on save, on paste
-and on type by enabling the following settings:
+As an example, VS Code's `C/C++ extension <https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools>`_
+contains the latest clang-format binary.
+VS Code can be configured to automatically format code on save, on paste and on type by enabling the following settings:
 
 .. sourcecode:: json
 
@@ -150,25 +174,48 @@ source code files. Additionally, it performs other manual checks and fixes in te
 We recommend running this script over your newly introduced C++ files prior to submission
 as a Merge Request.
 
-The script performs multiple style checks. By default, the script runs the following checks:
-
-* Check code formatting using clang-format. Respects clang-format guards.
-* Check if local ``#include`` headers do not use the "ns3/" prefix. Respects clang-format guards.
-* Check if there are no trailing whitespace. Always checked.
-* Check if there are no tabs. Respects clang-format guards.
-* Check if source code files use SPDX licenses rather than GPL license text. Respects clang-format guards.
-
-The process returns a zero exit code if all files adhere to these rules.
+The script performs multiple style checks. It returns a zero exit code if all files adhere to these rules.
 If there are files that do not comply with the rules, the process returns a non-zero
 exit code and lists the respective files. This mode is useful for developers editing
 their code and for the GitLab CI/CD pipeline to check if the codebase is well formatted.
-All checks are enabled by default. Users can disable specific checks using the corresponding
-flags:
 
-* ``--no-formatting``
-* ``--no-include-prefixes``
-* ``--no-whitespace``
-* ``--no-tabs``
+The script runs the checks explained in the following table.
+All checks are enabled by default.
+Users can disable specific checks using the corresponding flags.
+
+.. list-table::
+  :header-rows: 1
+
+  * - Check
+    - Description
+    - Flag to Disable Check
+  * - Formatting
+    - Check code formatting using clang-format. Respects clang-format guards.
+    - ``--no-formatting``
+  * - #include "ns3/" prefixes
+    - Check if local ``#include`` headers do not use the "ns3/" prefix. Respects clang-format guards.
+    - ``--no-include-prefixes``
+  * - #include quotes
+    - Check if ns-3 ``#include`` headers use quotes (``""``) instead of angle brackets (``<>``). Respects clang-format guards.
+    - ``--no-include-quotes``
+  * - Doxygen tags
+    - Check if Doxygen tags use ``@`` rather than ``\\``. Respects clang-format guards.
+    - ``--no-doxygen-tags``
+  * - SPDX Licenses
+    - Check if source code use SPDX licenses rather than GPL license text. Respects clang-format guards.
+    - ``--no-licenses``
+  * - Emacs comments
+    - Check if source code does not have emacs file style comments. Respects clang-format guards.
+    - ``--no-emacs``
+  * - Trailing whitespace
+    - Check if there are no trailing whitespace. Always checked.
+    - ``--no-whitespace``
+  * - Tabs
+    - Check if there are no tabs. Respects clang-format guards.
+    - ``--no-tabs``
+  * - File encoding
+    - Check if files have the correct encoding (UTF-8). Always checked.
+    - ``--no-encoding``
 
 Additional information about the formatting issues detected by the script can be enabled
 by adding the ``-v, --verbose`` flag.
@@ -221,8 +268,8 @@ Clang-format can be installed using your OS's package manager. Please note that 
 should install one of the supported versions of clang-format, which are listed in the
 following section.
 
-Minimum clang-tidy version
-==========================
+Supported versions of clang-tidy
+================================
 
 Since clang-tidy is a linter that analyzes code and outputs errors found during
 the analysis, developers can use different versions of clang-tidy on the workflow.
@@ -231,9 +278,10 @@ Therefore, it is recommended to use the latest version available.
 
 To ensure consistency among developers, |ns3| defines a minimum version of clang-tidy,
 whose warnings must not be ignored. Therefore, developers should, at least, scan their
-code with the minimum version of clang-tidy.
+code with the minimum version of clang-tidy. However, more recent versions can be used,
+which will produce better warnings.
 
-The minimum version is clang-tidy-14.
+The supported versions of clang-tidy are listed in the ``RELEASE_NOTES.md`` document.
 
 Integration with IDEs
 =====================
@@ -258,7 +306,7 @@ run the following command:
 
 Due to the integration of clang-tidy with CMake, clang-tidy can be run while building
 |ns3|. In this way, clang-tidy errors will be shown alongside build errors on the terminal.
-To build |ns3| and run clang-tidy, run the the following command:
+To build |ns3| and run clang-tidy, run the following command:
 
 .. sourcecode:: console
 
@@ -288,6 +336,29 @@ When running clang-tidy, please note that:
   must be made by the developer.
 
 - Enabling clang-tidy will add time to the build process (in the order of minutes).
+
+clang-tidy integration with GitLab CI/CD
+========================================
+
+To ensure that the |ns3| codebase follows the guidelines enforced by clang-tidy,
+there are two clang-tidy jobs in the GitLab CI/CD pipeline.
+
+* ``clang-tidy-diff-scan``: This job runs a clang-tidy scan on Merge Requests (MRs),
+  and only scans the files modified by the MR. However, if the MR modifies clang-tidy
+  or CI/CD configurations, this job is skipped in favor of a full scan.
+* ``clang-tidy-full-scan``: This job runs a clang-tidy scan on all C++ files.
+  It runs automatically whenever new commits are pushed to the master branch, in
+  scheduled pipelines, and when clang-tidy or CI/CD configurations are changed.
+
+The ``clang-tidy-full-scan`` job can also be run in MR pipelines by manually triggering
+the job in the GitLab UI.
+Although it is not necessary in most cases, this job can be useful in MRs with large
+refactorings or changes to class constructors, which might trigger warnings in files
+that were not directly modified by the MR, but which might be affected by its changes
+(for example, modernize-use-auto warnings).
+
+To start the job, go to the MR's Pipelines tab, click on the ``code linting`` stage,
+and then click on the "play button" of the ``clang-tidy-full-scan`` job.
 
 Disable clang-tidy analysis in specific lines
 =============================================
@@ -680,7 +751,7 @@ is described in the `Doxygen website <https://www.doxygen.nl/index.html>`_.
   {
 
   /**
-   * \brief short one-line description of the purpose of your class
+   * @brief short one-line description of the purpose of your class
    *
    * A longer description of the purpose of your class after a blank
    * empty line.
@@ -693,8 +764,8 @@ is described in the `Doxygen website <https://www.doxygen.nl/index.html>`_.
       /**
        * A detailed description of the purpose of the method.
        *
-       * \param firstParam a short description of the purpose of this parameter
-       * \return a short description of what is returned from this function.
+       * @param firstParam a short description of the purpose of this parameter
+       * @return a short description of what is returned from this function.
        */
       int DoSomething(int firstParam);
 
@@ -770,7 +841,7 @@ For standard headers, use the C++ style of inclusion:
 
   .. sourcecode:: cpp
 
-    #include <ns3/header.h>
+    #include "ns3/header.h"
 
 - inside .cc files, use
 
@@ -782,7 +853,7 @@ For standard headers, use the C++ style of inclusion:
 
   .. sourcecode:: cpp
 
-    #include <ns3/header.h>
+    #include "ns3/header.h"
 
 Variables and constants
 =======================
@@ -829,21 +900,52 @@ file (``*.cc``).
   constexpr uint8_t STATUS_PDU{0};
 
 When declaring variables that are easily deducible from context, prefer to declare them
-with ``auto`` instead of repeating the type name. Not only does this improve code readability,
-by making lines shorter, but it also facilitates future code refactoring.
+with ``auto`` instead of repeating the type name. Not only does this improve code readability
+(by reducing redundancy), but it also facilitates future code refactoring.
 
 .. sourcecode:: cpp
 
-  // Avoid repeating the type name when declaring iterators or pointers, and casting variables
-  std::map<uint32_t, std::string>::const_iterator it = myMap.find(key);
+  // Avoid repeating the type name when declaring variables if the type is obvious from the context
   int* ptr = new int[10];
   uint8_t m = static_cast<uint8_t>(97 + (i % 26));
 
   // Prefer to declare them with auto
-  auto it = myMap.find(key);
   auto* ptr = new int[10];
   auto m = static_cast<uint8_t>(97 + (i % 26));
 
+Containers (maps, sets, vectors) and iterators require understanding how C++ type deduction
+works.  Suppose that you want a const iterator when using ``std::map::find()``, matching the
+below declaration:
+
+.. sourcecode:: cpp
+
+  std::map<uint32_t, std::string>::const_iterator it = myMap.find(key);
+
+If ``myMap`` has been declared as a non-const map (which is the typical case in |ns3|), then the
+following will not result in a ``const_iterator`` because ``find()`` returns a non-const iterator
+on a non-const map:
+
+.. sourcecode:: cpp
+
+  auto it = myMap.find(key);
+
+Instead, if you would like auto to deduce a const iterator from ``find()``, you need to make
+``myMap`` into a const lvalue reference, such as:
+
+.. sourcecode:: cpp
+
+  auto it = std::as_const(myMap).find(key);
+
+Note that ``std::map::begin()`` and ``std::map::end()`` have ``cbegin()`` and ``cend()`` variants
+that explicitly return const iterators, but ``std::map::find()`` and some other methods lack
+such variants, requiring use of ``std::as_const()`` as shown above.
+
+.. sourcecode:: cpp
+
+  auto it = myMap.begin();  // declares a non-const iterator
+  auto cit = myMap.cbegin();  // declares a const iterator
+
+If the iterator is a const iterator, prefixing the name ``it`` with ``c`` can improve readability.
 
 Initialization
 ==============
@@ -912,6 +1014,45 @@ To summarize Time declaration and initialization, consider the following example
   Time t{100000000}; // NOT OK, is interpreted differently when ``Time::SetResolution()`` called
   Time t{0.1}; // NOT OK, will round to zero; see above and also merge request !2007
 
+A constant that cannot be declared as ``constexpr`` (such as an ``ns3::Time`` constant) and needs
+to be used in multiple translation units (TUs) shall be declared as ``inline`` and initialized in a
+header file that is then included in all the TUs in which the constant needs to be used:
+
+.. sourcecode:: cpp
+
+  inline const Time WIFI_TU = MicroSeconds(1024);
+
+Indeed, since C++17, there may be more than one definition of a variable declared as ``inline`` in
+the program as long as each definition appears in a different TU and all definitions are identical.
+See wifi-standard-constants.h for an example of how to group such constants in a header file and
+declare them so that the values may be used in Attribute defaults.
+
+This approach is to be preferred over declaring the constant as ``extern`` in a header file and
+initializing the constant in a separate ``.cc`` file, because in such a case it would be dangerous
+to use the constant in the initialization of a static variable (e.g., the ``tid`` static member in
+the static ``GetTypeId`` method of classes inheriting from the ``Object`` class) due to the issue
+of static initialization order.
+
+A constant that cannot be declared as ``constexpr`` (such as an ``ns3::Time`` constant) and needs
+to be used in a single TU shall be declared and initialized in the ``.cc`` file before it is used:
+
+.. sourcecode:: cpp
+
+  // Example of declaring a Time constant locally
+  // If DEFAULT_BEACON_INTERVAL is declared with the class implementation such as
+  // below, and it is used as an an attribute default value, make sure that it
+  // is declared before the object TypeId is registered, such as below:
+  const Time DEFAULT_BEACON_INTERVAL = MicroSeconds(DEFAULT_BEACON_INTERVAL_USEC);
+
+  NS_OBJECT_ENSURE_REGISTERED(ApWifiMac);
+
+Instead, constants that can be declared as ``constexpr`` (such as all the POD types) shall be
+initialized in an header file by using the ``constexpr`` keyword only:
+
+.. sourcecode:: cpp
+
+  constexpr uint16_t MIN_AID{1};
+
 Comments
 ========
 
@@ -922,9 +1063,10 @@ Doxygen comments should use the C-style comment (also known as Javadoc) style.
 For comments that are intended to not be exposed publicly in the Doxygen output,
 use the ``@internal`` and ``@endinternal`` tags.
 Please use the ``@see`` tag for cross-referencing.
-All parameters and return values should be documented. The |ns3| codebase uses
-both the ``@`` or ``\`` characters for tag identification; please make sure
-that usage is consistent within a file.
+All parameters and return values should be documented. The |ns3| codebase prefers
+the ``@`` character for tag identification. This character is recognized by clang-format
+as the start of Doxygen tags, which enables it to keep tags properly formatted;
+therefore please don't use ``\`` as the delimiter.
 
 .. sourcecode:: cpp
 
@@ -936,7 +1078,7 @@ that usage is consistent within a file.
       /**
        * Constructor.
        *
-       * \param n Number of elements.
+       * @param n Number of elements.
        */
       MyClass(int n);
   };
@@ -951,11 +1093,11 @@ classes (e.g., all the classes in a module). E.g.;
 .. sourcecode:: cpp
 
   /**
-   * \defgroup mynewmodule This is a new module
+   * @defgroup mynewmodule This is a new module
    */
 
   /**
-   * \ingroup mynewmodule
+   * @ingroup mynewmodule
    *
    * MyClassOne description.
    */
@@ -964,7 +1106,7 @@ classes (e.g., all the classes in a module). E.g.;
   };
 
   /**
-   * \ingroup mynewmodule
+   * @ingroup mynewmodule
    *
    * MyClassTwo description.
    */
@@ -977,22 +1119,22 @@ In the tests for the module, it is suggested to add an ancillary group:
 .. sourcecode:: cpp
 
   /**
-   * \defgroup mynewmodule-test Tests for new module
-   * \ingroup mynewmodule
-   * \ingroup tests
+   * @defgroup mynewmodule-test Tests for new module
+   * @ingroup mynewmodule
+   * @ingroup tests
    */
 
   /**
-   * \ingroup mynewmodule-tests
-   * \brief MyNewModule Test
+   * @ingroup mynewmodule-tests
+   * @brief MyNewModule Test
    */
   class MyNewModuleTest : public TestCase
   {
   };
 
   /**
-   * \ingroup mynewmodule-tests
-   * \brief MyNewModule TestSuite
+   * @ingroup mynewmodule-tests
+   * @brief MyNewModule TestSuite
    */
   class MyNewModuleTestSuite : public TestSuite
   {
@@ -1001,7 +1143,7 @@ In the tests for the module, it is suggested to add an ancillary group:
   };
 
   /**
-   * \ingroup mynewmodule-tests
+   * @ingroup mynewmodule-tests
    * Static variable for test initialization
    */
   static MyNewModuleTestSuite g_myNewModuleTestSuite;
@@ -1015,6 +1157,27 @@ complete English sentences and capitalize the first word unless a lower-case
 identifier begins the sentence. Two spaces after each sentence helps to make
 emacs sentence commands work. Sometimes ``NS_LOG_DEBUG`` statements can
 be also used in place of comments.
+
+Comments should describe the code as it currently stands, not its history.
+Do not write comments that narrate a change or contrast new code with what
+was there before (e.g., "the previous version used std::abs, which forced a
+positive angle"). Such rationale belongs in the Work Item or Merge
+Request description, not in the source, where it becomes stale and misleads
+future readers who never saw the old code. Reserve comments for nuance or
+careful handling that is not evident from the code itself; do not add a
+comment for every statement or to restate what straightforward code plainly
+does.  Comments about previous code are acceptable if pointing to a common
+pitfall, to avoid such code from being reintroduced (e.g., a comment such
+as "Optimization: Ternary if operator is faster than std::max()" or
+"Avoid (...) due to rounding issues. See issue #..." are appropriate
+to leave behind).
+
+Conventions for the logging facility itself, including the meaning of each
+log level (``LOG_INFO``, ``LOG_LOGIC``, ``LOG_DEBUG``, etc.) and
+guidance on the use of ``NS_LOG_FUNCTION`` and when to choose between
+different levels (including logging in constructors and destructors), are
+documented in the Logging chapter of the manual
+(``doc/manual/source/logging-asserts.rst``).
 
 Short one-line comments and long comments can use the C++ comment style;
 that is, ``//``, but longer comments may use C-style comments.
@@ -1039,6 +1202,60 @@ the preceding lines.
 
   /// Node container with the Wi-Fi stations
   NodeContainer wifiStations(3);
+
+Comments in closing braces are generally discouraged, to allow for consistent style
+formatting across recent versions of clang-format (see MRs
+`!1899 <https://gitlab.com/nsnam/ns-3-dev/-/merge_requests/1899>`_ and
+`!2070 <https://gitlab.com/nsnam/ns-3-dev/-/merge_requests/2070>`_).
+This rule may be overridden in cases where the comment improves the code's readability.
+For example, in class declarations in files with multiple classes, classes within parent classes,
+and inline class functions.
+To ensure consistent style formatting, prefer placing the comment marking the end of the class
+in a new line before the brace.
+
+An exception to this rule are the comments in the closing brace of a namespace,
+which identifies the corresponding namespace.
+
+The following examples illustrate the above guidelines.
+
+.. sourcecode:: cpp
+
+  // File with only one class
+
+  namespace ns3
+  {
+
+  int
+  MyClass::Func(int x)
+  {
+      while (...)
+      {
+          if (...)
+          {
+          } // end if // Do not add this comment
+      } // end while  // Do not add this comment
+  } // end Func       // Do not add this comment
+
+  } // namespace ns3  // Keep this comment
+
+.. sourcecode:: cpp
+
+  // Example of file with multiple classes, and classes within classes
+
+  class MyClass
+  {
+      class InlineClass
+      {
+          ...
+          int var; //!< Some variable
+
+          // end of class InlineClass  // This comment is allowed
+      };
+
+      ...
+
+      // end of class MyClass  // This comment is allowed
+  };
 
 Casts
 =====
@@ -1079,10 +1296,46 @@ the issue. In the following example, ``x`` can be declared as ``float`` instead 
 Namespaces
 ==========
 
-Code should always be included in a given namespace, namely ``ns3``.
-In order to avoid exposing internal symbols, consider placing the code in an
-anonymous namespace, which can only be accessed by functions in the same file.
+|ns3| uses the ``ns3`` namespace to separate ns-3 model library code from the
+C++ global namespace. The following guidelines apply to the use of
+the ``ns3`` namespace and additional namespaces. Note that these guidelines are
+applied inconsistently within the |ns3| mainline because |ns3| historically had
+limited use of nested namespaces, and a widespread change to use nested namespaces
+in all libraries would hinder backward compatibility of user programs. Therefore,
+the migration to use the below guidelines is gradual, but they should apply to
+newly authored code.
 
+- |ns3| model library code (code within the ``model`` and ``helper`` directories)
+  should be included within the ``ns3`` namespace.
+- We recommend that new ns-3 modules, intended for the mainline, wrap their
+  model code in a nested namespace. The name of the namespace should be the
+  module name in lowercase, without any hyphens. See the ``lr-wpan`` module
+  for an example (the nested namespace in that case is ``lrwpan``). An example
+  of a recently added module following this guideline is the ``zigbee`` module.
+- Tests should use the ``tests`` namespace outside of the ``ns3`` namespace,
+  and can import the ``ns3`` namespace and any nested namespaces with the ``using``
+  directive.
+- Example program code should not be within the ``ns3`` or nested namespaces, but
+  can import those namespaces with the ``using`` directive.
+- In order to avoid exposing internal symbols, consider placing such code in an
+  anonymous namespace, which can only be accessed by functions in the same file.
+
+When using nested namespaces, a question arises as to the use of prefixes on types
+that are declared in the namespace. For instance, consider the ``LrWpanNetDevice``
+class, which is a derived class of ``NetDevice`` and which exists in the
+``ns3::lrwpan`` namespace. When using scope resolution to refer to these types,
+the prefix is repetitive with the namespace; e.g., ``ns3::lrwpan::LrWpanNetDevice``,
+although ``ns3::lrwpan::NetDevice`` would be sufficient to avoid collisions and
+would be shorter. However, use of the shorter version can hinder regular expression
+searches through the codebase for given types, and require more instances of scope
+resolution. This style
+guide leaves this decision of whether to prefix type names with nested namespace
+hints (such as ``LrWpanNetDevice``) or to shorten the type names (such as
+``NetDevice``) for authors to decide, but in the case where a name may be the same
+as used in another module (such as the NetDevice example herein), a prefix on the
+type name is recommended.
+
+The following guidelines apply to the code syntax for namespace usage.
 Code within namespaces should not be indented. To more easily identify the end
 of a namespace, add a trailing comment to its closing brace.
 
@@ -1094,8 +1347,6 @@ of a namespace, add a trailing comment to its closing brace.
   // (...)
 
   } // namespace ns3
-
-Namespace names should follow the snake_case convention.
 
 Unused variables
 ================
@@ -1129,8 +1380,8 @@ The general guidelines are as follows:
     /**
      * Receive packet from lower layer (passed to PHY as callback).
      *
-     * \param pkt Packet being received.
-     * \param txMode Mode of received packet.
+     * @param pkt Packet being received.
+     * @param txMode Mode of received packet.
      */
     void RxPacketGood(Ptr<Packet> pkt, double, UanTxMode txMode);
 
@@ -1432,6 +1683,16 @@ for more details.
 
 - Avoid declaring trivial destructors, to optimize performance.
 
+.. _When an empty destructor is required: https://andreasfertig.com/blog/2023/12/when-an-empty-destructor-is-required/
+
+- When declaring default destructors with ``~Class() = default;``, be aware
+  that classes derived from ``SimpleRefCount<T>`` must have this declaration
+  on the source file (``.cc``). The header file (``.h``) should contain
+  the plain destructor declaration ``~Class();``. This is due to PIMPL's
+  opaque pointer, as explained in Andrea Fertig's blog post
+  `When an empty destructor is required`_.
+  See class WifiPpdu's destructor for an example.
+
 C++ standard
 ============
 
@@ -1566,7 +1827,10 @@ Miscellaneous items
         ...
     };
 
-- When checking whether a Time value is zero, use ``Time::IsZero()`` rather than comparing it to a zero-valued time object with ``operator==``, to avoid construction of a temporary.  Similar guidance applies to the related functions ``Time::IsPositive()``, ``Time::IsNegative()``, ``Time::IsStrictlyPositive``, and ``Time::IsStrictlyNegative()``.
+- When checking whether a Time value is zero, use ``Time::IsZero()`` rather than comparing it to
+  a zero-valued time object with ``operator==``, to avoid construction of a temporary.
+  Similar guidance applies to the related functions ``Time::IsPositive()``,
+  ``Time::IsNegative()``, ``Time::IsStrictlyPositive``, and ``Time::IsStrictlyNegative()``.
 
   .. sourcecode:: cpp
 
@@ -1577,6 +1841,43 @@ Miscellaneous items
     // to this alternative:
     if (t > Seconds(0))
     {...}
+
+- Use ``std::array`` instead of C-style arrays, e.g.:
+
+  .. sourcecode:: cpp
+
+    // Avoid
+    uint8_t myArray[16];
+
+    // Prefer
+    std::array<uint8_t, 16> myArray;
+
+  This enables many useful operations without writing extra code, such as copy constructors, default
+  comparison operators, etc.
+
+- In C++ 20, a new comparison operator <=> ... was added, and a new pattern started to become a C++
+  best practice: to avoid defining operators separately but to make use of a member declaration such as:
+
+  .. sourcecode:: cpp
+
+    #include <compare>
+    struct IntWrapper
+    {
+      int value{0};
+      constexpr IntWrapper(int value): value{value} { }
+      auto operator<=>(const IntWrapper&) const = default;
+      bool operator==(const IntWrapper&) const = default; // Unnecessary, derived from <=>
+      bool operator!=(const IntWrapper&) const = default; // Unnecessary, derived from ==
+    };
+
+  For new ns-3 code, we recommend using this operator where possible.  There are cases in which
+  the default does not apply, and you can read about some of them on
+  `cppreference's default comparisons page <https://en.cppreference.com/w/cpp/language/default_comparisons.html>`_
+  and on `Microsoft's C++ blog post on the spaceship operator <https://devblogs.microsoft.com/cppblog/simplify-your-code-with-rocket-science-c20s-spaceship-operator/>`_.
+  You may notice in the ns-3 codebase that most code defines operators separately, because the code predates C++20.
+  Some of this code may be changed to use ``<=>`` over time.
+
+  Two examples are in ``ns3::LollipopCounter``, and ``ns3::SequenceNumber``.
 
 Clang-tidy rules
 ================
@@ -1817,3 +2118,83 @@ add the following configuration to ``.vscode/settings.json``:
       "pyproject.toml",
     ],
   }
+
+Markdown Lint
+*************
+
+.. _MarkdownLint: https://github.com/DavidAnson/MarkdownLint
+.. _MarkdownLint Rules: https://github.com/DavidAnson/MarkdownLint/blob/main/doc/Rules.md
+.. _MarkdownLint Installation: https://github.com/igorshubovych/markdownlint-cli?tab=readme-ov-file#installation
+.. _MarkdownLint Configuration File: https://github.com/DavidAnson/MarkdownLint/blob/main/schema/.MarkdownLint.yaml
+.. _MarkdownLint Docker: https://github.com/igorshubovych/MarkdownLint-cli/pkgs/container/MarkdownLint-cli
+.. _MarkdownLint VS Code Extension: https://marketplace.visualstudio.com/items?itemName=DavidAnson.vscode-MarkdownLint
+
+|ns3| uses `MarkdownLint`_ as a linter of Markdown files.
+This linter checks if Markdown files follow a set of defined rules, in order to encourage
+standardization and consistency of Markdown files across parsers.
+It also ensures that Markdown files are correctly interpreted and rendered.
+
+MarkdownLint detects linting issues and can fix most of them automatically.
+Some issues may need to be manually fixed.
+
+MarkdownLint configuration
+==========================
+
+MarkdownLint's settings are saved in the file ``.markdownlint.yml``.
+This schema of this file is defined in `MarkdownLint Configuration File`_,
+which explains how to customize the tool to enable / disable rules or customize its parameters.
+
+The list of Markdown rules supported by MarkdownLint is available in `MarkdownLint Rules`_.
+
+Install and Run MarkdownLint
+============================
+
+MarkdownLint is written in NodeJS. To run MarkdownLint, either use the official
+MarkdownLint Docker image, install it natively in macOS via Homebrew,
+or install MarkdownLint with NodeJS / npm.
+
+Run MarkdownLint with Docker image
+##################################
+
+MarkdownLint has an official Docker image in `MarkdownLint Docker`_ with the tool
+and all dependencies installed.
+
+To run MarkdownLint in a Docker container, use the following command:
+
+.. sourcecode:: console
+
+  # Check all Markdown files in the current directory and subdirectories
+  docker run --rm -v $PWD:/workdir ghcr.io/igorshubovych/markdownlint-cli:latest . [--fix]
+
+  # Check specific Markdown file
+  docker run --rm -v $PWD:/workdir ghcr.io/igorshubovych/markdownlint-cli:latest PATH_TO_FILE [--fix]
+
+If the ``fix`` flag is used, the tool tries to automatically fix the detected issues.
+Otherwise, it only reports the issues found.
+
+Install and Run MarkdownLint natively
+#####################################
+
+To install MarkdownLint natively, either on macOS via Homebrew or using NodeJS / npm,
+follow the instructions available in `MarkdownLint Installation`_.
+
+To run MarkdownLint, use the following command:
+
+.. sourcecode:: console
+
+  # Check all Markdown files in the current directory and subdirectories
+  markdownlint-cli . [--fix]
+
+  # Check specific Markdown file
+  markdownlint-cli PATH_TO_FILE [--fix]
+
+VS Code Extension
+=================
+
+For VS Code users, the `MarkdownLint VS Code Extension`_ extension is available in the marketplace.
+This extension uses the same engine and respects the configuration file.
+
+The MarkdownLint extension automatically analyzes files open in the editor and provides inline hints
+when issues are detected. It can automatically fix most issues related with formatting.
+As explained in the "Integration with IDEs" section, VS Code can be configured to automatically
+format code when saving, editing or pasting code.

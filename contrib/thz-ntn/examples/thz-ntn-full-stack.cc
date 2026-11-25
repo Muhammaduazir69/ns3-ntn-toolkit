@@ -24,6 +24,7 @@
  * orbital dynamics rather than the old sin()-shaped pass.
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
 #include <ns3/mobility-module.h>
@@ -445,6 +446,9 @@ main(int argc, char* argv[])
 
     // ---- Run ns-3 simulation (drives the SGP4 mobility) ----
     Simulator::Stop(Seconds(duration));
+    // Globe scene of the pass: the two SGP4 satellites, the terminal and the RIS panel in
+    // the ENU frame the steps above evaluate (the recorder maps it back onto the Earth).
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 
     // ---- Summary ----
@@ -522,6 +526,9 @@ main(int argc, char* argv[])
     std::cout << "    Polarization: Dual-circular\n";
     std::cout << "    Sensitivity:  " << std::setprecision(1)
               << rxSensitivity << " dBm\n";
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "thz-ntn-full-stack", "analytic", argc, argv);
 
     Simulator::Destroy();
 

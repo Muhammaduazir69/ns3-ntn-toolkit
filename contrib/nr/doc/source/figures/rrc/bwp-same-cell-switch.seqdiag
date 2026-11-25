@@ -1,0 +1,11 @@
+diagram {
+   UePhyB; UeRrc; GnbRrc; BwpMgrGnb;
+
+   UePhyB ->> UeRrc [label="SaveUeMeasurements (RSRP on same-cell carrier B)"]
+   UeRrc => UeRrc [label="EvaluateSameCellBwpSwitch: \n RSRP(B) > RSRP(serving) + BwpSwitchHysteresis (3 dB)?"]
+   UeRrc => UeRrc [label="SwitchPrimaryBwpSameCell: \n re-point primary DL/UL index, re-bind RNTI \n (guarded: same cellId only)"]
+   UeRrc ->> GnbRrc [label="SendIdealBwpSwitchIndication(rnti, bwpB)"]
+   GnbRrc => GnbRrc [label="NrUeManager::SetPrimaryBwp(bwpB)"]
+   GnbRrc ->> BwpMgrGnb [label="SetUePrimaryBwp(rnti, bwpB)"]
+   BwpMgrGnb => BwpMgrGnb [label="m_uePrimaryBwp[rnti] = bwpB \n => downlink now scheduled on BWP B"]
+}

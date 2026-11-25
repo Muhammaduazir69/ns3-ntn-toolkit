@@ -4,6 +4,7 @@ set(base_examples
     fatal-example
     hash-example
     length-example
+    log-line-test-example
     main-callback
     main-ptr
     sample-log-time-format
@@ -12,7 +13,9 @@ set(base_examples
     sample-show-progress
     sample-simulator
     system-path-examples
+    templated-classes
     test-string-value-formatting
+    timespan-example
 )
 
 foreach(
@@ -53,7 +56,7 @@ build_lib_example(
   NAME empirical-random-variable-example
   SOURCE_FILES empirical-random-variable-example.cc
   LIBRARIES_TO_LINK ${libcore}
-                    ${libflow-monitor}
+                    ${libstats}
 )
 
 build_lib_example(

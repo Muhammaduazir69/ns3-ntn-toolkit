@@ -90,9 +90,9 @@ SqliteDataOutput::Output(DataCollector& dc)
     res = m_sqliteOut->Bind(stmt, 5, description);
     NS_ASSERT(res);
 
-    res = m_sqliteOut->SpinStep(stmt);
+    res = SQLiteOutput::SpinStep(stmt);
     NS_ASSERT(res);
-    res = m_sqliteOut->SpinFinalize(stmt);
+    res = SQLiteOutput::SpinFinalize(stmt);
     NS_ASSERT(res == 0);
 
     res = m_sqliteOut->WaitExec("CREATE TABLE IF NOT EXISTS "
@@ -107,15 +107,15 @@ SqliteDataOutput::Output(DataCollector& dc)
 
     for (auto i = dc.MetadataBegin(); i != dc.MetadataEnd(); i++)
     {
-        std::pair<std::string, std::string> blob = (*i);
-        m_sqliteOut->SpinReset(stmt);
+        const auto& blob = (*i);
+        SQLiteOutput::SpinReset(stmt);
         m_sqliteOut->Bind(stmt, 1, run);
         m_sqliteOut->Bind(stmt, 2, blob.first);
         m_sqliteOut->Bind(stmt, 3, blob.second);
-        m_sqliteOut->SpinStep(stmt);
+        SQLiteOutput::SpinStep(stmt);
     }
 
-    m_sqliteOut->SpinFinalize(stmt);
+    SQLiteOutput::SpinFinalize(stmt);
 
     m_sqliteOut->SpinExec("BEGIN");
     SqliteOutputCallback callback(m_sqliteOut, run);
@@ -147,7 +147,7 @@ SqliteDataOutput::SqliteOutputCallback::SqliteOutputCallback(const Ptr<SQLiteOut
 
 SqliteDataOutput::SqliteOutputCallback::~SqliteOutputCallback()
 {
-    m_db->SpinFinalize(m_insertSingletonStatement);
+    SQLiteOutput::SpinFinalize(m_insertSingletonStatement);
 }
 
 void
@@ -158,23 +158,23 @@ SqliteDataOutput::SqliteOutputCallback::OutputStatistic(std::string key,
     NS_LOG_FUNCTION(this << key << variable << statSum);
 
     OutputSingleton(key, variable + "-count", static_cast<double>(statSum->getCount()));
-    if (!isNaN(statSum->getSum()))
+    if (!std::isnan(statSum->getSum()))
     {
         OutputSingleton(key, variable + "-total", statSum->getSum());
     }
-    if (!isNaN(statSum->getMax()))
+    if (!std::isnan(statSum->getMax()))
     {
         OutputSingleton(key, variable + "-max", statSum->getMax());
     }
-    if (!isNaN(statSum->getMin()))
+    if (!std::isnan(statSum->getMin()))
     {
         OutputSingleton(key, variable + "-min", statSum->getMin());
     }
-    if (!isNaN(statSum->getSqrSum()))
+    if (!std::isnan(statSum->getSqrSum()))
     {
         OutputSingleton(key, variable + "-sqrsum", statSum->getSqrSum());
     }
-    if (!isNaN(statSum->getStddev()))
+    if (!std::isnan(statSum->getStddev()))
     {
         OutputSingleton(key, variable + "-stddev", statSum->getStddev());
     }
@@ -187,11 +187,11 @@ SqliteDataOutput::SqliteOutputCallback::OutputSingleton(std::string key,
 {
     NS_LOG_FUNCTION(this << key << variable << val);
 
-    m_db->SpinReset(m_insertSingletonStatement);
+    SQLiteOutput::SpinReset(m_insertSingletonStatement);
     m_db->Bind(m_insertSingletonStatement, 2, key);
     m_db->Bind(m_insertSingletonStatement, 3, variable);
     m_db->Bind(m_insertSingletonStatement, 4, val);
-    m_db->SpinStep(m_insertSingletonStatement);
+    SQLiteOutput::SpinStep(m_insertSingletonStatement);
 }
 
 void
@@ -201,11 +201,11 @@ SqliteDataOutput::SqliteOutputCallback::OutputSingleton(std::string key,
 {
     NS_LOG_FUNCTION(this << key << variable << val);
 
-    m_db->SpinReset(m_insertSingletonStatement);
+    SQLiteOutput::SpinReset(m_insertSingletonStatement);
     m_db->Bind(m_insertSingletonStatement, 2, key);
     m_db->Bind(m_insertSingletonStatement, 3, variable);
     m_db->Bind(m_insertSingletonStatement, 4, val);
-    m_db->SpinStep(m_insertSingletonStatement);
+    SQLiteOutput::SpinStep(m_insertSingletonStatement);
 }
 
 void
@@ -215,11 +215,11 @@ SqliteDataOutput::SqliteOutputCallback::OutputSingleton(std::string key,
 {
     NS_LOG_FUNCTION(this << key << variable << val);
 
-    m_db->SpinReset(m_insertSingletonStatement);
+    SQLiteOutput::SpinReset(m_insertSingletonStatement);
     m_db->Bind(m_insertSingletonStatement, 2, key);
     m_db->Bind(m_insertSingletonStatement, 3, variable);
     m_db->Bind(m_insertSingletonStatement, 4, val);
-    m_db->SpinStep(m_insertSingletonStatement);
+    SQLiteOutput::SpinStep(m_insertSingletonStatement);
 }
 
 void
@@ -229,11 +229,11 @@ SqliteDataOutput::SqliteOutputCallback::OutputSingleton(std::string key,
 {
     NS_LOG_FUNCTION(this << key << variable << val);
 
-    m_db->SpinReset(m_insertSingletonStatement);
+    SQLiteOutput::SpinReset(m_insertSingletonStatement);
     m_db->Bind(m_insertSingletonStatement, 2, key);
     m_db->Bind(m_insertSingletonStatement, 3, variable);
     m_db->Bind(m_insertSingletonStatement, 4, val);
-    m_db->SpinStep(m_insertSingletonStatement);
+    SQLiteOutput::SpinStep(m_insertSingletonStatement);
 }
 
 void
@@ -243,11 +243,11 @@ SqliteDataOutput::SqliteOutputCallback::OutputSingleton(std::string key,
 {
     NS_LOG_FUNCTION(this << key << variable << val);
 
-    m_db->SpinReset(m_insertSingletonStatement);
+    SQLiteOutput::SpinReset(m_insertSingletonStatement);
     m_db->Bind(m_insertSingletonStatement, 2, key);
     m_db->Bind(m_insertSingletonStatement, 3, variable);
     m_db->Bind(m_insertSingletonStatement, 4, val.GetTimeStep());
-    m_db->SpinStep(m_insertSingletonStatement);
+    SQLiteOutput::SpinStep(m_insertSingletonStatement);
 }
 
 } // namespace ns3

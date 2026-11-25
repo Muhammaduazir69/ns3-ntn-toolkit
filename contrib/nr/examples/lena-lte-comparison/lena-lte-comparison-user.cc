@@ -4,15 +4,15 @@
 
 #include "lena-lte-comparison.h"
 
-#include <ns3/command-line.h>
-#include <ns3/show-progress.h>
+#include "ns3/command-line.h"
+#include "ns3/show-progress.h"
 
 using namespace ns3;
 
 /**
- * \ingroup examples
- * \file lena-lte-comparison-user.cc
- * \brief A multi-cell network deployment with site sectorization
+ * @ingroup examples
+ * @file lena-lte-comparison-user.cc
+ * @brief A multi-cell network deployment with site sectorization
  *
  * This example describes how to setup a simulation using the 3GPP channel model
  * from TR 38.901. This example consists of an hexagonal grid deployment
@@ -98,7 +98,7 @@ main(int argc, char* argv[])
                  "for all sectors)",
                  params.freqScenario);
     cmd.AddValue("downtiltAngle",
-                 "Base station antenna down tilt angle (deg)",
+                 "Base station antenna downtilt angle (deg)",
                  params.downtiltAngle);
     cmd.AddValue("enableUlPc", "Whether to enable or disable UL power control", params.enableUlPc);
     cmd.AddValue("powerAllocation",

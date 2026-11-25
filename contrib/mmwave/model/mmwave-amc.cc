@@ -103,11 +103,6 @@ MmWaveAmc::GetTypeId(void)
     return tid;
 }
 
-TypeId
-MmWaveAmc::GetInstanceTypeId() const
-{
-    return MmWaveAmc::GetTypeId();
-}
 
 void
 MmWaveAmc::SetBer(double ber)

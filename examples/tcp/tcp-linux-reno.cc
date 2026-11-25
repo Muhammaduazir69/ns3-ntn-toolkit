@@ -92,8 +92,8 @@ InstallBulkSend(Ptr<Node> node,
     BulkSendHelper source(socketFactory, InetSocketAddress(address, port));
     source.SetAttribute("MaxBytes", UintegerValue(0));
     ApplicationContainer sourceApps = source.Install(node);
-    sourceApps.Start(Seconds(10.0));
-    Simulator::Schedule(Seconds(10.0) + Seconds(0.001), &TraceCwnd, nodeId, cwndWindow, CwndTrace);
+    sourceApps.Start(Seconds(10));
+    Simulator::Schedule(Seconds(10) + Seconds(0.001), &TraceCwnd, nodeId, cwndWindow, CwndTrace);
     sourceApps.Stop(stopTime);
 }
 
@@ -103,7 +103,7 @@ InstallPacketSink(Ptr<Node> node, uint16_t port, std::string socketFactory)
 {
     PacketSinkHelper sink(socketFactory, InetSocketAddress(Ipv4Address::GetAny(), port));
     ApplicationContainer sinkApps = sink.Install(node);
-    sinkApps.Start(Seconds(10.0));
+    sinkApps.Start(Seconds(10));
     sinkApps.Stop(stopTime);
 }
 
@@ -118,7 +118,7 @@ main(int argc, char* argv[])
     uint32_t delAckCount = 1;
     std::string recovery = "ns3::TcpClassicRecovery";
 
-    CommandLine cmd;
+    CommandLine cmd(__FILE__);
     cmd.AddValue("tcpTypeId",
                  "TCP variant to use (e.g., ns3::TcpNewReno, ns3::TcpLinuxReno, etc.)",
                  tcpTypeId);

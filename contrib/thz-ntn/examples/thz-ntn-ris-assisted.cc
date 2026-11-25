@@ -30,6 +30,7 @@
  */
 
 #include "thz-ntn-pass-kit.h"
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/thz-ntn-link-geometry.h"
 
 #include <ns3/command-line.h>
@@ -38,6 +39,8 @@
 #include <ns3/node-container.h>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -207,6 +210,21 @@ main(int argc, char* argv[])
               << "\n";
     std::cout << "  " << std::string(82, '-') << "\n";
 
+    // ntn-dataset@1: sections 2 and 3 as datasets next to the run record in outputDir,
+    // so the results follow the parameters.
+    std::filesystem::create_directories(outputDir);
+    std::ofstream perfCsv(outputDir + "/thz-ntn-ris-assisted-performance.csv");
+    perfCsv << "ris_side,elements,array_factor_gain_db,cascaded_path_loss_db,total_snr_db,"
+               "snr_improvement_db,capacity_gbps\n";
+    std::vector<ns3::ntnobs::DatasetMetric> metrics;
+    metrics.push_back({"slant_range_km", std::to_string(slantRange / 1000.0), "analytic"});
+    metrics.push_back(
+        {"direct_path_loss_db", std::to_string(directResult.totalPathLoss_dB), "analytic"});
+    metrics.push_back({"direct_snr_db", std::to_string(directResult.snr_dB), "analytic"});
+    metrics.push_back({"direct_capacity_gbps",
+                       std::to_string(directResult.shannonCapacity_Gbps),
+                       "analytic"});
+
     for (uint32_t N : risSizes)
     {
         // Create RIS with this size
@@ -250,6 +268,15 @@ main(int argc, char* argv[])
                   << std::setprecision(2)
                   << std::setw(12) << capacity
                   << "\n";
+        perfCsv << N << "," << totalElements << "," << risGain << "," << cascadedPL << ","
+                << totalSnr << "," << snrImprovement << "," << capacity << "\n";
+        if (N == 64)
+        {
+            metrics.push_back({"ris64_total_snr_db", std::to_string(totalSnr), "analytic"});
+            metrics.push_back(
+                {"ris64_snr_improvement_db", std::to_string(snrImprovement), "analytic"});
+            metrics.push_back({"ris64_capacity_gbps", std::to_string(capacity), "analytic"});
+        }
     }
 
     // ---- N^2 scaling law verification ----
@@ -267,6 +294,8 @@ main(int argc, char* argv[])
               << "\n";
     std::cout << "  " << std::string(58, '-') << "\n";
 
+    std::ofstream scaleCsv(outputDir + "/thz-ntn-ris-assisted-scaling.csv");
+    scaleCsv << "n,n_squared,theoretical_gain_db,array_factor_gain_db\n";
     for (uint32_t N : risSizes)
     {
         Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
@@ -284,6 +313,7 @@ main(int argc, char* argv[])
                   << std::setw(16) << theoreticalGain
                   << std::setw(16) << measuredGain
                   << "\n";
+        scaleCsv << N << "," << N2 << "," << theoreticalGain << "," << measuredGain << "\n";
     }
 
     // ---- Quantization loss analysis ----
@@ -303,9 +333,66 @@ main(int argc, char* argv[])
               << (nearField ? "Near-field" : "Far-field") << " region\n";
     std::cout << "  Total RIS elements: " << ris64->GetTotalElements() << "\n";
 
+    // Globe scene of the analytic geometry. The local-frame nodes above stay as they are;
+    // device-less context nodes place the same geometry on the Earth: an SGP4 satellite of
+    // a Walker shell at --altitude (ntn-constellation), the terminal on the parallel west of
+    // its t = 0 sub-point where that satellite is seen at --elevation about the WGS-84
+    // normal, and the RIS panel risDist east of the terminal, 10 m up.
+    {
+        ntncon::WalkerConfig w;
+        w.num_planes = 72;
+        w.total_sats = 72 * 22;
+        w.altitude_km = altitude;
+        w.inclination_deg = 53.0;
+        w.epoch_unix_s = ntnobs::NtnSceneRecorder::kDefaultSceneEpochUnix;
+        auto sceneSat = CreateObject<ntncon::Sgp4MobilityModel>();
+        sceneSat->SetElementsSgp4(ntncon::WalkerConstellation::BuildDelta(w)[0]);
+        const Vector satE = sceneSat->GetPosition();
+        double subLat;
+        double subLon;
+        double subAlt;
+        ntngeo::EcefToGeodetic(satE, subLat, subLon, subAlt);
+        double lo = 0.0;
+        double hi = 40.0;
+        for (int it = 0; it < 60; ++it)
+        {
+            const double mid = 0.5 * (lo + hi);
+            const double e =
+                ntngeo::GeodeticElevationDeg(ntngeo::GeodeticToEcef(subLat, subLon - mid, 0.0),
+                                             satE);
+            (e > elevation ? lo : hi) = mid;
+        }
+        const double gtLon = subLon - 0.5 * (lo + hi);
+        auto sceneGt = CreateObject<ConstantPositionMobilityModel>();
+        sceneGt->SetPosition(ntngeo::GeodeticToEcef(subLat, gtLon, 0.0));
+        const double dLon = risDist / (111195.0 * std::cos(subLat * M_PI / 180.0));
+        auto sceneRis = CreateObject<ConstantPositionMobilityModel>();
+        sceneRis->SetPosition(ntngeo::GeodeticToEcef(subLat, gtLon + dLon, 10.0));
+        ntnobs::AddContextSatelliteNodes(std::vector<Ptr<ntncon::Sgp4MobilityModel>>{sceneSat});
+        for (const Ptr<MobilityModel>& m :
+             {Ptr<MobilityModel>(sceneGt), Ptr<MobilityModel>(sceneRis)})
+        {
+            Ptr<Node> n = CreateObject<Node>();
+            n->AggregateObject(m);
+        }
+        ntnobs::StartSceneFromNodeList(outputDir);
+    }
+
     // ---- Run simulation ----
     Simulator::Stop(Seconds(1.0));
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    perfCsv.close();
+    scaleCsv.close();
+    metrics.push_back({"quantization_loss_db", std::to_string(qLoss), "analytic"});
+    metrics.push_back({"ris_near_field", nearField ? "1" : "0", "analytic"});
+    ns3::ntnobs::WriteDatasetRecord(outputDir,
+                                    "thz-ntn-ris-assisted",
+                                    "analytic",
+                                    argc,
+                                    argv,
+                                    metrics);
     Simulator::Destroy();
 
     std::cout << "\n  Simulation complete.\n";

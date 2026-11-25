@@ -2,6 +2,20 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file lena-v1-utils.cc
+ *
+ * @brief Implementation of the LenaV1Utils class, which encapsulates the LENA v1 (LTE module)
+ * configuration of the comparison scenario. SetLenaV1SimulatorParameters() creates the
+ * LteHelper/EPC and sets the 3GPP pathloss model matching the scenario (UMa/UMi/RMa), eNB and UE
+ * transmit power and noise figure, PF or RR scheduler, per-sector EARFCNs implementing the
+ * overlapping or non-overlapping frequency reuse, isotropic (calibration) or cosine sectorized
+ * antennas, and installs the per-sector eNB and UE devices. It also connects the LteUePhy
+ * "ReportCurrentCellRsrpSinr" trace to SinrOutputStats and the "ReportPowerSpectralDensity" trace
+ * to PowerOutputStats, so that LTE runs populate the same SQLite tables as the NR runs.
+ */
+
 #include "lena-v1-utils.h"
 
 #include "lena-v2-utils.h"
@@ -154,7 +168,8 @@ LenaV1Utils::SetLenaV1SimulatorParameters(const double sector0AngleRad,
     Config::SetDefault("ns3::LteEnbPhy::TxPower", DoubleValue(txPower));
     Config::SetDefault("ns3::LteUePhy::TxPower", DoubleValue(ueTxPower));
     Config::SetDefault("ns3::LteUePhy::NoiseFigure", DoubleValue(9.0));
-    Config::SetDefault("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
+    // ntn: the toolkit builds the mmWave LTE fork, which has no RLF detection attribute.
+    Config::SetDefaultFailSafe("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
     Config::SetDefault("ns3::LteAmc::AmcModel", EnumValue(LteAmc::PiroEW2010));
     lteHelper->SetAttribute("PathlossModel",
                             StringValue(pathlossModel)); // for each band the same pathloss model

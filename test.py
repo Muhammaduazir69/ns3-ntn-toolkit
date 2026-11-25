@@ -8,6 +8,7 @@ import argparse
 import fnmatch
 import os
 import queue
+import re
 import shutil
 import signal
 import subprocess
@@ -142,7 +143,14 @@ def parse_examples_to_run_file(
 ):
     # Look for the examples-to-run file exists.
     if not os.path.exists(examples_to_run_path):
-        return
+        # Also tests for contribs OUTSIDE the ns-3-dev directory
+        possible_external_contrib_path = examples_to_run_path.replace(
+            "contrib", f"{os.path.dirname(os.path.dirname(__file__))}/ns-3-external-contrib"
+        )
+        if os.path.exists(possible_external_contrib_path):
+            examples_to_run_path = possible_external_contrib_path
+        else:
+            return
 
     # Each tuple in the C++ list of examples to run contains
     #
@@ -212,6 +220,9 @@ def parse_examples_to_run_file(
         # Add all of the C++ examples that were built, i.e. found
         # in the directory, to the list of C++ examples to run.
         if os.path.exists(example_path):
+            # Handle paths with empty spaces
+            example_path = '"%s"' % example_path
+
             # Add any arguments to the path.
             if len(example_name_parts) != 1:
                 example_path = "%s %s" % (example_path, example_arguments)
@@ -314,7 +325,7 @@ def read_test(test):
 # expected that this output will be fine for developers looking for problems.
 #
 def node_to_text(test, f, test_type="Suite"):
-    (result, name, reason, time_real) = read_test(test)
+    result, name, reason, time_real = read_test(test)
     if reason:
         reason = " (%s)" % reason
 
@@ -382,7 +393,7 @@ def translate_to_html(results_file, html_file):
             #
             # For each test suite, get its name, result and execution time info
             #
-            (result, name, reason, time) = read_test(suite)
+            result, name, reason, time = read_test(suite)
 
             #
             # Print a level three header with the result, name and time.  If the
@@ -462,7 +473,7 @@ def translate_to_html(results_file, html_file):
                 # Get the name, result and timing information from xml to use in
                 # printing table below.
                 #
-                (result, name, reason, time) = read_test(case)
+                result, name, reason, time = read_test(case)
 
                 #
                 # If the test case failed, we iterate through possibly multiple
@@ -575,7 +586,7 @@ def translate_to_html(results_file, html_file):
             #
             # Get the result and name of the example in question
             #
-            (result, name, reason, time) = read_test(example)
+            result, name, reason, time = read_test(example)
 
             #
             # If the example either failed or crashed, print its result status
@@ -859,15 +870,29 @@ def run_job_synchronously(shell_command, directory, valgrind, is_python, build_p
     if is_python:
         path_cmd = PYTHON[0] + " " + os.path.join(NS3_BASEDIR, shell_command)
     else:
+
+        # Here we handle paths with empty spaces.
+        # To do that, we need to separate program from arguments, then quote the absolute program path with spaces.
+        shell_args = re.findall(r'(?:".*?"|\S)+', shell_command)
+
+        program = shell_args[0].strip('"')
+
         if len(build_path):
-            path_cmd = os.path.join(build_path, shell_command)
+            # Programs are looked up in the user-provided build directory,
+            # which requires re-rooting the ones already resolved against
+            # the configured build directory.
+            if os.path.isabs(program):
+                program = os.path.relpath(program, NS3_BUILDDIR)
+            path_cmd = os.path.join(os.path.abspath(build_path), program)
         else:
-            path_cmd = os.path.join(NS3_BUILDDIR, shell_command)
+            path_cmd = program if NS3_BUILDDIR in program else os.path.join(NS3_BUILDDIR, program)
+
+        path_cmd = f'"{path_cmd}" {" ".join(shell_args[1:])}'
 
     if valgrind:
         if VALGRIND_SUPPRESSIONS_FILE:
             cmd = (
-                "valgrind --suppressions=%s --leak-check=full --show-reachable=yes --error-exitcode=2 --errors-for-leak-kinds=all %s"
+                'valgrind --suppressions="%s" --leak-check=full --show-reachable=yes --error-exitcode=2 --errors-for-leak-kinds=all %s'
                 % (suppressions_path, path_cmd)
             )
         else:
@@ -1185,7 +1210,7 @@ def load_previously_successful_tests():
         exit(-1)
 
     for test_type in ["Test", "Example"]:
-        if previous_run_results.find(test_type):
+        if previous_run_results.find(test_type) is not None:
             temp = list(
                 map(
                     lambda x: (x.find("Name").text, x.find("Result").text),
@@ -1241,12 +1266,12 @@ def run_tests():
         # user wants to run everything.
         #
         if len(args.example):
-            build_cmd = "./ns3 build %s" % os.path.basename(args.example)
+            build_cmd = "./ns3 build %s" % os.path.basename(args.example.replace("*", ""))
         else:
             build_cmd = "./ns3"
 
         if sys.platform == "win32":
-            build_cmd = sys.executable + " " + build_cmd
+            build_cmd = f'"{sys.executable}" {build_cmd}'
 
         if args.verbose:
             print("Building: %s" % build_cmd)
@@ -1364,7 +1389,7 @@ def run_tests():
     #
     if args.kinds:
         path_cmd = os.path.join("utils", test_runner_name + " --print-test-type-list")
-        (rc, standard_out, standard_err, et) = run_job_synchronously(
+        rc, standard_out, standard_err, et = run_job_synchronously(
             path_cmd, os.getcwd(), False, False
         )
         print(standard_out)
@@ -1382,7 +1407,7 @@ def run_tests():
                 path_cmd = os.path.join(
                     "utils", test_runner_name + " --print-test-name-list --print-test-types"
                 )
-            (rc, standard_out, standard_err, et) = run_job_synchronously(
+            rc, standard_out, standard_err, et = run_job_synchronously(
                 path_cmd, os.getcwd(), False, False
             )
             if rc != 0:
@@ -1400,8 +1425,8 @@ def run_tests():
                 standard_out = standard_out.decode()
             list_items = standard_out.split("\n")
             list_items.sort()
-        print("Test Type    Test Name")
-        print("---------    ---------")
+        print("Test Type            Test Name")
+        print("---------------      ---------")
         for item in list_items:
             if len(item.strip()):
                 print(item)
@@ -1411,13 +1436,13 @@ def run_tests():
             examples_sorted.sort()
         if ENABLE_PYTHON_BINDINGS:
             python_examples_sorted = []
-            for x, y in python_tests:
+            for x, y, _ in python_tests:
                 if y == "True":
                     python_examples_sorted.append(x)
             python_examples_sorted.sort()
             examples_sorted.extend(python_examples_sorted)
         for item in examples_sorted:
-            print("example     ", item)
+            print("example             ", item)
         print()
 
     if args.kinds or args.list:
@@ -1500,7 +1525,7 @@ def run_tests():
     if len(args.suite):
         # See if this is a valid test suite.
         path_cmd = os.path.join("utils", test_runner_name + " --print-test-name-list")
-        (rc, suites, standard_err, et) = run_job_synchronously(path_cmd, os.getcwd(), False, False)
+        rc, suites, standard_err, et = run_job_synchronously(path_cmd, os.getcwd(), False, False)
 
         if isinstance(suites, bytes):
             suites = suites.decode()
@@ -1525,12 +1550,12 @@ def run_tests():
                 "utils",
                 test_runner_name + " --print-test-name-list --test-type=%s" % args.constrain,
             )
-            (rc, suites, standard_err, et) = run_job_synchronously(
+            rc, suites, standard_err, et = run_job_synchronously(
                 path_cmd, os.getcwd(), False, False
             )
         else:
             path_cmd = os.path.join("utils", test_runner_name + " --print-test-name-list")
-            (rc, suites, standard_err, et) = run_job_synchronously(
+            rc, suites, standard_err, et = run_job_synchronously(
                 path_cmd, os.getcwd(), False, False
             )
     else:
@@ -1558,7 +1583,7 @@ def run_tests():
         path_cmd = os.path.join(
             "utils", test_runner_name + " --print-test-name-list --test-type=%s" % "performance"
         )
-        (rc, performance_tests, standard_err, et) = run_job_synchronously(
+        rc, performance_tests, standard_err, et = run_job_synchronously(
             path_cmd, os.getcwd(), False, False
         )
         if isinstance(performance_tests, bytes):
@@ -1649,11 +1674,15 @@ def run_tests():
                 multiple = ""
             else:
                 multiple = " --stop-on-failure"
-            if len(args.fullness):
-                fullness = args.fullness.upper()
-                fullness = " --fullness=%s" % fullness
-            else:
-                fullness = " --fullness=QUICK"
+
+            if args.fullness:
+                if len(args.fullness):
+                    fullness = args.fullness.upper()
+                    fullness = " --fullness=%s" % fullness
+                else:
+                    fullness = " --fullness=QUICK"
+            elif args.only_fullness:
+                fullness = " --only-fullness=%s" % args.only_fullness.upper()
 
             path_cmd = os.path.join(
                 "utils", test_runner_name + " --test-name=%s%s%s" % (test, multiple, fullness)
@@ -1703,17 +1732,54 @@ def run_tests():
     #  ./test.py:                                           run all of the examples
     #  ./test.py --constrain=unit                           run no examples
     #  ./test.py --constrain=example                        run all of the examples
-    #  ./test.py --suite=some-test-suite:                   run no examples
-    #  ./test.py --example=some-example:                    run the single example
-    #  ./test.py --suite=some-suite --example=some-example: run the single example
+    #  ./test.py --suite=some-test-suite                    run no examples
+    #  ./test.py --example=some-example                     run the single example with no parameters
+    #  ./test.py --example="some-example --args=2"          run the single example with custom parameters
+    #  ./test.py --example=some-example*                    run the all examples-to-run.py instances with said example
+    #  ./test.py --suite=some-suite --example=some-example  run the single example
     #
     #
-    if len(args.suite) == 0 and len(args.example) == 0 and len(args.pyexample) == 0:
+    if len(args.suite) == 0 and len(args.pyexample) == 0:
         if len(args.constrain) == 0 or args.constrain == "example":
             if ENABLE_EXAMPLES:
+                if args.example:
+                    if args.example.endswith("*"):
+                        # If an example name is passed without arguments, we filter all examples containing said program
+                        example_tests = list(
+                            filter(lambda x: args.example[:-1] in x[0], example_tests)
+                        )
+                        args.example_args = []
+                    else:
+                        example_tests = list(
+                            filter(
+                                lambda x: " ".join([args.example, *args.example_args])
+                                == x[0].split("/")[-1],
+                                example_tests,
+                            )
+                        )
+                        args.example_args = []
+
+                    if not example_tests or args.example_args:
+                        # If an example name is passed with arguments, we create an example entry for said example
+                        example_name = " ".join([args.example, *args.example_args])
+                        example_path = "%s%s-%s%s" % (
+                            APPNAME,
+                            VERSION,
+                            args.example,
+                            BUILD_PROFILE_SUFFIX,
+                        )
+                        if example_path in ns3_runnable_programs_dictionary:
+                            example_path = ns3_runnable_programs_dictionary[example_path]
+                            example_path += ".exe" if sys.platform == "win32" else ""
+                            example_path = " ".join([example_path, *args.example_args])
+                            example_tests = [(example_name, example_path, "True", "True", "QUICK")]
+                        else:
+                            print("No example matching the name %s" % example_name)
+                            example_tests = []
+
                 for name, test, do_run, do_valgrind_run, fullness in example_tests:
                     # Remove any arguments and directory names from test.
-                    test_name = test.split(" ", 1)[0]
+                    test_name = re.findall(r'(?:".*?"|\S)+', test)[0].strip('"')
                     test_name = os.path.basename(test_name)
                     test_name = test_name[:-4] if sys.platform == "win32" else test_name
 
@@ -1764,44 +1830,6 @@ def run_tests():
                             input_queue.put(job)
                             jobs = jobs + 1
                             total_tests = total_tests + 1
-
-    elif len(args.example):
-        # Add the proper prefix and suffix to the example name to
-        # match what is done in the CMakeLists.txt file.
-        example_name = "%s%s-%s%s" % (APPNAME, VERSION, args.example, BUILD_PROFILE_SUFFIX)
-
-        key_list = []
-        for key in ns3_runnable_programs_dictionary:
-            key_list.append(key)
-        example_name_key_list = fnmatch.filter(key_list, example_name)
-
-        if len(example_name_key_list) == 0:
-            print("No example matching the name %s" % args.example)
-        else:
-            #
-            # If you tell me to run an example, I will try and run the example
-            # irrespective of any condition.
-            #
-            for example_name_iter in example_name_key_list:
-                example_path = ns3_runnable_programs_dictionary[example_name_iter]
-                example_path = os.path.abspath(example_path)
-                job = Job()
-                job.set_is_example(True)
-                job.set_is_pyexample(False)
-                job.set_display_name(example_path)
-                job.set_tmp_file_name("")
-                job.set_cwd(testpy_output_dir)
-                job.set_basedir(os.getcwd())
-                job.set_tempdir(testpy_output_dir)
-                job.set_shell_command(example_path)
-                job.set_build_path(args.buildpath)
-
-                if args.verbose:
-                    print("Queue %s" % example_name_iter)
-
-                input_queue.put(job)
-                jobs = jobs + 1
-                total_tests = total_tests + 1
 
     #
     # Run some Python examples as smoke tests.  We have a list of all of
@@ -1987,11 +2015,17 @@ def run_tests():
                 status = "CRASH"
                 status_print = colors.PINK + status + colors.NORMAL
 
-        print("[%d/%d]" % (i, total_tests), end=" ")
+        print("[%d/%d] %s" % (i + 1, total_tests, status_print), end="")
+
         if args.duration or args.constrain == "performance":
-            print("%s (%.3f): %s %s" % (status_print, job.elapsed_time, kind, job.display_name))
-        else:
-            print("%s: %s %s" % (status_print, kind, job.display_name))
+            print(" (%.3f)" % job.elapsed_time, end="")
+
+        print(":", end="")
+
+        if "NS_COMMANDLINE_INTROSPECTION" in os.environ:
+            print(" Wrote example usage for", end="")
+
+        print(" %s %s" % (kind, job.display_name))
 
         if job.is_example or job.is_pyexample:
             #
@@ -2216,12 +2250,23 @@ def run_tests():
     # directories, which will probably surprise the user.
     #
     if not args.retain:
-        shutil.rmtree(testpy_output_dir)
+        shutil.rmtree(TMP_OUTPUT_DIR)
 
     if passed_tests + skipped_tests == total_tests:
         return 0  # success
     else:
         return 1  # catchall for general errors
+
+
+def split_program_and_arguments(argv):
+    split_argv = re.findall(r'(?:".*[|*]?"|\S)+', argv)
+    program = ""
+    program_args = []
+    if split_argv:
+        program = split_argv[0]
+    if len(split_argv) > 1:
+        program_args = split_argv[1:]
+    return program, program_args
 
 
 def main(argv):
@@ -2268,8 +2313,9 @@ def main(argv):
         default=False,
         help="If examples use reference data files, get them to re-generate them",
     )
+    fullness_group = parser.add_mutually_exclusive_group(required=False)
 
-    parser.add_argument(
+    fullness_group.add_argument(
         "-f",
         "--fullness",
         action="store",
@@ -2277,6 +2323,16 @@ def main(argv):
         default="QUICK",
         choices=["QUICK", "EXTENSIVE", "TAKES_FOREVER"],
         help="choose the duration of tests to run: QUICK, EXTENSIVE, or TAKES_FOREVER, where EXTENSIVE includes QUICK and TAKES_FOREVER includes QUICK and EXTENSIVE (only QUICK tests are run by default)",
+    )
+
+    fullness_group.add_argument(
+        "-of",
+        "--only-fullness",
+        action="store",
+        type=str,
+        default=None,
+        choices=["QUICK", "EXTENSIVE", "TAKES_FOREVER"],
+        help="choose the duration of tests to run: QUICK, EXTENSIVE, or TAKES_FOREVER (only tests marked with fullness will be executed)",
     )
 
     parser.add_argument(
@@ -2415,6 +2471,8 @@ def main(argv):
 
     global args
     args = parser.parse_args()
+    args.example, exargs = split_program_and_arguments(args.example)
+    setattr(args, "example_args", exargs)
     signal.signal(signal.SIGINT, sigint_hook)
 
     # From waf/waflib/Options.py

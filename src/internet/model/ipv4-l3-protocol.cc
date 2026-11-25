@@ -19,6 +19,7 @@
 
 #include "ns3/boolean.h"
 #include "ns3/callback.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/ipv4-address.h"
 #include "ns3/log.h"
 #include "ns3/net-device.h"
@@ -35,8 +36,6 @@ namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("Ipv4L3Protocol");
-
-const uint16_t Ipv4L3Protocol::PROT_NUMBER = 0x0800;
 
 NS_OBJECT_ENSURE_REGISTERED(Ipv4L3Protocol);
 
@@ -364,7 +363,7 @@ Ipv4L3Protocol::SetupLoopback()
     uint32_t index = AddIpv4Interface(interface);
     Ptr<Node> node = GetObject<Node>();
     node->RegisterProtocolHandler(MakeCallback(&Ipv4L3Protocol::Receive, this),
-                                  Ipv4L3Protocol::PROT_NUMBER,
+                                  iana::ieee802numbers::IPV4,
                                   device);
     interface->SetUp();
     if (m_routingProtocol)
@@ -391,18 +390,18 @@ Ipv4L3Protocol::AddInterface(Ptr<NetDevice> device)
     NS_ASSERT(tc);
 
     m_node->RegisterProtocolHandler(MakeCallback(&TrafficControlLayer::Receive, tc),
-                                    Ipv4L3Protocol::PROT_NUMBER,
+                                    iana::ieee802numbers::IPV4,
                                     device);
     m_node->RegisterProtocolHandler(MakeCallback(&TrafficControlLayer::Receive, tc),
-                                    ArpL3Protocol::PROT_NUMBER,
+                                    iana::ieee802numbers::ARP,
                                     device);
 
     tc->RegisterProtocolHandler(MakeCallback(&Ipv4L3Protocol::Receive, this),
-                                Ipv4L3Protocol::PROT_NUMBER,
+                                iana::ieee802numbers::IPV4,
                                 device);
     tc->RegisterProtocolHandler(
         MakeCallback(&ArpL3Protocol::Receive, PeekPointer(GetObject<ArpL3Protocol>())),
-        ArpL3Protocol::PROT_NUMBER,
+        iana::ieee802numbers::ARP,
         device);
 
     Ptr<Ipv4Interface> interface = CreateObject<Ipv4Interface>();
@@ -633,13 +632,6 @@ Ipv4L3Protocol::Receive(Ptr<NetDevice> device,
         }
     }
 
-    for (auto i = m_sockets.begin(); i != m_sockets.end(); ++i)
-    {
-        NS_LOG_LOGIC("Forwarding to raw socket");
-        Ptr<Ipv4RawSocketImpl> socket = *i;
-        socket->ForwardUp(packet, ipHeader, ipv4Interface);
-    }
-
     if (m_enableDpd && ipHeader.GetDestination().IsMulticast() && UpdateDuplicate(packet, ipHeader))
     {
         NS_LOG_LOGIC("Dropping received packet -- duplicate.");
@@ -652,6 +644,28 @@ Ipv4L3Protocol::Receive(Ptr<NetDevice> device,
     {
         NS_LOG_WARN("No route found for forwarding packet.  Drop.");
         m_dropTrace(ipHeader, packet, DROP_NO_ROUTE, this, interface);
+        SendIcmpNoRoute(ipHeader, packet);
+    }
+}
+
+void
+Ipv4L3Protocol::SendIcmpNoRoute(const Ipv4Header& ipHeader, Ptr<const Packet> packet)
+{
+    NS_LOG_FUNCTION(this << ipHeader << packet);
+    // @RFC{1812} sec 4.3.2.7 / 5.2.7.1: a router that cannot forward a datagram
+    // because it has no route to the destination network must return an ICMP
+    // Destination Unreachable (net unreachable) message to the source (see @issueid{825}).
+    // Only a node configured as a forwarder (router) generates this message, and
+    // never in response to a datagram with a multicast or broadcast destination.
+    if (!m_ipForward || ipHeader.GetDestination().IsMulticast() ||
+        ipHeader.GetDestination() == Ipv4Address::GetBroadcast())
+    {
+        return;
+    }
+    Ptr<Icmpv4L4Protocol> icmp = GetIcmp();
+    if (icmp)
+    {
+        icmp->SendDestUnreachNetwork(ipHeader, packet);
     }
 }
 
@@ -764,8 +778,6 @@ Ipv4L3Protocol::Send(Ptr<Packet> packet,
 
     // Handle a few cases:
     // 1) packet is passed in with a route entry
-    // 1a) packet is passed in with a route entry but route->GetGateway is not set (e.g., on-demand)
-    // 1b) packet is passed in with a route entry and valid gateway
     // 2) packet is passed without a route and packet is destined to limited broadcast address
     // 3) packet is passed without a route and packet is destined to a subnet-directed broadcast
     // address 4) packet is passed without a route, packet is not broadcast (e.g., a raw socket
@@ -774,18 +786,6 @@ Ipv4L3Protocol::Send(Ptr<Packet> packet,
     // 1) packet is passed in with route entry
     if (route)
     {
-        // 1a) route->GetGateway is not set (e.g., on-demand)
-        if (!route->GetGateway().IsInitialized())
-        {
-            // This could arise because the synchronous RouteOutput() call
-            // returned to the transport protocol with a source address but
-            // there was no next hop available yet (since a route may need
-            // to be queried).
-            NS_FATAL_ERROR("Ipv4L3Protocol::Send case 1a: packet passed with a route but the "
-                           "Gateway address is uninitialized. This case not yet implemented.");
-        }
-
-        // 1b) with a valid gateway
         NS_LOG_LOGIC("Ipv4L3Protocol::Send case 1b:  passed in with route and valid gateway");
         int32_t interface = GetInterfaceForDevice(route->GetOutputDevice());
         m_sendOutgoingTrace(ipHeader, packet, interface);
@@ -801,9 +801,7 @@ Ipv4L3Protocol::Send(Ptr<Packet> packet,
     if (destination.IsBroadcast() || destination.IsLocalMulticast())
     {
         NS_LOG_LOGIC("Ipv4L3Protocol::Send case 2:  limited broadcast - no route");
-        uint32_t ifaceIndex = 0;
-        for (auto ifaceIter = m_interfaces.begin(); ifaceIter != m_interfaces.end();
-             ifaceIter++, ifaceIndex++)
+        for (auto ifaceIter = m_interfaces.begin(); ifaceIter != m_interfaces.end(); ++ifaceIter)
         {
             Ptr<Ipv4Interface> outInterface = *ifaceIter;
             // ANY source matches any interface
@@ -1017,13 +1015,13 @@ Ipv4L3Protocol::IpMulticastForward(Ptr<Ipv4MulticastRoute> mrtentry,
 
         Ptr<Packet> packet = p->Copy();
         Ipv4Header ipHeader = header;
-        ipHeader.SetTtl(header.GetTtl() - 1);
-        if (ipHeader.GetTtl() == 0)
+        if (ipHeader.GetTtl() <= 1)
         {
             NS_LOG_WARN("TTL exceeded.  Drop.");
             m_dropTrace(header, packet, DROP_TTL_EXPIRED, this, interface);
             return;
         }
+        ipHeader.SetTtl(header.GetTtl() - 1);
         NS_LOG_LOGIC("Forward multicast via interface " << interface);
         Ptr<Ipv4Route> rtentry = Create<Ipv4Route>();
         rtentry->SetSource(ipHeader.GetSource());
@@ -1046,8 +1044,7 @@ Ipv4L3Protocol::IpForward(Ptr<Ipv4Route> rtentry, Ptr<const Packet> p, const Ipv
     Ipv4Header ipHeader = header;
     Ptr<Packet> packet = p->Copy();
     int32_t interface = GetInterfaceForDevice(rtentry->GetOutputDevice());
-    ipHeader.SetTtl(ipHeader.GetTtl() - 1);
-    if (ipHeader.GetTtl() == 0)
+    if (ipHeader.GetTtl() <= 1)
     {
         // Do not reply to multicast/broadcast IP address
         if (!ipHeader.GetDestination().IsBroadcast() && !ipHeader.GetDestination().IsMulticast())
@@ -1059,6 +1056,7 @@ Ipv4L3Protocol::IpForward(Ptr<Ipv4Route> rtentry, Ptr<const Packet> p, const Ipv
         m_dropTrace(header, packet, DROP_TTL_EXPIRED, this, interface);
         return;
     }
+    ipHeader.SetTtl(ipHeader.GetTtl() - 1);
     // in case the packet still has a priority tag attached, remove it
     SocketPriorityTag priorityTag;
     packet->RemovePacketTag(priorityTag);
@@ -1096,6 +1094,14 @@ Ipv4L3Protocol::LocalDeliver(Ptr<const Packet> packet, const Ipv4Header& ip, uin
     }
 
     m_localDeliverTrace(ipHeader, p, iif);
+
+    Ptr<Ipv4Interface> ipv4Interface = GetInterface(iif);
+
+    for (auto& socket : m_sockets)
+    {
+        NS_LOG_INFO("Delivering to raw socket " << socket);
+        socket->ForwardUp(p, ipHeader, ipv4Interface);
+    }
 
     Ptr<IpL4Protocol> protocol = GetProtocol(ipHeader.GetProtocol(), iif);
     if (protocol)
@@ -1222,10 +1228,7 @@ Ipv4L3Protocol::SourceAddressSelection(uint32_t interfaceIdx, Ipv4Address dest)
         Ipv4InterfaceAddress test = GetAddress(interfaceIdx, i);
         if (test.GetLocal().CombineMask(test.GetMask()) == dest.CombineMask(test.GetMask()))
         {
-            if (!test.IsSecondary())
-            {
-                return test.GetLocal();
-            }
+            return test.GetLocal();
         }
     }
     return candidate;
@@ -1248,10 +1251,6 @@ Ipv4L3Protocol::SelectSourceAddress(Ptr<const NetDevice> device,
         for (uint32_t j = 0; j < GetNAddresses(i); j++)
         {
             iaddr = GetAddress(i, j);
-            if (iaddr.IsSecondary())
-            {
-                continue;
-            }
             if (iaddr.GetScope() > scope)
             {
                 continue;
@@ -1278,10 +1277,6 @@ Ipv4L3Protocol::SelectSourceAddress(Ptr<const NetDevice> device,
         for (uint32_t j = 0; j < GetNAddresses(i); j++)
         {
             iaddr = GetAddress(i, j);
-            if (iaddr.IsSecondary())
-            {
-                continue;
-            }
             if (iaddr.GetScope() != Ipv4InterfaceAddress::LINK && iaddr.GetScope() <= scope)
             {
                 return iaddr.GetLocal();
@@ -1403,19 +1398,6 @@ Ipv4L3Protocol::GetIpForward() const
 }
 
 void
-Ipv4L3Protocol::SetWeakEsModel(bool model)
-{
-    NS_LOG_FUNCTION(this << model);
-    m_strongEndSystemModel = !model;
-}
-
-bool
-Ipv4L3Protocol::GetWeakEsModel() const
-{
-    return !m_strongEndSystemModel;
-}
-
-void
 Ipv4L3Protocol::SetStrongEndSystemModel(bool model)
 {
     NS_LOG_FUNCTION(this << model);
@@ -1438,7 +1420,8 @@ Ipv4L3Protocol::RouteInputError(Ptr<const Packet> p,
                                                              << sockErrno);
     m_dropTrace(ipHeader, p, DROP_ROUTE_ERROR, this, 0);
 
-    // \todo Send an ICMP no route.
+    // Return an ICMP net-unreachable to the source on a routing failure (see @issueid{825}).
+    SendIcmpNoRoute(ipHeader, p);
 }
 
 void
@@ -1541,12 +1524,12 @@ Ipv4L3Protocol::ProcessFragment(Ptr<Packet>& packet, Ipv4Header& ipHeader, uint3
     key.first = addressCombination;
     key.second = idProto;
 
-    Ptr<Fragments> fragments;
+    std::shared_ptr<Fragments> fragments;
 
     auto it = m_fragments.find(key);
     if (it == m_fragments.end())
     {
-        fragments = Create<Fragments>();
+        fragments = std::make_shared<Fragments>();
         m_fragments.insert(std::make_pair(key, fragments));
 
         auto iter = SetTimeout(key, ipHeader, iif);

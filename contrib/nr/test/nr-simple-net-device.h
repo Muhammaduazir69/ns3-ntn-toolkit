@@ -6,6 +6,18 @@
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
 
+/**
+ * @ingroup test
+ * @file nr-simple-net-device.h
+ *
+ * @brief Test support net device, not a test suite. NrSimpleNetDevice subclasses SimpleNetDevice
+ * to stand in for the real NR net device where only a packet delivery service between protocol
+ * stacks is needed: it forwards Send() to SimpleNetDevice so PDUs travel over a SimpleChannel
+ * (optionally dropped by a receive error model) instead of the NR PHY/MAC. It is instantiated by
+ * NrSimpleHelper and used by the RLC UM and AM end-to-end test suites (nr-test-rlc-um-e2e.cc and
+ * nr-test-rlc-am-e2e.cc).
+ */
+
 #ifndef NR_SIMPLE_NET_DEVICE_H
 #define NR_SIMPLE_NET_DEVICE_H
 
@@ -20,7 +32,7 @@ namespace ns3
 {
 
 /**
- * \ingroup nr
+ * @ingroup nr
  * The NrSimpleNetDevice class implements the NR simple net device.
  * This class is used to provide a limited NrNetDevice functionalities that
  * are necessary for testing purposes.
@@ -29,8 +41,8 @@ class NrSimpleNetDevice : public SimpleNetDevice
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -38,7 +50,7 @@ class NrSimpleNetDevice : public SimpleNetDevice
     /**
      * Constructor
      *
-     * \param node the Node
+     * @param node the Node
      */
     NrSimpleNetDevice(Ptr<Node> node);
 

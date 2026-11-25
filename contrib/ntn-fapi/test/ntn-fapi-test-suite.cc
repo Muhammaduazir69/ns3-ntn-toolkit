@@ -777,7 +777,7 @@ class FapiSlotCadenceAndSfnTest : public TestCase
 {
   public:
     FapiSlotCadenceAndSfnTest()
-        : TestCase("SCF 3.4.1 / TS 38.211 4.3.1: one SLOT.indication per slot, contiguous SFN/slot")
+        : TestCase("SCF 3.4.1 - TS 38.211 4.3.1: one SLOT.indication per slot, contiguous SFN-slot")
     {
     }
 
@@ -924,7 +924,7 @@ class FapiDlTtiPduConformanceTest : public TestCase
 {
   public:
     FapiDlTtiPduConformanceTest()
-        : TestCase("DL_TTI.request PDUs: PDCCH/PDSCH pairing, MCS 0..28, HARQ id, symbols in slot")
+        : TestCase("DL_TTI.request PDUs: PDCCH-PDSCH pairing, MCS 0..28, HARQ id, symbols in slot")
     {
     }
 
@@ -1029,7 +1029,7 @@ class FapiCrcMatchesPhyDecodeTest : public TestCase
 {
   public:
     FapiCrcMatchesPhyDecodeTest()
-        : TestCase("CRC/RX_DATA.indication equal the PHY decode TB for TB; app bytes <= RX_DATA bytes")
+        : TestCase("CRC-RX_DATA.indication equal the PHY decode TB for TB; app bytes <= RX_DATA bytes")
     {
     }
 
@@ -1183,7 +1183,7 @@ class FapiLinkOutageTest : public TestCase
 {
   public:
     FapiLinkOutageTest()
-        : TestCase("Failure path: an 80 dB outage keeps SLOT cadence, fails/stops CRC, then recovers")
+        : TestCase("Failure path: an 80 dB outage keeps SLOT cadence, fails-stops CRC, then recovers")
     {
     }
 

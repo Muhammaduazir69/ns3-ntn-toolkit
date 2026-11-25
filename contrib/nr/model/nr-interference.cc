@@ -7,10 +7,12 @@
 #include "nr-mimo-chunk-processor.h"
 #include "nr-spectrum-signal-parameters.h"
 
-#include <ns3/log.h>
-#include <ns3/simulator.h>
+#include "ns3/log.h"
+#include "ns3/simulator.h"
 
 #include <algorithm>
+#include <cmath>
+#include <complex>
 
 NS_LOG_COMPONENT_DEFINE("NrInterference");
 
@@ -129,6 +131,10 @@ NrInterference::ConditionallyEvaluateChunk()
     NS_LOG_DEBUG(this << " now " << Now() << " last " << m_lastChangeTime);
     if (m_receiving && (Now() > m_lastChangeTime))
     {
+        // Rebuild the sum of all signals from the live-signal list: the
+        // running sum can carry a permanent negative bias (absorption by a
+        // saturating signal) or NaN (an infinite signal) from expired signals.
+        RebuildAllSignals();
         NS_LOG_LOGIC(this << " signal = " << *m_rxSignal << " allSignals = " << *m_allSignals
                           << " noise = " << *m_noise);
         SpectrumValue interf = (*m_allSignals) - (*m_rxSignal) + (*m_noise);
@@ -159,18 +165,21 @@ NrInterference::ConditionallyEvaluateChunk()
             // Compute the MIMO SINR separately for each received signal.
             for (auto& rxSignal : m_rxSignalsMimo)
             {
-                // Use the UE's RNTI to distinguish multiple received signals
+                // Use the UE's RNTI and the cell it belongs to in order to distinguish multiple
+                // received signals. The cell is needed because RNTIs are per-cell values that
+                // are reused, so the RNTI on its own does not identify the signal.
                 auto nrRxSignal = DynamicCast<const NrSpectrumSignalParametersDataFrame>(rxSignal);
                 uint16_t rnti = nrRxSignal ? nrRxSignal->rnti : 0;
+                uint16_t cellId = nrRxSignal ? nrRxSignal->cellId : 0;
 
                 // MimoSinrChunk is used to store SINR and compute TBLER of the data transmission
                 auto sinrMatrix = ComputeSinr(outOfCellInterfCov, rxSignal);
-                MimoSinrChunk mimoSinr{sinrMatrix, rnti, duration};
+                MimoSinrChunk mimoSinr{sinrMatrix, rnti, cellId, duration};
                 cp->EvaluateChunk(mimoSinr);
 
                 // MimoSignalChunk is used to compute PMI feedback.
                 auto& chanSpct = *(rxSignal->spectrumChannelMatrix);
-                MimoSignalChunk mimoSignal{chanSpct, outOfCellInterfCov, rnti, duration};
+                MimoSignalChunk mimoSignal{chanSpct, outOfCellInterfCov, rnti, cellId, duration};
                 cp->EvaluateChunk(mimoSignal);
             }
         }
@@ -301,11 +310,11 @@ NrInterference::AppendEvent(Time startTime, Time endTime, double rxPowerW)
 
     if (!m_receiving)
     {
-        NiChanges::iterator nowIterator = GetPosition(now);
+        auto nowIterator = GetPosition(now);
         // We empty the list until the current moment. To do so we
         // first we sum all the energies until the current moment
         // and save it in m_firstPower.
-        for (NiChanges::iterator i = m_niChanges.begin(); i != nowIterator; i++)
+        for (auto i = m_niChanges.begin(); i != nowIterator; i++)
         {
             m_firstPower += i->GetDelta();
         }
@@ -356,13 +365,24 @@ NrInterference::StartRxMimo(Ptr<const SpectrumSignalParameters> params)
         // This must be the first receive signal, clear any lingering previous signals
         m_rxSignalsMimo.clear();
     }
-    m_rxSignalsMimo.push_back(params);
     for (auto& cp : m_mimoChunkProcessors)
     {
         // Clear the list of stored chunks
         cp->Start();
     }
-    NrInterferenceBase::StartRx(rxPsd);
+    if (NrInterferenceBase::StartRx(rxPsd))
+    {
+        m_rxSignalsMimo.push_back(params);
+    }
+    else
+    {
+        // Rejected overlapping signal: keep it out of the receive-signal list
+        // so it has no SINR chunk of its own (its TB fails decoding against an
+        // all-zero SINR) and, since it remains in m_allSignalsMimo, it is
+        // added to the out-of-cell interference covariance for the signals
+        // that are being received.
+        NS_LOG_WARN("Overlapping signal accounted as interference");
+    }
 }
 
 void
@@ -392,6 +412,12 @@ NrInterference::AddMimoChunkProcessor(Ptr<NrMimoChunkProcessor> cp)
 {
     NS_LOG_FUNCTION(this << cp);
     m_mimoChunkProcessors.push_back(cp);
+}
+
+bool
+NrInterference::IsChunkProcessorSet()
+{
+    return (!m_mimoChunkProcessors.empty());
 }
 
 NrCovMat
@@ -467,7 +493,19 @@ NrInterference::AddInterference(NrCovMat& covMat, Ptr<const SpectrumSignalParame
     }
     else
     {
-        covMat.AddInterferenceSignal(chanSpct);
+        // Every port of the channel matrix carries the full transmit power spectral density,
+        // and precoders are normalized to the total transmit power. Without precoding, the
+        // transmit power is split evenly across the transmit ports.
+        const auto nTxPorts = chanSpct.GetNumCols();
+        if (nTxPorts > 1)
+        {
+            covMat.AddInterferenceSignal(chanSpct *
+                                         std::complex<double>{1.0 / std::sqrt(nTxPorts), 0.0});
+        }
+        else
+        {
+            covMat.AddInterferenceSignal(chanSpct);
+        }
     }
 }
 

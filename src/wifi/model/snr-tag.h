@@ -14,18 +14,19 @@
 #define SNR_TAG_H
 
 #include "ns3/tag.h"
+#include "ns3/wifi-export.h"
 
 namespace ns3
 {
 
 class Tag;
 
-class SnrTag : public Tag
+class WIFI_EXPORT SnrTag : public Tag
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -43,13 +44,13 @@ class SnrTag : public Tag
     /**
      * Set the SNR to the given value.
      *
-     * \param snr the value of the SNR to set in linear scale
+     * @param snr the value of the SNR to set in linear scale
      */
     void Set(double snr);
     /**
      * Return the SNR value.
      *
-     * \return the SNR value in linear scale
+     * @return the SNR value in linear scale
      */
     double Get() const;
 

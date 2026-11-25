@@ -16,8 +16,10 @@
 #include <algorithm>
 #include <ctime>
 #include <filesystem>
+#include <iterator>
 #include <regex>
 #include <sstream>
+#include <system_error>
 #include <tuple>
 
 #ifdef __APPLE__
@@ -50,8 +52,8 @@ constexpr auto SYSTEM_PATH_SEP = "/";
 #endif
 
 /**
- * \file
- * \ingroup systempath
+ * @file
+ * @ingroup systempath
  * ns3::SystemPath implementation.
  */
 
@@ -64,11 +66,11 @@ NS_LOG_COMPONENT_DEFINE("SystemPath");
 namespace
 {
 /**
- * \ingroup systempath
+ * @ingroup systempath
  * Get the list of files located in a file system directory with error.
  *
- * \param [in] path A path which identifies a directory
- * \return Tuple with a list of the filenames which are located in the input directory or error flag
+ * @param [in] path A path which identifies a directory
+ * @return Tuple with a list of the filenames which are located in the input directory or error flag
  * \c true if directory doesn't exist.
  */
 std::tuple<std::list<std::string>, bool>
@@ -96,14 +98,14 @@ namespace SystemPath
 {
 
 /**
- * \ingroup systempath
- * \brief Get the directory path for a file.
+ * @ingroup systempath
+ * @brief Get the directory path for a file.
  *
  * This is an internal function (by virtue of not being
  * declared in a \c .h file); the public API is FindSelfDirectory().
  *
- * \param [in] path The full path to a file.
- * \returns The full path to the containing directory.
+ * @param [in] path The full path to a file.
+ * @returns The full path to the containing directory.
  */
 std::string
 Dirname(std::string path)
@@ -116,7 +118,7 @@ Dirname(std::string path)
 }
 
 std::string
-FindSelfDirectory()
+FindSelf()
 {
     /**
      * This function returns the path to the running $PREFIX.
@@ -132,22 +134,23 @@ FindSelfDirectory()
 #if defined(__linux__)
     {
         ssize_t size = 1024;
-        char* buffer = (char*)malloc(size);
+        char* buffer = static_cast<char*>(malloc(size));
         memset(buffer, 0, size);
-        int status;
+        int pathLength;
         while (true)
         {
-            status = readlink("/proc/self/exe", buffer, size);
-            if (status != 1 || (status == -1 && errno != ENAMETOOLONG))
+            pathLength = readlink("/proc/self/exe", buffer, size);
+            if ((pathLength > 0 && pathLength < size) ||
+                (pathLength == -1 && errno != ENAMETOOLONG))
             {
                 break;
             }
             size *= 2;
             free(buffer);
-            buffer = (char*)malloc(size);
+            buffer = static_cast<char*>(malloc(size));
             memset(buffer, 0, size);
         }
-        if (status == -1)
+        if (pathLength == -1)
         {
             NS_FATAL_ERROR("Oops, could not find self directory.");
         }
@@ -159,15 +162,15 @@ FindSelfDirectory()
         //  LPTSTR = char *
         DWORD size = 1024;
         auto lpFilename = (LPTSTR)malloc(sizeof(TCHAR) * size);
-        DWORD status = GetModuleFileName(nullptr, lpFilename, size);
-        while (status == size)
+        DWORD pathLength = GetModuleFileName(nullptr, lpFilename, size);
+        while (pathLength == size)
         {
             size = size * 2;
             free(lpFilename);
             lpFilename = (LPTSTR)malloc(sizeof(TCHAR) * size);
-            status = GetModuleFileName(nullptr, lpFilename, size);
+            pathLength = GetModuleFileName(nullptr, lpFilename, size);
         }
-        NS_ASSERT(status != 0);
+        NS_ASSERT(pathLength != 0);
         filename = lpFilename;
         free(lpFilename);
     }
@@ -202,7 +205,13 @@ FindSelfDirectory()
         filename = buf;
     }
 #endif
-    return Dirname(filename);
+    return filename;
+}
+
+std::string
+FindSelfDirectory()
+{
+    return Dirname(FindSelf());
 }
 
 std::string
@@ -235,7 +244,7 @@ Split(std::string path)
 std::string
 Join(std::list<std::string>::const_iterator begin, std::list<std::string>::const_iterator end)
 {
-    NS_LOG_FUNCTION(*begin << *end);
+    NS_LOG_FUNCTION(std::distance(begin, end));
     std::string retval = "";
     for (auto i = begin; i != end; i++)
     {
@@ -336,46 +345,9 @@ bool
 Exists(const std::string path)
 {
     NS_LOG_FUNCTION(path);
-
-    bool err;
-    auto dirpath = Dirname(path);
-    std::list<std::string> files;
-    tie(files, err) = ReadFilesNoThrow(dirpath);
-    if (err)
-    {
-        // Directory doesn't exist
-        NS_LOG_LOGIC("directory doesn't exist: " << dirpath);
-        return false;
-    }
-    NS_LOG_LOGIC("directory exists: " << dirpath);
-
-    // Check if the file itself exists
-    auto tokens = Split(path);
-    std::string file = tokens.back();
-
-    if (file.empty())
-    {
-        // Last component was a directory, not a file name
-        // We already checked that the directory exists,
-        // so return true
-        NS_LOG_LOGIC("directory path exists: " << path);
-        return true;
-    }
-
-    files = ReadFiles(dirpath);
-
-    auto it = std::find(files.begin(), files.end(), file);
-    if (it == files.end())
-    {
-        // File itself doesn't exist
-        NS_LOG_LOGIC("file itself doesn't exist: " << file);
-        return false;
-    }
-
-    NS_LOG_LOGIC("file itself exists: " << file);
-    return true;
-
-} // Exists()
+    [[maybe_unused]] std::error_code ec;
+    return std::filesystem::exists(path, ec);
+}
 
 std::string
 CreateValidSystemPath(const std::string path)
@@ -392,7 +364,7 @@ CreateValidSystemPath(const std::string path)
                        incompatible_characters,
                        "_");
     return valid_path;
-} // CreateValidSystemPath
+}
 
 } // namespace SystemPath
 

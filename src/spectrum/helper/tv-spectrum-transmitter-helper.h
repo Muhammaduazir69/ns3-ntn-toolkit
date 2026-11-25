@@ -9,19 +9,19 @@
 #ifndef TV_SPECTRUM_TRANSMITTER_HELPER_H
 #define TV_SPECTRUM_TRANSMITTER_HELPER_H
 
+#include "ns3/antenna-model.h"
+#include "ns3/mobility-model.h"
+#include "ns3/net-device-container.h"
+#include "ns3/net-device.h"
+#include "ns3/node-container.h"
+#include "ns3/non-communicating-net-device.h"
 #include "ns3/object-factory.h"
-#include <ns3/antenna-model.h>
-#include <ns3/mobility-model.h>
-#include <ns3/net-device-container.h>
-#include <ns3/net-device.h>
-#include <ns3/node-container.h>
-#include <ns3/non-communicating-net-device.h>
-#include <ns3/random-variable-stream.h>
-#include <ns3/spectrum-channel.h>
-#include <ns3/spectrum-phy.h>
-#include <ns3/spectrum-signal-parameters.h>
-#include <ns3/spectrum-value.h>
-#include <ns3/tv-spectrum-transmitter.h>
+#include "ns3/random-variable-stream.h"
+#include "ns3/spectrum-channel.h"
+#include "ns3/spectrum-phy.h"
+#include "ns3/spectrum-signal-parameters.h"
+#include "ns3/spectrum-value.h"
+#include "ns3/tv-spectrum-transmitter.h"
 
 class TvHelperDistributionTestCase;
 
@@ -29,7 +29,7 @@ namespace ns3
 {
 
 /**
- * \ingroup spectrum
+ * @ingroup spectrum
  *
  * Helper class which uses TvSpectrumTransmitter class to create customizable
  * TV transmitter(s) that transmit PSD spectrum specified by user-set attributes.
@@ -39,7 +39,7 @@ namespace ns3
  * and location.
  *
  * Here is an example of how to use this class:
- * \code
+ * @code
    TvSpectrumTransmitterHelper tvTransHelper;
    tvTransHelper.SetChannel (channel); // provided that user has a Ptr<SpectrumChannel> ready.
    tvTransHelper.SetAttribute ("StartFrequency", DoubleValue (524e6));
@@ -50,7 +50,7 @@ namespace ns3
    tvTransHelper.SetAttribute ("TvType", EnumValue (TvSpectrumTransmitter::TVTYPE_8VSB));
    tvTransHelper.SetAttribute ("Antenna", StringValue ("ns3::IsotropicAntennaModel"));
    tvTransHelper.Install (tvTransmitterNode); // provided that user has a NodeContainer ready.
-   \endcode
+   @endcode
  */
 class TvSpectrumTransmitterHelper
 {

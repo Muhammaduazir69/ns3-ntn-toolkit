@@ -2,6 +2,23 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file cttc-nr-3gpp-calibration-utils-v2.cc
+ *
+ * @brief Implementation of the LenaV2Utils class, which encapsulates the whole 5G-LENA (NR
+ * module) configuration of the calibration example. SetLenaV2SimulatorParameters() creates the
+ * NrHelper/EPC and the spectrum/BWPs at the configured starting frequency, and sets the error
+ * model, scheduler (including optional sub-band CQI and MIMO PMI parameters), gNB/UE uniform
+ * planar arrays with 3GPP or isotropic elements, dual polarization and ports, the beamforming
+ * method (predefined beam toward a given sector/elevation, cell scan, or realistic BF), O2I and
+ * shadowing settings, uplink power control and wraparound support, then installs the per-sector
+ * gNB and UE devices. It also connects the traces feeding the SQLite writers: UE "DlDataSinr" to
+ * SinrOutputStats, UE "ReportPowerSpectralDensity" to PowerOutputStats (ueTxPower table), and
+ * gNB "SlotDataStats", "RBDataStats" and spectrum "RxDataTrace" to SlotOutputStats, RbOutputStats
+ * and PowerOutputStats (gnbRxPower table).
+ */
+
 #include "cttc-nr-3gpp-calibration-utils-v2.h"
 
 #include "flow-monitor-output-stats.h"
@@ -9,13 +26,13 @@
 #include "rb-output-stats.h"
 #include "slot-output-stats.h"
 
+#include "ns3/antenna-module.h"
+#include "ns3/config.h"
+#include "ns3/enum.h"
 #include "ns3/log.h"
-#include <ns3/antenna-module.h>
-#include <ns3/config.h>
-#include <ns3/enum.h>
-#include <ns3/nr-spectrum-value-helper.h>
-#include <ns3/object-vector.h>
-#include <ns3/pointer.h>
+#include "ns3/nr-spectrum-value-helper.h"
+#include "ns3/object-vector.h"
+#include "ns3/pointer.h"
 
 NS_LOG_COMPONENT_DEFINE("LenaV2Utils");
 
@@ -115,7 +132,7 @@ ConfigurePhy(Ptr<NrHelper>& nrHelper,
              double beamConfElevation)
 {
     // Change the antenna orientation
-    Ptr<NrGnbPhy> phy0 = nrHelper->GetGnbPhy(gnb, 0); // BWP 0
+    Ptr<NrGnbPhy> phy0 = NrHelper::GetGnbPhy(gnb, 0); // BWP 0
     Ptr<UniformPlanarArray> antenna0 = ConstCast<UniformPlanarArray>(
         phy0->GetSpectrumPhy()->GetAntenna()->GetObject<UniformPlanarArray>());
     antenna0->SetAttribute("BearingAngle", DoubleValue(orientationRads));
@@ -125,84 +142,100 @@ ConfigurePhy(Ptr<NrHelper>& nrHelper,
     phy0->GetSpectrumPhy()->GetBeamManager()->SetPredefinedBeam(beamConfSector, beamConfElevation);
 
     // Set numerology
-    nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Numerology", UintegerValue(numerology)); // BWP
+    NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Numerology", UintegerValue(numerology)); // BWP
 
     // Set TX power
-    nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(txPowerBs));
+    NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("TxPower", DoubleValue(txPowerBs));
 
     // Set TDD pattern
-    nrHelper->GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern));
+    NrHelper::GetGnbPhy(gnb, 0)->SetAttribute("Pattern", StringValue(pattern));
 }
 
 } // unnamed namespace
 
 void
-LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
-                                          const std::string& scenario,
-                                          const std::string& confType,
-                                          const std::string& radioNetwork,
-                                          std::string errorModel,
-                                          const std::string& operationMode,
-                                          const std::string& direction,
-                                          uint16_t numerology,
-                                          const std::string& pattern,
-                                          const NodeContainer& gnbSector1Container,
-                                          const NodeContainer& gnbSector2Container,
-                                          const NodeContainer& gnbSector3Container,
-                                          const NodeContainer& ueSector1Container,
-                                          const NodeContainer& ueSector2Container,
-                                          const NodeContainer& ueSector3Container,
-                                          const Ptr<NrPointToPointEpcHelper>& baseEpcHelper,
-                                          Ptr<NrHelper>& nrHelper,
-                                          NetDeviceContainer& gnbSector1NetDev,
-                                          NetDeviceContainer& gnbSector2NetDev,
-                                          NetDeviceContainer& gnbSector3NetDev,
-                                          NetDeviceContainer& ueSector1NetDev,
-                                          NetDeviceContainer& ueSector2NetDev,
-                                          NetDeviceContainer& ueSector3NetDev,
-                                          bool enableFading,
-                                          bool enableUlPc,
-                                          std::string powerAllocation,
-                                          SinrOutputStats* sinrStats,
-                                          PowerOutputStats* ueTxPowerStats,
-                                          PowerOutputStats* gnbRxPowerStats,
-                                          SlotOutputStats* slotStats,
-                                          RbOutputStats* rbStats,
-                                          const std::string& scheduler,
-                                          uint32_t bandwidthMHz,
-                                          double startingFreq,
-                                          uint32_t freqScenario,
-                                          double gnbTxPower,
-                                          double ueTxPower,
-                                          double downtiltAngle,
-                                          const uint32_t gnbNumRows,
-                                          const uint32_t gnbNumColumns,
-                                          const uint32_t ueNumRows,
-                                          const uint32_t ueNumColumns,
-                                          bool gnbEnable3gppElement,
-                                          bool ueEnable3gppElement,
-                                          const double gnbHSpacing,
-                                          const double gnbVSpacing,
-                                          const double ueHSpacing,
-                                          const double ueVSpacing,
-                                          const double gnbNoiseFigure,
-                                          const double ueNoiseFigure,
-                                          bool enableRealBF,
-                                          bool enableShadowing,
-                                          double o2iThreshold,
-                                          double o2iLowLossThreshold,
-                                          bool linkO2iConditionToAntennaHeight,
-                                          bool crossPolarizedGnb,
-                                          bool crossPolarizedUe,
-                                          double polSlantAngleGnb1,
-                                          double polSlantAngleGnb2,
-                                          double polSlantAngleUe1,
-                                          double polSlantAngleUe2,
-                                          std::string bfMethod,
-                                          uint16_t beamConfSector,
-                                          double beamConfElevation,
-                                          double isd,
-                                          bool ueBearingAngle)
+LenaV2Utils::SetLenaV2SimulatorParameters(
+    const double sector0AngleRad,
+    const std::string& scenario,
+    const std::string& confType,
+    const std::string& radioNetwork,
+    std::string errorModel,
+    const std::string& operationMode,
+    const std::string& direction,
+    uint16_t numerology,
+    const std::string& pattern,
+    const NodeContainer& gnbSector1Container,
+    const NodeContainer& gnbSector2Container,
+    const NodeContainer& gnbSector3Container,
+    const NodeContainer& ueSector1Container,
+    const NodeContainer& ueSector2Container,
+    const NodeContainer& ueSector3Container,
+    const Ptr<NrPointToPointEpcHelper>& baseEpcHelper,
+    Ptr<NrHelper>& nrHelper,
+    NetDeviceContainer& gnbSector1NetDev,
+    NetDeviceContainer& gnbSector2NetDev,
+    NetDeviceContainer& gnbSector3NetDev,
+    NetDeviceContainer& ueSector1NetDev,
+    NetDeviceContainer& ueSector2NetDev,
+    NetDeviceContainer& ueSector3NetDev,
+    bool enableFading,
+    bool enableUlPc,
+    std::string powerAllocation,
+    SinrOutputStats* sinrStats,
+    PowerOutputStats* ueTxPowerStats,
+    PowerOutputStats* gnbRxPowerStats,
+    SlotOutputStats* slotStats,
+    RbOutputStats* rbStats,
+    const std::string& scheduler,
+    uint32_t bandwidthMHz,
+    double startingFreq,
+    uint32_t freqScenario,
+    double gnbTxPower,
+    double ueTxPower,
+    double downtiltAngle,
+    const uint32_t gnbNumRows,
+    const uint32_t gnbNumColumns,
+    const uint32_t ueNumRows,
+    const uint32_t ueNumColumns,
+    bool gnbEnable3gppElement,
+    bool ueEnable3gppElement,
+    const double gnbHSpacing,
+    const double gnbVSpacing,
+    const double ueHSpacing,
+    const double ueVSpacing,
+    const double gnbNoiseFigure,
+    const double ueNoiseFigure,
+    bool enableRealBF,
+    bool enableShadowing,
+    double o2iThreshold,
+    double o2iLowLossThreshold,
+    bool linkO2iConditionToAntennaHeight,
+    bool crossPolarizedGnb,
+    bool crossPolarizedUe,
+    double polSlantAngleGnb1,
+    double polSlantAngleGnb2,
+    double polSlantAngleUe1,
+    double polSlantAngleUe2,
+    std::string bfMethod,
+    uint16_t beamConfSector,
+    double beamConfElevation,
+    double isd,
+    bool ueBearingAngle,
+    double PolSlantAngleGnb,
+    double PolSlantAngleUe,
+    bool dualPolarizedGnb,
+    bool dualPolarizedUe,
+    uint8_t numVPortsGnb,
+    uint8_t numHPortsGnb,
+    uint8_t numVPortsUe,
+    uint8_t numHPortsUe,
+    bool enableMimo,
+    NrHelper::MimoPmiParams mimoPmiParams,
+    bool enableSubbandScheluder,
+    bool m_subbandCqiClamping,
+    EnumValue<NrMacSchedulerUeInfo::McsCsiSource> m_mcsCsiSource,
+    Ptr<WraparoundModel> wraparoundModel,
+    NodeContainer& picoGnbNodes)
 {
     /*
      * Create the radio network related parameters
@@ -283,52 +316,19 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
 
     double txPowerBs = 0.0;
 
-    BandwidthPartInfo::Scenario scene = BandwidthPartInfo::UMa;
-
-    if (scenario == "UMa")
-    {
-        scene = BandwidthPartInfo::UMa;
-    }
-    else if (scenario == "RMa")
-    {
-        scene = BandwidthPartInfo::RMa;
-    }
-    else if (scenario == "UMi-StreetCanyon")
-    {
-        scene = BandwidthPartInfo::UMi_StreetCanyon;
-    }
-    else
-    {
-        NS_ABORT_MSG("Unsupported scenario " << scenario
-                                             << ". Supported values: UMa, RMa, UMi_StreetCanyon");
-    }
-
+    NS_ABORT_MSG_UNLESS(scenario == "UMa" || scenario == "RMa" || scenario == "UMi",
+                        "Unsupported scenario " << scenario << ". Supported values: UMa, RMa, UMi");
     txPowerBs = gnbTxPower;
     std::cout << "Scenario: " << scenario << "gnbTxPower: " << txPowerBs << std::endl;
 
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(100)));
-    nrHelper->SetPhasedArraySpectrumPropagationLossModelTypeId(
-        DistanceBasedThreeGppSpectrumPropagationLossModel::GetTypeId());
-    nrHelper->SetPhasedArraySpectrumPropagationLossModelAttribute("MaxDistance",
-                                                                  DoubleValue(2 * isd));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
-    nrHelper->SetChannelConditionModelAttribute("LinkO2iConditionToAntennaHeight",
-                                                BooleanValue(linkO2iConditionToAntennaHeight));
-    nrHelper->SetChannelConditionModelAttribute("O2iThreshold", DoubleValue(o2iThreshold));
-    nrHelper->SetChannelConditionModelAttribute("O2iLowLossThreshold",
-                                                DoubleValue(o2iLowLossThreshold));
-
     std::cout << "o2iThreshold: " << o2iThreshold << std::endl;
     std::cout << "o2iLowLossThreshold: " << o2iLowLossThreshold << std::endl;
-
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(enableShadowing));
 
     // Noise figure for the gNB
     nrHelper->SetGnbPhyAttribute("NoiseFigure", DoubleValue(gnbNoiseFigure));
     // Noise figure for the UE
     nrHelper->SetUePhyAttribute("NoiseFigure", DoubleValue(ueNoiseFigure));
     nrHelper->SetUePhyAttribute("EnableUplinkPowerControl", BooleanValue(enableUlPc));
-
     if (radioNetwork == "LTE" && confType == "calibrationConf" && enableUlPc)
     {
         Config::SetDefault("ns3::NrUePowerControl::ClosedLoop", BooleanValue(false));
@@ -336,6 +336,15 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
         Config::SetDefault("ns3::NrUePowerControl::PoNominalPusch", IntegerValue(-106));
         Config::SetDefault("ns3::NrUePowerControl::Alpha",
                            DoubleValue(1.0)); // well this is the default value also
+    }
+
+    if (enableSubbandScheluder)
+    {
+        Config::SetDefault("ns3::NrMacSchedulerNs3::McsCsiSource",
+                           EnumValue<NrMacSchedulerUeInfo::McsCsiSource>(m_mcsCsiSource));
+        // 3GPP clamping to [-1,+2] of wideband, enabled by default
+        Config::SetDefault("ns3::NrPmSearch::SubbandCqiClamping",
+                           BooleanValue(m_subbandCqiClamping));
     }
 
     Config::SetDefault("ns3::NrMacSchedulerSrsDefault::StartingPeriodicity", UintegerValue(16));
@@ -368,8 +377,8 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     nrHelper->SetDlErrorModel(errorModel);
 
     // Both DL and UL AMC will have the same model behind.
-    nrHelper->SetGnbDlAmcAttribute("AmcModel", EnumValue(NrAmc::ShannonModel));
-    nrHelper->SetGnbUlAmcAttribute("AmcModel", EnumValue(NrAmc::ShannonModel));
+    nrHelper->SetGnbDlAmcAttribute("AmcModel", EnumValue(NrAmc::ErrorModel));
+    nrHelper->SetGnbUlAmcAttribute("AmcModel", EnumValue(NrAmc::ErrorModel));
 
     /*
      * Adjust the average number of Reference symbols per RB only for LTE case,
@@ -378,9 +387,11 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     nrHelper->SetGnbDlAmcAttribute("NumRefScPerRb", UintegerValue(numScPerRb));
     nrHelper->SetGnbUlAmcAttribute("NumRefScPerRb", UintegerValue(1)); // FIXME: Might change in LTE
 
-    nrHelper->SetGnbPhyAttribute("RbOverhead", DoubleValue(rbOverhead));
+    nrHelper->SetAttribute("RbOverhead", DoubleValue(rbOverhead));
     nrHelper->SetGnbPhyAttribute("N2Delay", UintegerValue(n2Delay));
     nrHelper->SetGnbPhyAttribute("N1Delay", UintegerValue(n1Delay));
+    nrHelper->SetGnbPhyAttribute("TbDecodeLatency", TimeValue(MicroSeconds(0)));
+    // TbDecodeLatency
 
     nrHelper->SetUeMacAttribute("NumHarqProcess", UintegerValue(harqProcesses));
     nrHelper->SetGnbMacAttribute("NumHarqProcess", UintegerValue(harqProcesses));
@@ -459,39 +470,27 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
                                          << (int)numCcPerBand << ", " << (int)numBwp);
 
         NS_LOG_LOGIC("bandConf0: " << bandCenter << " " << bandwidthBand);
-        CcBwpCreator::SimpleOperationBandConf bandConf0(bandCenter,
-                                                        bandwidthBand,
-                                                        numCcPerBand,
-                                                        scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf0(bandCenter, bandwidthBand, numCcPerBand);
         bandConf0.m_numBwp = numBwp;
         bandCenter += bandwidthBand;
 
         NS_LOG_LOGIC("bandConf1: " << bandCenter << " " << bandwidthBand);
-        CcBwpCreator::SimpleOperationBandConf bandConf1(bandCenter,
-                                                        bandwidthBand,
-                                                        numCcPerBand,
-                                                        scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf1(bandCenter, bandwidthBand, numCcPerBand);
         bandConf1.m_numBwp = numBwp;
         bandCenter += bandwidthBand;
 
         NS_LOG_LOGIC("bandConf2: " << bandCenter << " " << bandwidthBand);
-        CcBwpCreator::SimpleOperationBandConf bandConf2(bandCenter,
-                                                        bandwidthBand,
-                                                        numCcPerBand,
-                                                        scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf2(bandCenter, bandwidthBand, numCcPerBand);
         bandConf2.m_numBwp = numBwp;
 
         // Create, then configure
         CcBwpCreator ccBwpCreator;
         band0 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf0);
         band0.m_bandId = 0;
-
         band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
         band1.m_bandId = 1;
-
         band2 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf2);
         band2.m_bandId = 2;
-
         bandCenter = band0Start + bandwidthBwp / 2.0;
 
         NS_LOG_LOGIC("band0[0][0]: " << bandCenter << " " << bandwidthBwp);
@@ -503,7 +502,6 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
             NS_LOG_LOGIC("band0[0][1]: " << bandCenter << " " << bandwidthBwp);
             ConfigureBwpTo(band0.m_cc[0]->m_bwp[1], bandCenter, bandwidthBwp);
             bandCenter += bandwidthBwp;
-            Config::SetDefault("ns3::NrUeNetDevice::PrimaryUlIndex", UintegerValue(1));
         }
 
         NS_LOG_LOGIC("band1[0][0]: " << bandCenter << " " << bandwidthBwp);
@@ -543,10 +541,7 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
                                      << (int)numBwp);
 
         NS_LOG_LOGIC("bandConf0: " << bandCenter << " " << bandwidthBand);
-        CcBwpCreator::SimpleOperationBandConf bandConf0(bandCenter,
-                                                        bandwidthBand,
-                                                        numCcPerBand,
-                                                        scene);
+        CcBwpCreator::SimpleOperationBandConf bandConf0(bandCenter, bandwidthBand, numCcPerBand);
         bandConf0.m_numBwp = numBwp;
         bandCenter += bandwidthBand;
 
@@ -554,7 +549,6 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
         CcBwpCreator ccBwpCreator;
         band0 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf0);
         band0.m_bandId = 0;
-
         bandCenter = band0Start + bandwidthBwp / 2.0;
 
         NS_LOG_LOGIC("band0[0][0]: " << bandCenter << " " << bandwidthBwp);
@@ -577,17 +571,96 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
                   << " and operationMode = " << operationMode << std::endl;
         exit(1);
     }
-
-    auto bandMask = NrHelper::INIT_PROPAGATION | NrHelper::INIT_CHANNEL;
-    // Omit fading from calibration mode
-    if (enableFading)
+    // Create the NrChannelHelper, which takes care of the spectrum channel
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Configure the spectrum channel with the scenario
+    channelHelper->ConfigureFactories(scenario, "Default");
+    // Set the channel condition attributes
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetChannelConditionModelAttribute("LinkO2iConditionToAntennaHeight",
+                                                     BooleanValue(linkO2iConditionToAntennaHeight));
+    channelHelper->SetChannelConditionModelAttribute("O2iThreshold", DoubleValue(o2iThreshold));
+    channelHelper->SetChannelConditionModelAttribute("O2iLowLossThreshold",
+                                                     DoubleValue(o2iLowLossThreshold));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(enableShadowing));
+    channelHelper->SetWraparoundModel(wraparoundModel);
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    // Configure Distance-based spectrum manually because it is not possible to set it via
+    // NrChannelHelper
+    ObjectFactory distanceBasedChannelFactory;
+    distanceBasedChannelFactory.SetTypeId(
+        DistanceBasedThreeGppSpectrumPropagationLossModel::GetTypeId());
+    distanceBasedChannelFactory.Set("MaxDistance", DoubleValue(2 * isd));
+    for (size_t i = 0; i < band0.GetBwps().size(); i++)
     {
-        bandMask |= NrHelper::INIT_FADING;
+        auto distanceBased3gpp =
+            distanceBasedChannelFactory.Create<DistanceBasedThreeGppSpectrumPropagationLossModel>();
+        distanceBased3gpp->SetChannelModelAttribute(
+            "Frequency",
+            DoubleValue(band0.GetBwpAt(0, i)->m_centralFrequency));
+        distanceBased3gpp->SetChannelModelAttribute("Scenario", StringValue(scenario));
+        auto specChannelBand0 = channelHelper->CreateChannel(NrChannelHelper::INIT_PROPAGATION);
+        // Create the channel considering only the propagation loss. Create the fading in
+        // case of non-calibration
+        if (enableFading)
+        {
+            PointerValue channelConditionModel0;
+            specChannelBand0->GetPropagationLossModel()->GetAttribute("ChannelConditionModel",
+                                                                      channelConditionModel0);
+            distanceBased3gpp->SetChannelModelAttribute(
+                "ChannelConditionModel",
+                PointerValue(channelConditionModel0.Get<ChannelConditionModel>()));
+            specChannelBand0->AddPhasedArraySpectrumPropagationLossModel(distanceBased3gpp);
+        }
+        band0.GetBwpAt(0, i)->SetChannel(specChannelBand0);
     }
-    nrHelper->InitializeOperationBand(&band0, bandMask);
-    nrHelper->InitializeOperationBand(&band1, bandMask);
-    nrHelper->InitializeOperationBand(&band2, bandMask);
-
+    for (size_t i = 0; i < band1.GetBwps().size(); i++)
+    {
+        auto distanceBased3gpp =
+            distanceBasedChannelFactory.Create<DistanceBasedThreeGppSpectrumPropagationLossModel>();
+        distanceBased3gpp->SetChannelModelAttribute(
+            "Frequency",
+            DoubleValue(band1.GetBwpAt(0, i)->m_centralFrequency));
+        distanceBased3gpp->SetChannelModelAttribute("Scenario", StringValue(scenario));
+        auto specChannelBand1 = channelHelper->CreateChannel(NrChannelHelper::INIT_PROPAGATION);
+        // Create the channel considering only the propagation loss. Create the fading in
+        // case of non-calibration
+        if (enableFading)
+        {
+            PointerValue channelConditionModel1;
+            specChannelBand1->GetPropagationLossModel()->GetAttribute("ChannelConditionModel",
+                                                                      channelConditionModel1);
+            distanceBased3gpp->SetChannelModelAttribute(
+                "ChannelConditionModel",
+                PointerValue(channelConditionModel1.Get<ChannelConditionModel>()));
+            specChannelBand1->AddPhasedArraySpectrumPropagationLossModel(distanceBased3gpp);
+        }
+        band1.GetBwpAt(0, i)->SetChannel(specChannelBand1);
+    }
+    for (size_t i = 0; i < band2.GetBwps().size(); i++)
+    {
+        auto distanceBased3gpp =
+            distanceBasedChannelFactory.Create<DistanceBasedThreeGppSpectrumPropagationLossModel>();
+        distanceBased3gpp->SetAttribute("MaxDistance", DoubleValue(200 * isd));
+        distanceBased3gpp->SetChannelModelAttribute("Scenario", StringValue(scenario));
+        distanceBased3gpp->SetChannelModelAttribute(
+            "Frequency",
+            DoubleValue(band2.GetBwpAt(0, i)->m_centralFrequency));
+        auto specChannelBand2 = channelHelper->CreateChannel(NrChannelHelper::INIT_PROPAGATION);
+        // Create the channel considering only the propagation loss. Create the fading in
+        // case of non-calibration
+        if (enableFading)
+        {
+            PointerValue channelConditionModel2;
+            specChannelBand2->GetPropagationLossModel()->GetAttribute("ChannelConditionModel",
+                                                                      channelConditionModel2);
+            distanceBased3gpp->SetChannelModelAttribute(
+                "ChannelConditionModel",
+                PointerValue(channelConditionModel2.Get<ChannelConditionModel>()));
+            specChannelBand2->AddPhasedArraySpectrumPropagationLossModel(distanceBased3gpp);
+        }
+        band2.GetBwpAt(0, i)->SetChannel(specChannelBand2);
+    }
     BandwidthPartInfoPtrVector sector1Bwps;
     BandwidthPartInfoPtrVector sector2Bwps;
     BandwidthPartInfoPtrVector sector3Bwps;
@@ -632,10 +705,11 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
                     beamformingHelper->SetAttribute("BeamformingPeriodicity",
                                                     TimeValue(MilliSeconds(10)));
                 }
-                else if (bfMethod == "CellScanAzimuth")
+                else if (bfMethod == "KroneckerQuasiOmniBeamforming")
                 {
-                    beamformingHelper->SetBeamformingMethod(
-                        CellScanBeamformingAzimuthZenith::GetTypeId());
+                    beamformingHelper->SetAttribute(
+                        "BeamformingMethod",
+                        TypeIdValue(KroneckerQuasiOmniBeamforming::GetTypeId()));
                 }
                 else
                 {
@@ -669,7 +743,8 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     {
         if (scheduler == "PF")
         {
-            nrHelper->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerTdmaPF"));
+            nrHelper->SetSchedulerTypeId(
+                TypeId::LookupByName("ns3::NrMacSchedulerTdmaPF")); // NrMacSchedulerTdmaPF
         }
         else if (scheduler == "RR")
         {
@@ -700,9 +775,19 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     // Core latency
     nrEpcHelper->SetAttribute("S1uLinkDelay", TimeValue(MilliSeconds(0)));
 
+    if (enableMimo)
+    {
+        nrHelper->SetupMimoPmi(mimoPmiParams);
+    }
     // Antennas for all the UEs
     nrHelper->SetUeAntennaAttribute("NumRows", UintegerValue(ueNumRows));
     nrHelper->SetUeAntennaAttribute("NumColumns", UintegerValue(ueNumColumns));
+
+    nrHelper->SetUeAntennaAttribute("NumVerticalPorts", UintegerValue(numVPortsUe));
+    nrHelper->SetUeAntennaAttribute("NumHorizontalPorts", UintegerValue(numHPortsUe));
+
+    nrHelper->SetUeAntennaAttribute("IsDualPolarized", BooleanValue(dualPolarizedUe));
+    nrHelper->SetUeAntennaAttribute("PolSlantAngle", DoubleValue(PolSlantAngleUe * M_PI / 180.0));
 
     if (ueEnable3gppElement)
     {
@@ -726,6 +811,12 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     nrHelper->SetGnbAntennaAttribute("AntennaVerticalSpacing", DoubleValue(gnbVSpacing));
 
     nrHelper->SetGnbAntennaAttribute("DowntiltAngle", DoubleValue(downtiltAngle * M_PI / 180.0));
+
+    nrHelper->SetGnbAntennaAttribute("IsDualPolarized", BooleanValue(dualPolarizedGnb));
+    nrHelper->SetGnbAntennaAttribute("PolSlantAngle", DoubleValue(PolSlantAngleGnb * M_PI / 180.0));
+    nrHelper->SetGnbAntennaAttribute("NumVerticalPorts", UintegerValue(numVPortsGnb));
+    nrHelper->SetGnbAntennaAttribute("NumHorizontalPorts", UintegerValue(numHPortsGnb));
+    // nrHelper->SetUeSpectrumAttribute("NumAntennaPanel", UintegerValue(1));
 
     if (gnbEnable3gppElement)
     {
@@ -757,13 +848,13 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
         case 40:
         case 20:
         case 15:
-            nrHelper->SetGnbMacAttribute("NumRbPerRbg", UintegerValue(4));
+            nrHelper->SetAttribute("NumRbPerRbg", UintegerValue(4));
             break;
         case 10:
-            nrHelper->SetGnbMacAttribute("NumRbPerRbg", UintegerValue(3));
+            nrHelper->SetAttribute("NumRbPerRbg", UintegerValue(3));
             break;
         case 5:
-            nrHelper->SetGnbMacAttribute("NumRbPerRbg", UintegerValue(2));
+            nrHelper->SetAttribute("NumRbPerRbg", UintegerValue(2));
             break;
         default:
             NS_ABORT_MSG(
@@ -773,7 +864,7 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     }
     else
     {
-        nrHelper->SetGnbMacAttribute("NumRbPerRbg", UintegerValue(1));
+        nrHelper->SetAttribute("NumRbPerRbg", UintegerValue(1));
     }
 
     // We assume a common traffic pattern for all UEs
@@ -786,9 +877,6 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     // gNb routing between Bearer and bandwidth part
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB",
                                                  UintegerValue(bwpIdForLowLat));
-
-    // Ue routing between Bearer and bandwidth part
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdForLowLat));
 
     //  NetDeviceContainer gnbNetDev = nrHelper->InstallGnbDevice (gridScenario.GetBaseStations (),
     //  allBwps);
@@ -805,13 +893,90 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     ueSector3NetDev = nrHelper->InstallUeDevice(ueSector3Container, sector3Bwps);
     ueNetDevs.Add(ueSector3NetDev);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbSector1NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(gnbSector2NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(gnbSector3NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector1NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector2NetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueSector3NetDev, randomStream);
+    NetDeviceContainer picoGnbNetDev;
+    if (picoGnbNodes.GetN() > 0)
+    {
+        // Reuse the same BWPs as the deployment you want to mimic.
+        // If pico cells belong to sector 1 band plan, sector1Bwps is a reasonable default.
+        // For overlapping deployments all sectors already use the same BWPs.
+        BandwidthPartInfoPtrVector picoBwps = sector1Bwps;
+
+        // Force pico behavior:
+        // - isotropic antenna element
+        // - omni beamforming
+        gnbEnable3gppElement = false;
+        bfMethod = "Omni";
+
+        // Re-apply the pico-specific antenna element on the helper
+        nrHelper->SetGnbAntennaAttribute("NumRows", UintegerValue(gnbNumRows));
+        nrHelper->SetGnbAntennaAttribute("NumColumns", UintegerValue(gnbNumColumns));
+        nrHelper->SetGnbAntennaAttribute("AntennaHorizontalSpacing", DoubleValue(gnbHSpacing));
+        nrHelper->SetGnbAntennaAttribute("AntennaVerticalSpacing", DoubleValue(gnbVSpacing));
+        nrHelper->SetGnbAntennaAttribute("DowntiltAngle",
+                                         DoubleValue(downtiltAngle * M_PI / 180.0));
+        nrHelper->SetGnbAntennaAttribute("IsDualPolarized", BooleanValue(dualPolarizedGnb));
+        nrHelper->SetGnbAntennaAttribute("PolSlantAngle",
+                                         DoubleValue(PolSlantAngleGnb * M_PI / 180.0));
+        nrHelper->SetGnbAntennaAttribute("NumVerticalPorts", UintegerValue(numVPortsGnb));
+        nrHelper->SetGnbAntennaAttribute("NumHorizontalPorts", UintegerValue(numHPortsGnb));
+        nrHelper->SetGnbAntennaAttribute("AntennaElement",
+                                         PointerValue(CreateObject<IsotropicAntennaModel>()));
+
+        // If fading/beamforming is enabled, force omni beamforming method for pico nodes
+        if (enableFading)
+        {
+            beamformingHelper->SetBeamformingMethod(QuasiOmniDirectPathBeamforming::GetTypeId());
+        }
+
+        // Install pico gNB devices with same general NR settings as macros
+        picoGnbNetDev = nrHelper->InstallGnbDevice(picoGnbNodes, picoBwps);
+
+        // Configure pico PHYs:
+        // use same numerology / tx power / pattern,
+        // but set horizontal bearing to 0 rad (or any pico azimuth you prefer)
+        for (uint32_t i = 0; i < picoGnbNetDev.GetN(); ++i)
+        {
+            Ptr<NetDevice> gnb = picoGnbNetDev.Get(i);
+            uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
+
+            // Horizontal orientation = 0 rad for omni pico
+            double picoOrientation = 0.0;
+
+            ConfigurePhy(nrHelper,
+                         gnb,
+                         picoOrientation,
+                         numerology,
+                         txPowerBs,
+                         pattern,
+                         0,
+                         gnbFirstSubArray,
+                         gnbSecondSubArray,
+                         beamConfSector,
+                         beamConfElevation);
+
+            if (numBwps == 2)
+            {
+                ConfigurePhy(nrHelper,
+                             gnb,
+                             picoOrientation,
+                             numerology,
+                             txPowerBs,
+                             pattern,
+                             1,
+                             gnbFirstSubArray,
+                             gnbSecondSubArray,
+                             beamConfSector,
+                             beamConfElevation);
+
+                NrHelper::GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
+            }
+        }
+    }
+
+    NetDeviceContainer gnbNetDevsWithPico;
+    gnbNetDevsWithPico.Add(gnbNetDevs);
+    gnbNetDevsWithPico.Add(picoGnbNetDev);
+    nrHelper->AssignStreams({.gnbDevs = gnbNetDevsWithPico, .ueDevs = ueNetDevs});
 
     // Sectors (cells) of a site are pointing at different directions
     std::vector<double> sectorOrientationRad{
@@ -823,7 +988,7 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     for (uint32_t cellId = 0; cellId < gnbNetDevs.GetN(); ++cellId)
     {
         Ptr<NetDevice> gnb = gnbNetDevs.Get(cellId);
-        uint32_t numBwps = nrHelper->GetNumberBwp(gnb);
+        uint32_t numBwps = NrHelper::GetNumberBwp(gnb);
         if (numBwps > 2)
         {
             NS_ABORT_MSG("Incorrect number of BWPs per CC");
@@ -859,7 +1024,7 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
                          beamConfSector,
                          beamConfElevation);
             // Link the two FDD BWP
-            nrHelper->GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
+            NrHelper::GetBwpManagerGnb(gnb)->SetOutputLink(1, 0);
         }
     }
 
@@ -869,7 +1034,7 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
     // Set the UE routing:
     for (auto nd = ueNetDevs.Begin(); nd != ueNetDevs.End(); ++nd)
     {
-        auto uePhyFirst = nrHelper->GetUePhy(*nd, 0);
+        auto uePhyFirst = NrHelper::GetUePhy(*nd, 0);
         auto uePhySecond{uePhyFirst};
 
         ObjectVectorValue ueSpectrumPhysFirstBwp;
@@ -897,8 +1062,7 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
 
         if (operationMode == "FDD")
         {
-            nrHelper->GetBwpManagerUe(*nd)->SetOutputLink(0, 1);
-            uePhySecond = nrHelper->GetUePhy(*nd, 1);
+            uePhySecond = NrHelper::GetUePhy(*nd, 1);
             uePhySecond->SetUplinkPowerControl(uePhyFirst->GetUplinkPowerControl());
 
             ObjectVectorValue ueSpectrumPhysSecondBwp;
@@ -913,7 +1077,6 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
                                                 MakeBoundCallback(&ReportPowerNr, ueTxPowerStats));
     }
 
-    // When all the configuration is done, explicitly call UpdateConfig ()
     for (auto nd = gnbNetDevs.Begin(); nd != gnbNetDevs.End(); ++nd)
     {
         uint32_t bwpId = 0;
@@ -921,7 +1084,7 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
         {
             bwpId = 1;
         }
-        auto gnbPhy = nrHelper->GetGnbPhy(*nd, bwpId);
+        auto gnbPhy = NrHelper::GetGnbPhy(*nd, bwpId);
         gnbPhy->TraceConnectWithoutContext("SlotDataStats",
                                            MakeBoundCallback(&ReportSlotStatsNr, slotStats));
         gnbPhy->TraceConnectWithoutContext("RBDataStats",
@@ -929,13 +1092,6 @@ LenaV2Utils::SetLenaV2SimulatorParameters(const double sector0AngleRad,
         gnbPhy->GetSpectrumPhy()->TraceConnectWithoutContext(
             "RxDataTrace",
             MakeBoundCallback(&ReportGnbRxDataNr, gnbRxPowerStats));
-
-        DynamicCast<NrGnbNetDevice>(*nd)->UpdateConfig();
-    }
-
-    for (auto nd = ueNetDevs.Begin(); nd != ueNetDevs.End(); ++nd)
-    {
-        DynamicCast<NrUeNetDevice>(*nd)->UpdateConfig();
     }
 }
 

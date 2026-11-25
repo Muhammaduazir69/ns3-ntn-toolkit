@@ -9,7 +9,7 @@
 #ifndef LR_WPAN_SPECTRUM_SIGNAL_PARAMETERS_H
 #define LR_WPAN_SPECTRUM_SIGNAL_PARAMETERS_H
 
-#include <ns3/spectrum-signal-parameters.h>
+#include "ns3/spectrum-signal-parameters.h"
 
 namespace ns3
 {
@@ -20,7 +20,7 @@ namespace lrwpan
 {
 
 /**
- * \ingroup lr-wpan
+ * @ingroup lr-wpan
  *
  * Signal parameters for LrWpan.
  */
@@ -35,7 +35,7 @@ struct LrWpanSpectrumSignalParameters : public SpectrumSignalParameters
 
     /**
      * copy constructor
-     * \param p the object to copy from.
+     * @param p the object to copy from.
      */
     LrWpanSpectrumSignalParameters(const LrWpanSpectrumSignalParameters& p);
 
@@ -43,6 +43,11 @@ struct LrWpanSpectrumSignalParameters : public SpectrumSignalParameters
      * The packet burst being transmitted with this signal
      */
     Ptr<PacketBurst> packetBurst;
+
+    /**
+     * The duration of the preamble according to the PHY option selected.
+     */
+    Time preambleDuration;
 };
 
 } // namespace lrwpan

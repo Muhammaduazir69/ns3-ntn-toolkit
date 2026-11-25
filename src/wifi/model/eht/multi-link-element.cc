@@ -9,281 +9,16 @@
 #include "multi-link-element.h"
 
 #include "ns3/address-utils.h"
+#include "ns3/log.h"
 #include "ns3/mgt-headers.h"
 
 #include <utility>
 
+NS_LOG_COMPONENT_DEFINE("MultiLinkElement");
+
 namespace ns3
 {
 
-/**
- * CommonInfoBasicMle
- */
-
-uint16_t
-CommonInfoBasicMle::GetPresenceBitmap() const
-{
-    // see Sec. 9.4.2.312.2.1 of 802.11be D1.5
-    return (m_linkIdInfo.has_value() ? 0x0001 : 0x0) |
-           (m_bssParamsChangeCount.has_value() ? 0x0002 : 0x0) |
-           (m_mediumSyncDelayInfo.has_value() ? 0x0004 : 0x0) |
-           (m_emlCapabilities.has_value() ? 0x0008 : 0x0) |
-           (m_mldCapabilities.has_value() ? 0x0010 : 0x0);
-}
-
-uint8_t
-CommonInfoBasicMle::GetSize() const
-{
-    uint8_t ret = 7; // Common Info Length (1) + MLD MAC Address (6)
-    ret += (m_linkIdInfo.has_value() ? 1 : 0);
-    ret += (m_bssParamsChangeCount.has_value() ? 1 : 0);
-    ret += (m_mediumSyncDelayInfo.has_value() ? 2 : 0);
-    ret += (m_emlCapabilities.has_value() ? 2 : 0);
-    ret += (m_mldCapabilities.has_value() ? 2 : 0);
-    return ret;
-}
-
-void
-CommonInfoBasicMle::Serialize(Buffer::Iterator& start) const
-{
-    start.WriteU8(GetSize()); // Common Info Length
-    WriteTo(start, m_mldMacAddress);
-    if (m_linkIdInfo.has_value())
-    {
-        start.WriteU8(*m_linkIdInfo & 0x0f);
-    }
-    if (m_bssParamsChangeCount.has_value())
-    {
-        start.WriteU8(*m_bssParamsChangeCount);
-    }
-    if (m_mediumSyncDelayInfo.has_value())
-    {
-        start.WriteU8(m_mediumSyncDelayInfo->mediumSyncDuration);
-        uint8_t val = m_mediumSyncDelayInfo->mediumSyncOfdmEdThreshold |
-                      (m_mediumSyncDelayInfo->mediumSyncMaxNTxops << 4);
-        start.WriteU8(val);
-    }
-    if (m_emlCapabilities.has_value())
-    {
-        uint16_t val =
-            m_emlCapabilities->emlsrSupport | (m_emlCapabilities->emlsrPaddingDelay << 1) |
-            (m_emlCapabilities->emlsrTransitionDelay << 4) |
-            (m_emlCapabilities->emlmrSupport << 7) | (m_emlCapabilities->emlmrDelay << 8) |
-            (m_emlCapabilities->transitionTimeout << 11);
-        start.WriteHtolsbU16(val);
-    }
-    if (m_mldCapabilities.has_value())
-    {
-        uint16_t val =
-            m_mldCapabilities->maxNSimultaneousLinks | (m_mldCapabilities->srsSupport << 4) |
-            (m_mldCapabilities->tidToLinkMappingSupport << 5) |
-            (m_mldCapabilities->freqSepForStrApMld << 7) | (m_mldCapabilities->aarSupport << 12);
-        start.WriteHtolsbU16(val);
-    }
-}
-
-uint8_t
-CommonInfoBasicMle::Deserialize(Buffer::Iterator start, uint16_t presence)
-{
-    Buffer::Iterator i = start;
-
-    uint8_t length = i.ReadU8();
-    ReadFrom(i, m_mldMacAddress);
-    uint8_t count = 7;
-
-    if ((presence & 0x0001) != 0)
-    {
-        m_linkIdInfo = i.ReadU8() & 0x0f;
-        count++;
-    }
-    if ((presence & 0x0002) != 0)
-    {
-        m_bssParamsChangeCount = i.ReadU8();
-        count++;
-    }
-    if ((presence & 0x0004) != 0)
-    {
-        m_mediumSyncDelayInfo = MediumSyncDelayInfo();
-        m_mediumSyncDelayInfo->mediumSyncDuration = i.ReadU8();
-        uint8_t val = i.ReadU8();
-        m_mediumSyncDelayInfo->mediumSyncOfdmEdThreshold = val & 0x0f;
-        m_mediumSyncDelayInfo->mediumSyncMaxNTxops = (val >> 4) & 0x0f;
-        count += 2;
-    }
-    if ((presence & 0x0008) != 0)
-    {
-        m_emlCapabilities = EmlCapabilities();
-        uint16_t val = i.ReadLsbtohU16();
-        m_emlCapabilities->emlsrSupport = val & 0x0001;
-        m_emlCapabilities->emlsrPaddingDelay = (val >> 1) & 0x0007;
-        m_emlCapabilities->emlsrTransitionDelay = (val >> 4) & 0x0007;
-        m_emlCapabilities->emlmrSupport = (val >> 7) & 0x0001;
-        m_emlCapabilities->emlmrDelay = (val >> 8) & 0x0007;
-        m_emlCapabilities->transitionTimeout = (val >> 11) & 0x000f;
-        count += 2;
-    }
-    if ((presence & 0x0010) != 0)
-    {
-        m_mldCapabilities = MldCapabilities();
-        uint16_t val = i.ReadLsbtohU16();
-        m_mldCapabilities->maxNSimultaneousLinks = val & 0x000f;
-        m_mldCapabilities->srsSupport = (val >> 4) & 0x0001;
-        m_mldCapabilities->tidToLinkMappingSupport = (val >> 5) & 0x0003;
-        m_mldCapabilities->freqSepForStrApMld = (val >> 7) & 0x001f;
-        m_mldCapabilities->aarSupport = (val >> 12) & 0x0001;
-        count += 2;
-    }
-
-    NS_ABORT_MSG_IF(count != length,
-                    "Common Info Length (" << +length
-                                           << ") differs "
-                                              "from actual number of bytes read ("
-                                           << +count << ")");
-    return count;
-}
-
-uint8_t
-CommonInfoBasicMle::EncodeEmlsrPaddingDelay(Time delay)
-{
-    auto delayUs = delay.GetMicroSeconds();
-
-    if (delayUs == 0)
-    {
-        return 0;
-    }
-
-    for (uint8_t i = 1; i <= 4; i++)
-    {
-        if (1 << (i + 4) == delayUs)
-        {
-            return i;
-        }
-    }
-
-    NS_ABORT_MSG("Value not allowed (" << delay.As(Time::US) << ")");
-    return 0;
-}
-
-Time
-CommonInfoBasicMle::DecodeEmlsrPaddingDelay(uint8_t value)
-{
-    NS_ABORT_MSG_IF(value > 4, "Value not allowed (" << +value << ")");
-    if (value == 0)
-    {
-        return MicroSeconds(0);
-    }
-    return MicroSeconds(1 << (4 + value));
-}
-
-uint8_t
-CommonInfoBasicMle::EncodeEmlsrTransitionDelay(Time delay)
-{
-    auto delayUs = delay.GetMicroSeconds();
-
-    if (delayUs == 0)
-    {
-        return 0;
-    }
-
-    for (uint8_t i = 1; i <= 5; i++)
-    {
-        if (1 << (i + 3) == delayUs)
-        {
-            return i;
-        }
-    }
-
-    NS_ABORT_MSG("Value not allowed (" << delay.As(Time::US) << ")");
-    return 0;
-}
-
-Time
-CommonInfoBasicMle::DecodeEmlsrTransitionDelay(uint8_t value)
-{
-    NS_ABORT_MSG_IF(value > 5, "Value not allowed (" << +value << ")");
-    if (value == 0)
-    {
-        return MicroSeconds(0);
-    }
-    return MicroSeconds(1 << (3 + value));
-}
-
-void
-CommonInfoBasicMle::SetMediumSyncDelayTimer(Time delay)
-{
-    int64_t delayUs = delay.GetMicroSeconds();
-    NS_ABORT_MSG_IF(delayUs % 32 != 0, "Delay must be a multiple of 32 microseconds");
-    delayUs /= 32;
-
-    if (!m_mediumSyncDelayInfo.has_value())
-    {
-        m_mediumSyncDelayInfo = CommonInfoBasicMle::MediumSyncDelayInfo{};
-    }
-    m_mediumSyncDelayInfo->mediumSyncDuration = (delayUs & 0xff);
-}
-
-Time
-CommonInfoBasicMle::GetMediumSyncDelayTimer() const
-{
-    NS_ASSERT(m_mediumSyncDelayInfo);
-    return MicroSeconds(m_mediumSyncDelayInfo->mediumSyncDuration * 32);
-}
-
-void
-CommonInfoBasicMle::SetMediumSyncOfdmEdThreshold(int8_t threshold)
-{
-    NS_ABORT_MSG_IF(threshold < -72 || threshold > -62, "Threshold may range from -72 to -62 dBm");
-    uint8_t value = 72 + threshold;
-
-    if (!m_mediumSyncDelayInfo.has_value())
-    {
-        m_mediumSyncDelayInfo = CommonInfoBasicMle::MediumSyncDelayInfo{};
-    }
-    m_mediumSyncDelayInfo->mediumSyncOfdmEdThreshold = value;
-}
-
-int8_t
-CommonInfoBasicMle::GetMediumSyncOfdmEdThreshold() const
-{
-    NS_ASSERT(m_mediumSyncDelayInfo);
-    return (m_mediumSyncDelayInfo->mediumSyncOfdmEdThreshold) - 72;
-}
-
-void
-CommonInfoBasicMle::SetMediumSyncMaxNTxops(uint8_t nTxops)
-{
-    NS_ASSERT_MSG(nTxops < 16, "Value " << +nTxops << "cannot be encoded in 4 bits");
-
-    if (!m_mediumSyncDelayInfo.has_value())
-    {
-        m_mediumSyncDelayInfo = CommonInfoBasicMle::MediumSyncDelayInfo{};
-    }
-
-    if (nTxops == 0)
-    {
-        // no limit on max number of TXOPs
-        m_mediumSyncDelayInfo->mediumSyncMaxNTxops = 15;
-        return;
-    }
-
-    m_mediumSyncDelayInfo->mediumSyncMaxNTxops = --nTxops;
-}
-
-std::optional<uint8_t>
-CommonInfoBasicMle::GetMediumSyncMaxNTxops() const
-{
-    NS_ASSERT(m_mediumSyncDelayInfo);
-    uint8_t nTxops = m_mediumSyncDelayInfo->mediumSyncMaxNTxops;
-    if (nTxops == 15)
-    {
-        return std::nullopt;
-    }
-    return nTxops + 1;
-}
-
-/**
- * MultiLinkElement
- */
 MultiLinkElement::MultiLinkElement(ContainingFrame frame)
     : m_containingFrame(frame),
       m_commonInfo(std::in_place_type<std::monostate>) // initialize as UNSET
@@ -325,6 +60,9 @@ MultiLinkElement::SetVariant(Variant variant)
     {
     case BASIC_VARIANT:
         m_commonInfo = CommonInfoBasicMle();
+        break;
+    case PROBE_REQUEST_VARIANT:
+        m_commonInfo = CommonInfoProbeReqMle();
         break;
     default:
         NS_ABORT_MSG("Unsupported variant: " << +variant);
@@ -493,6 +231,39 @@ MultiLinkElement::GetTransitionTimeout() const
     return MicroSeconds(1 << (6 + emlCapabilities->transitionTimeout));
 }
 
+void
+MultiLinkElement::SetApMldId(uint8_t id)
+{
+    const auto variant = GetVariant();
+    switch (variant)
+    {
+    case BASIC_VARIANT:
+        std::get<CommonInfoBasicMle>(m_commonInfo).m_apMldId = id;
+        return;
+    case PROBE_REQUEST_VARIANT:
+        std::get<CommonInfoProbeReqMle>(m_commonInfo).m_apMldId = id;
+        return;
+    default:
+        NS_ABORT_MSG("AP MLD ID field not present in input variant " << variant);
+    }
+}
+
+std::optional<uint8_t>
+MultiLinkElement::GetApMldId() const
+{
+    const auto variant = GetVariant();
+    switch (variant)
+    {
+    case BASIC_VARIANT:
+        return std::get<CommonInfoBasicMle>(m_commonInfo).m_apMldId;
+    case PROBE_REQUEST_VARIANT:
+        return std::get<CommonInfoProbeReqMle>(m_commonInfo).m_apMldId;
+    default:
+        NS_LOG_DEBUG("AP MLD ID field not present in input variant");
+    }
+    return std::nullopt;
+}
+
 MultiLinkElement::PerStaProfileSubelement::PerStaProfileSubelement(Variant variant)
     : m_variant(variant),
       m_staControl(0)
@@ -503,7 +274,8 @@ MultiLinkElement::PerStaProfileSubelement::PerStaProfileSubelement(
     const PerStaProfileSubelement& perStaProfile)
     : m_variant(perStaProfile.m_variant),
       m_staControl(perStaProfile.m_staControl),
-      m_staMacAddress(perStaProfile.m_staMacAddress)
+      m_staMacAddress(perStaProfile.m_staMacAddress),
+      m_bssParamsChgCnt(perStaProfile.m_bssParamsChgCnt)
 {
     // deep copy of the STA Profile field
     auto staProfileCopy = [&](auto&& frame) {
@@ -533,6 +305,7 @@ MultiLinkElement::PerStaProfileSubelement::operator=(const PerStaProfileSubeleme
     m_variant = perStaProfile.m_variant;
     m_staControl = perStaProfile.m_staControl;
     m_staMacAddress = perStaProfile.m_staMacAddress;
+    m_bssParamsChgCnt = perStaProfile.m_bssParamsChgCnt;
 
     // deep copy of the STA Profile field
     auto staProfileCopy = [&](auto&& frame) {
@@ -596,6 +369,29 @@ MultiLinkElement::PerStaProfileSubelement::GetStaMacAddress() const
 {
     NS_ABORT_IF(!HasStaMacAddress());
     return m_staMacAddress;
+}
+
+void
+MultiLinkElement::PerStaProfileSubelement::SetBssParamsChgCnt(uint8_t count)
+{
+    NS_ABORT_MSG_IF(m_variant != BASIC_VARIANT,
+                    "Expected Basic Variant, variant:" << +static_cast<uint8_t>(m_variant));
+    m_bssParamsChgCnt = count;
+    m_staControl |= 0x0800;
+}
+
+bool
+MultiLinkElement::PerStaProfileSubelement::HasBssParamsChgCnt() const
+{
+    return (m_staControl & 0x0800) != 0;
+}
+
+uint8_t
+MultiLinkElement::PerStaProfileSubelement::GetBssParamsChgCnt() const
+{
+    NS_ASSERT_MSG(m_bssParamsChgCnt.has_value(), "No value set for m_bssParamsChgCnt");
+    NS_ASSERT_MSG(HasBssParamsChgCnt(), "BSS Parameters Change count bit not set");
+    return m_bssParamsChgCnt.value();
 }
 
 void
@@ -669,14 +465,48 @@ MultiLinkElement::PerStaProfileSubelement::GetAssocResponse() const
     return *std::get<std::unique_ptr<MgtAssocResponseHeader>>(m_staProfile);
 }
 
+void
+MultiLinkElement::PerStaProfileSubelement::SetProbeResponse(const MgtProbeResponseHeader& probeResp)
+{
+    m_staProfile = std::make_unique<MgtProbeResponseHeader>(probeResp);
+}
+
+void
+MultiLinkElement::PerStaProfileSubelement::SetProbeResponse(MgtProbeResponseHeader&& probeResp)
+{
+    m_staProfile = std::make_unique<MgtProbeResponseHeader>(std::move(probeResp));
+}
+
+bool
+MultiLinkElement::PerStaProfileSubelement::HasProbeResponse() const
+{
+    return std::holds_alternative<std::unique_ptr<MgtProbeResponseHeader>>(m_staProfile);
+}
+
+MgtProbeResponseHeader&
+MultiLinkElement::PerStaProfileSubelement::GetProbeResponse() const
+{
+    NS_ABORT_IF(!HasProbeResponse());
+    return *std::get<std::unique_ptr<MgtProbeResponseHeader>>(m_staProfile);
+}
+
 uint8_t
 MultiLinkElement::PerStaProfileSubelement::GetStaInfoLength() const
 {
+    if (m_variant == PROBE_REQUEST_VARIANT)
+    {
+        return 0; // IEEE 802.11be 6.0 Figure 9-1072s
+    }
+
     uint8_t ret = 1; // STA Info Length
 
     if (HasStaMacAddress())
     {
         ret += 6;
+    }
+    if (HasBssParamsChgCnt())
+    {
+        ret += 1;
     }
     // TODO add other subfields of the STA Info field
     return ret;
@@ -721,12 +551,23 @@ MultiLinkElement::PerStaProfileSubelement::GetInformationFieldSize() const
 void
 MultiLinkElement::PerStaProfileSubelement::SerializeInformationField(Buffer::Iterator start) const
 {
-    start.WriteHtolsbU16(m_staControl);
+    if (m_variant == PROBE_REQUEST_VARIANT)
+    {
+        NS_ASSERT_MSG(IsCompleteProfileSet(), "Encoding of STA Profile not supported");
+        start.WriteU16(m_staControl);
+        return;
+    }
+
+    start.WriteU16(m_staControl);
     start.WriteU8(GetStaInfoLength());
 
     if (HasStaMacAddress())
     {
         WriteTo(start, m_staMacAddress);
+    }
+    if (HasBssParamsChgCnt())
+    {
+        start.WriteU8(GetBssParamsChgCnt());
     }
     // TODO add other subfields of the STA Info field
     auto staProfileSerialize = [&](auto&& frame) {
@@ -754,14 +595,23 @@ uint16_t
 MultiLinkElement::PerStaProfileSubelement::DeserializeInformationField(Buffer::Iterator start,
                                                                        uint16_t length)
 {
+    if (m_variant == PROBE_REQUEST_VARIANT)
+    {
+        return DeserProbeReqMlePerSta(start, length);
+    }
+
     Buffer::Iterator i = start;
 
-    m_staControl = i.ReadLsbtohU16();
+    m_staControl = i.ReadU16();
     i.ReadU8(); // STA Info Length
 
     if (HasStaMacAddress())
     {
         ReadFrom(i, m_staMacAddress);
+    }
+    if (HasBssParamsChgCnt())
+    {
+        m_bssParamsChgCnt = i.ReadU8();
     }
 
     // TODO add other subfields of the STA Info field
@@ -788,6 +638,59 @@ MultiLinkElement::PerStaProfileSubelement::DeserializeInformationField(Buffer::I
     std::visit(staProfileDeserialize, m_containingFrame);
 
     return count;
+}
+
+uint16_t
+MultiLinkElement::PerStaProfileSubelement::DeserProbeReqMlePerSta(ns3::Buffer::Iterator start,
+                                                                  uint16_t length)
+{
+    NS_ASSERT_MSG(m_variant == PROBE_REQUEST_VARIANT,
+                  "Invalid Multi-link Element variant = " << static_cast<uint8_t>(m_variant));
+    Buffer::Iterator i = start;
+    uint16_t count = 0;
+
+    m_staControl = i.ReadU16();
+    count += 2;
+
+    NS_ASSERT_MSG(count <= length,
+                  "Incorrect decoded size count =" << count << ", length=" << length);
+    if (count == length)
+    {
+        return count;
+    }
+
+    // TODO: Support decoding of Partial Per-STA Profile
+    // IEEE 802.11be D5.0 9.4.2.312.3 Probe Request Multi-Link element
+    // If the Complete Profile Requested subfield is set to 0 and the STA Profile field
+    // is present in a Per-STA Profile subelement,
+    // the STA Profile field includes exactly one of the following:
+    // - one Request element (see 9.4.2.9 (Request element)), or
+    // — one Extended Request element (see 9.4.2.10 (Extended Request element)), or
+    // — one Request element and one Extended Request element
+    NS_LOG_DEBUG("Decoding of STA Profile in Per-STA Profile subelement not supported");
+    while (count < length)
+    {
+        i.ReadU8();
+        count++;
+    }
+    return count;
+}
+
+void
+MultiLinkElement::PerStaProfileSubelement::Print(std::ostream& os) const
+{
+    os << "Per-STA Profile Subelement=[";
+    os << "Variant: " << +static_cast<uint8_t>(m_variant);
+    os << ", STA Control: " << +m_staControl;
+    if (HasStaMacAddress())
+    {
+        os << ", STA MAC Address: " << m_staMacAddress;
+    }
+    if (m_bssParamsChgCnt)
+    {
+        os << ", BSS Params Change Count: " << +m_bssParamsChgCnt.value();
+    }
+    os << "]";
 }
 
 void
@@ -861,7 +764,7 @@ MultiLinkElement::SerializeInformationField(Buffer::Iterator start) const
             {
                 uint16_t mlControl =
                     static_cast<uint8_t>(GetVariant()) + (arg.GetPresenceBitmap() << 4);
-                start.WriteHtolsbU16(mlControl);
+                start.WriteU16(mlControl);
                 arg.Serialize(start);
             }
         },
@@ -879,7 +782,7 @@ MultiLinkElement::DeserializeInformationField(Buffer::Iterator start, uint16_t l
     Buffer::Iterator i = start;
     uint16_t count = 0;
 
-    uint16_t mlControl = i.ReadLsbtohU16();
+    uint16_t mlControl = i.ReadU16();
     count += 2;
 
     SetVariant(static_cast<Variant>(mlControl & 0x0007));
@@ -920,6 +823,17 @@ MultiLinkElement::DeserializeInformationField(Buffer::Iterator start, uint16_t l
     }
 
     return count;
+}
+
+void
+MultiLinkElement::Print(std::ostream& os) const
+{
+    os << "Multi-Link Element=[Per-STA Profile Subelements: {";
+    for (const auto& subelement : m_perStaProfileSubelements)
+    {
+        subelement.Print(os);
+    }
+    os << "}]";
 }
 
 } // namespace ns3

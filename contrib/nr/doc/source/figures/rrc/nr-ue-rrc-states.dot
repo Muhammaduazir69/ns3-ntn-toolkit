@@ -1,0 +1,64 @@
+digraph NrUeRrcStates {
+
+    rankdir=TB;
+    node [shape="box", width=3, style="filled", fillcolor="white", fontname="Helvetica"];
+    edge [fontname="Helvetica", fontsize=10];
+
+    // ---- States (NrUeRrc::State, model/nr-ue-rrc.h) ----
+    // Idle-mode states
+    IDLE_START           [fillcolor="white"]
+    IDLE_CELL_SEARCH     [fillcolor="gray92"]
+    IDLE_WAIT_MIB_SIB1   [fillcolor="gray92"]
+    IDLE_WAIT_MIB        [fillcolor="gray92"]
+    IDLE_WAIT_SIB1       [fillcolor="gray92"]
+    IDLE_CAMPED_NORMALLY [fillcolor="gray92"]
+    IDLE_WAIT_SIB2       [fillcolor="gray92"]
+    IDLE_RANDOM_ACCESS   [fillcolor="gray92"]
+    IDLE_CONNECTING      [fillcolor="gray92"]
+    // Connected-mode states
+    CONNECTED_NORMALLY      [fillcolor="lightblue"]
+    CONNECTED_HANDOVER      [fillcolor="lightblue"]
+    CONNECTED_PHY_PROBLEM   [fillcolor="mistyrose"]
+    CONNECTED_REESTABLISHING [style="filled,dashed", fillcolor="white",
+                              label="CONNECTED_REESTABLISHING\n(declared, never entered - TODO)"]
+
+    // ======================= Network attachment =======================
+    // Manual attachment (a target cell is forced)
+    IDLE_START -> IDLE_WAIT_MIB          [label="manual attachment"]
+    IDLE_WAIT_MIB -> IDLE_CAMPED_NORMALLY [label="rx MIB"]
+    // Automatic attachment by cell selection
+    IDLE_START -> IDLE_CELL_SEARCH       [label="start cell selection\n(automatic attachment)"]
+    IDLE_CELL_SEARCH -> IDLE_WAIT_MIB_SIB1 [label="synchronized to\nstrongest cell"]
+    IDLE_WAIT_MIB_SIB1 -> IDLE_WAIT_SIB1 [label="rx MIB"]
+    IDLE_WAIT_SIB1 -> IDLE_CAMPED_NORMALLY [label="rx SIB1,\nsuitable cell"]
+    IDLE_WAIT_SIB1 -> IDLE_CELL_SEARCH   [label="rx SIB1,\nnot suitable (retry)"]
+
+    // ===================== Connection establishment =====================
+    IDLE_CAMPED_NORMALLY -> IDLE_WAIT_SIB2 [label="connection request\nby upper layer"]
+    IDLE_WAIT_SIB2 -> IDLE_RANDOM_ACCESS   [label="rx SIB2\n(start connection)"]
+    IDLE_RANDOM_ACCESS -> IDLE_CONNECTING  [label="random access ok\n(send RRC CONN REQ,\nstart T300)"]
+    IDLE_RANDOM_ACCESS -> IDLE_CAMPED_NORMALLY [label="RA failure\n(attempts < limit)"]
+    IDLE_RANDOM_ACCESS -> IDLE_CELL_SEARCH [label="RA failure\n(attempts >= limit)"]
+    IDLE_CONNECTING -> CONNECTED_NORMALLY  [label="rx RRC CONN SETUP\n(cancel T300)"]
+    IDLE_CONNECTING -> IDLE_CAMPED_NORMALLY [label="T300 expiry (count < limit)\nor rx RRC CONN REJECT"]
+    IDLE_CONNECTING -> CONNECTED_PHY_PROBLEM [color="red", fontcolor="red",
+                                             label="T300 expiry,\nconnEstFailCount\nlimit reached"]
+
+    // ============================ Handover ============================
+    CONNECTED_NORMALLY -> CONNECTED_HANDOVER [color="blue", fontcolor="blue",
+                          label="rx RRC CONN RECONF\nwith mobilityControlInfo"]
+    CONNECTED_HANDOVER -> CONNECTED_NORMALLY [color="blue", fontcolor="blue",
+                          label="random access ok\n(handover complete)"]
+    CONNECTED_HANDOVER -> CONNECTED_PHY_PROBLEM [color="red", fontcolor="red",
+                          label="RA failure\n(handover failure)"]
+
+    // ===================== Radio link failure / release =====================
+    CONNECTED_NORMALLY -> CONNECTED_PHY_PROBLEM [color="red", fontcolor="red",
+                          label="T310 expiry / RLF\n(reestablishment on);\nor RLC-AM max-retx (opt);\nor rx RRC CONN RELEASE"]
+    CONNECTED_NORMALLY -> IDLE_CELL_SEARCH [color="red", fontcolor="red",
+                          label="RLF\n(reestablishment off)"]
+
+    // ===================== Recovery to idle (NAS) =====================
+    CONNECTED_PHY_PROBLEM -> IDLE_START [color="darkgreen", fontcolor="darkgreen",
+                          label="NAS disconnect /\nLeaveConnectedMode"]
+}

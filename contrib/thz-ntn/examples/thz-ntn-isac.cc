@@ -25,12 +25,15 @@
 
 #include "thz-ntn-pass-kit.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
 #include <ns3/mobility-module.h>
 #include <ns3/node-container.h>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -155,6 +158,16 @@ main(int argc, char* argv[])
     std::vector<double> targetRanges = {1e3, 5e3, 10e3, 50e3, 100e3}; // metres
 
     std::cout << "  2. Debris Detection vs Range:\n";
+    // ntn-dataset@1: sections 2 and 3 as datasets next to the run record in outputDir
+    // (empty CRB cells where the console prints N/A), so the results follow the parameters.
+    std::filesystem::create_directories(outputDir);
+    std::ofstream detCsv(outputDir + "/thz-ntn-isac-detection.csv");
+    detCsv << "debris,rcs_dbsm,range_km,radar_snr_db,pd,crb_range_m,crb_velocity_m_s\n";
+    std::vector<ns3::ntnobs::DatasetMetric> metrics;
+    metrics.push_back({"array_gain_dbi", std::to_string(arrayGain), "analytic"});
+    metrics.push_back({"range_resolution_m", std::to_string(rangeRes), "analytic"});
+    metrics.push_back({"velocity_resolution_m_s", std::to_string(velRes), "analytic"});
+    metrics.push_back({"angular_resolution_deg", std::to_string(angRes), "analytic"});
     for (size_t d = 0; d < debrisCategories.size(); d++)
     {
         DebrisModel debris = isac->GetDebrisModel(debrisCategories[d]);
@@ -212,12 +225,34 @@ main(int argc, char* argv[])
                           << std::setw(12) << "N/A";
             }
             std::cout << "\n";
+            detCsv << debrisCategories[d] << "," << debris.rcs_dBsm << "," << range / 1000.0
+                   << "," << result.snr_dB << "," << result.detectionProbability << ",";
+            if (crbRange > 0.0)
+            {
+                detCsv << crbRange << "," << crbVel;
+            }
+            else
+            {
+                detCsv << ",";
+            }
+            detCsv << "\n";
+            if (debrisCategories[d] == "medium_10cm" && range == 10e3)
+            {
+                metrics.push_back(
+                    {"radar_snr_10cm_10km_db", std::to_string(result.snr_dB), "analytic"});
+                metrics.push_back({"pd_10cm_10km",
+                                   std::to_string(result.detectionProbability),
+                                   "analytic"});
+            }
         }
 
         // Maximum detection range (Pd > 0.9, Pfa = 1e-6)
         double maxRange = isac->ComputeMaxDetectionRange_km(rcs_m2, 13.0);
         std::cout << "  Max detection range (Pd>0.9): " << std::setprecision(1)
                   << maxRange << " km\n";
+        metrics.push_back(
+            {"max_detection_range_" + debrisCategories[d] + "_km", std::to_string(maxRange),
+             "analytic"});
     }
 
     // ---- ISAC resource split tradeoff ----
@@ -242,6 +277,8 @@ main(int argc, char* argv[])
     double debrisRange = 10e3; // 10 km
     double debrisRcs = std::pow(10.0, medDebris.rcs_dBsm / 10.0);
 
+    std::ofstream tradeCsv(outputDir + "/thz-ntn-isac-tradeoff.csv");
+    tradeCsv << "sensing_fraction,comm_rate_gbps,radar_snr_db,pd,total_efficiency\n";
     for (double split : splits)
     {
         isac->SetResourceSplit(split);
@@ -265,11 +302,18 @@ main(int argc, char* argv[])
                   << std::setprecision(3)
                   << std::setw(14) << perf.totalEfficiency
                   << "\n";
+        tradeCsv << split << "," << perf.commRate_Gbps << "," << radarSnr << "," << pd << ","
+                 << perf.totalEfficiency << "\n";
     }
 
     // ---- Run simulation ----
     Simulator::Stop(Seconds(1.0));
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    detCsv.close();
+    tradeCsv.close();
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "thz-ntn-isac", "analytic", argc, argv, metrics);
     Simulator::Destroy();
 
     std::cout << "\n  Simulation complete.\n";
@@ -294,7 +338,37 @@ main(int argc, char* argv[])
             pc.link.groundGainDbi = companionGainDbi;
             // Disjoint sub-bands: communication keeps (1 - s) of the channel.
             pc.link.bandwidthHz = (1.0 - shares[i]) * companionBandwidthGhz * 1e9;
-            res[i] = thzkit::RunPass(pc);
+            if (i == 0)
+            {
+                res[i] = thzkit::RunPass(pc);
+                continue;
+            }
+            // Globe scene of the joint ISAC pass: the SGP4 satellite, the terminal and, as a
+            // device-less context object, the 10 cm debris fragment of the trade-off section
+            // trailing the satellite in its own orbit at debrisRange (SGP4, same shell).
+            res[i] = thzkit::RunPass(
+                pc,
+                [&pc, &outputDir, debrisRange](Ptr<thzntn::ThzNtnPacketLink>,
+                                               Ptr<MobilityModel>,
+                                               Ptr<MobilityModel>) {
+                    ntncon::WalkerConfig w;
+                    w.num_planes = pc.planes;
+                    w.total_sats = pc.planes * pc.satsPerPlane;
+                    w.altitude_km = pc.altitudeKm;
+                    w.inclination_deg = pc.inclinationDeg;
+                    w.epoch_unix_s = pc.epochUnixS;
+                    ntncon::KeplerianElements el = ntncon::WalkerConstellation::BuildDelta(w)[0];
+                    el.mean_anomaly_rad = std::fmod(
+                        el.mean_anomaly_rad - debrisRange / el.semi_major_axis_m + 2.0 * M_PI,
+                        2.0 * M_PI);
+                    el.name = "DEBRIS-10CM";
+                    el.norad_id = 99990;
+                    auto debrisMob = CreateObject<ntncon::Sgp4MobilityModel>();
+                    debrisMob->SetElementsSgp4(el);
+                    ns3::ntnobs::AddContextSatelliteNodes(
+                        std::vector<Ptr<ntncon::Sgp4MobilityModel>>{debrisMob});
+                    ns3::ntnobs::StartSceneFromNodeList(outputDir);
+                });
         }
         std::printf("# measured companion (%.0f GHz, %.2f GHz channel): comm-only goodput %.1f "
                     "Mb/s ACM %.1f Mb/s PDR %.5f | sensing share %.2f goodput %.1f Mb/s ACM "

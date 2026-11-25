@@ -4,14 +4,14 @@
 
 #include "realistic-beamforming-helper.h"
 
-#include <ns3/log.h>
-#include <ns3/nr-gnb-net-device.h>
-#include <ns3/nr-gnb-phy.h>
-#include <ns3/nr-spectrum-phy.h>
-#include <ns3/nr-ue-net-device.h>
-#include <ns3/nr-ue-phy.h>
-#include <ns3/nr-ue-rrc.h>
-#include <ns3/vector.h>
+#include "ns3/log.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/nr-gnb-phy.h"
+#include "ns3/nr-spectrum-phy.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-ue-phy.h"
+#include "ns3/nr-ue-rrc.h"
+#include "ns3/vector.h"
 
 namespace ns3
 {
@@ -62,6 +62,7 @@ RealisticBeamformingHelper::AddBeamformingTask(const Ptr<NrGnbNetDevice>& gNbDev
 
         m_spectrumPhyPairToAlgorithm[std::make_pair(gnbSpectrumPhy, ueSpectrumPhy)] =
             beamformingAlgorithm;
+        m_algorithmsInCreationOrder.push_back(beamformingAlgorithm);
         // connect trace of the corresponding gNB PHY to the RealisticBeamformingAlgorithm
         // function
         gnbSpectrumPhy->AddSrsSinrReportCallback(
@@ -72,6 +73,18 @@ RealisticBeamformingHelper::AddBeamformingTask(const Ptr<NrGnbNetDevice>& gNbDev
         beamformingAlgorithm->SetTriggerCallback(
             MakeCallback(&RealisticBeamformingHelper::RunTask, this));
     }
+}
+
+int64_t
+RealisticBeamformingHelper::AssignStreams(int64_t stream)
+{
+    NS_LOG_FUNCTION(this << stream);
+    int64_t currentStream = stream;
+    for (const auto& algorithm : m_algorithmsInCreationOrder)
+    {
+        currentStream += algorithm->AssignStreams(currentStream);
+    }
+    return currentStream - stream;
 }
 
 BeamformingVectorPair

@@ -168,14 +168,14 @@ The Simulator API was designed to make it really simple to schedule most
 events. It provides three variants to do so (ordered from most commonly
 used to least commonly used):
 
-* Schedule methods which allow you to schedule an event in the future
+* ``Schedule`` methods which allow you to schedule an event in the future
   by providing the delay between the current simulation time and the
   expiration date of the target event.
-* ScheduleNow methods which allow you to schedule an event for the
+* ``ScheduleNow`` methods which allow you to schedule an event for the
   current simulation time: they will execute _after_ the current event is
   finished executing but _before_ the simulation time is changed for the
   next event.
-* ScheduleDestroy methods which allow you to hook in the shutdown
+* ``ScheduleDestroy`` methods which allow you to hook in the shutdown
   process of the Simulator to cleanup simulation resources: every
   'destroy' event is executed when the user calls the Simulator::Destroy
   method.
@@ -370,6 +370,79 @@ by a scalar (numeric value)). Times can be written to/read from IO streams.
 In the case of writing it is easy to choose the output unit, different
 from the resolution unit.
 
+Here are examples of common usage:
+
+.. sourcecode:: cpp
+
+    Time t1 = MilliSeconds(1500); // 1.5 s = 1500 ms
+    Time t2 = MicroSeconds(500);  // 500 microseconds
+    Time t3 = t1 + t2;            // arithmetic
+    Time t4 = t3 * 2;             // multiplication
+
+    if (t4 > Seconds(3))
+    {
+        std::cout << "t4 is greater than 3 seconds\n";
+    }
+
+    double ms = t4.GetMilliSeconds(); // convert to double in ms
+
+    std::cout << t4.As(Time::MS) << "\n"; // stream with specific unit
+
+.. note::
+
+   When using floating-point values with constructors like ``Seconds(1.5)``,
+   users should be aware that values smaller than the current resolution
+   will be rounded. For example, if the resolution is set to nanoseconds,
+   values like ``Seconds(1e-10)`` will be rounded to zero.
+   Consider inspecting ``Time::SetResolution()`` and using methods like
+   ``GetNanoSeconds()`` to understand how sub-resolution values behave in practice.
+
+When calling ``Time::SetResolution()``, there is a trade-off between
+the precision of time measurements and the maximum simulation time
+span that can be represented. Finer resolutions (like femtoseconds)
+allow for more precise timing but reduce the maximum representable
+duration.
+
+.. list-table::
+  :header-rows: 1
+  :widths: 25 25 50
+
+  * - Resolution Unit
+    - Smallest Step
+    - Approximate Max Time Span
+  * - Seconds
+    - 1 s
+    - ~2.9 × 10¹¹ years
+  * - Milliseconds
+    - 1 ms
+    - ~2.9 × 10⁸ years
+  * - Microseconds
+    - 1 µs
+    - ~2.9 × 10⁵ years
+  * - Nanoseconds
+    - 1 ns
+    - ~292 years
+  * - Picoseconds
+    - 1 ps
+    - ~107 days
+  * - Femtoseconds
+    - 1 fs
+    - ~2.6 hours
+
+A time interval can be represented through the ``TimeSpan`` class. A ``TimeSpan`` object
+can be created by defining the begin time and the end time (where the former must be less
+than or equal to the latter). An example of common usage follows:
+
+.. sourcecode:: cpp
+
+    TimeSpan interval(MilliSeconds(500), Seconds(1));
+    // alternatively, TimeSpan interval("{500ms, 1s}");
+
+    std::cout << interval.Duration() << std::endl; // prints "500ms"
+
+A ``TimeSpan`` object can be set/get via the attribute system using the ``TimeSpanValue``
+attribute value. The example `src/core/examples/timespan-example.cc` shows how a
+``TimeSpan`` object can be set via the attribute system or via the CommandLine system.
 
 Scheduler
 *********

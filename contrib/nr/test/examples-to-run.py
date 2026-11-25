@@ -215,6 +215,16 @@ cpp_examples = [
         "True",
     ),
     (
+        "cttc-nr-mimo-demo --bandwidth=2.5e6 --subbandSize=1 --beamformingMethod=ns3::KroneckerBeamforming",
+        "True",
+        "True",
+    ),
+    (
+        "cttc-nr-mimo-demo --bandwidth=2.5e6 --subbandSize=1 --beamformingMethod=ns3::KroneckerQuasiOmniBeamforming",
+        "True",
+        "True",
+    ),
+    (
         "cttc-nr-mimo-demo --fullSearchCb=ns3::NrCbTypeOneSp --pmSearchMethod=ns3::NrPmSearchFull --bandwidth=2.5e6 --subbandSize=1 --downsamplingTechnique=FirstPRB",
         "True",
         "True",
@@ -230,7 +240,7 @@ cpp_examples = [
         "True",
     ),
     (
-        "cttc-nr-mimo-demo --bandwidth=10e6 --useMimoPmiParams=true",
+        "cttc-nr-mimo-demo --bandwidth=10e6 --useConfigSetDefault=false",
         "True",
         "True",
     ),
@@ -245,12 +255,68 @@ cpp_examples = [
         "True",
     ),
     (
-        "cttc-nr-fh-xr --fhCapacity=5000 --fhControlMethod=OptimizeRBs --frequency=30e9 --bandwidth=400e6 --numerology=3 --deployment=SIMPLE --arUeNum=3 --vrUeNum=3 --cgUeNum=3 --voiceUeNum=3 --appDuration=3000 --enableTDD4_1=1 --enableMimoFeedback=1 --txPower=30 --distance=2 --channelUpdatePeriod=0 --channelConditionUpdatePeriod=0 --enableShadowing=0 --isLos=1 --enableHarqRetx=1 --useFixedMcs=0 --enableInterServ=0 --enablePdcpDiscarding=1 --schedulerType=PF --reorderingTimerMs=10",
+        "cttc-nr-fh-xr --fhCapacity=167 --fhControlMethod=OptimizeRBs --frequency=30e9 --bandwidth=40e6 --numerology=3 --deployment=SIMPLE --arUeNum=1 --vrUeNum=1 --cgUeNum=1 --voiceUeNum=1 --appDuration=1000 --enableTDD4_1=1 --enableMimoFeedback=1 --txPower=30 --distance=2 --channelUpdatePeriod=0 --channelConditionUpdatePeriod=0 --enableShadowing=0 --isLos=1 --enableHarqRetx=1 --useFixedMcs=0 --enableInterServ=0 --enablePdcpDiscarding=1 --schedulerType=PF --reorderingTimerMs=10",
         "True",
         "True",
     ),
     (
+        "cttc-nr-fh-xr --fhCapacity=1500 --fhControlMethod=Dropping --frequency=30e9 --bandwidth=400e6 --numerology=3 --deployment=SIMPLE --arUeNum=0 --vrUeNum=15 --cgUeNum=2 --voiceUeNum=0 --appDuration=1000 --enableTDD4_1=1 --enableMimoFeedback=1 --txPower=30 --distance=2 --channelUpdatePeriod=0 --channelConditionUpdatePeriod=0 --enableShadowing=0 --isLos=1 --enableHarqRetx=1 --useFixedMcs=0 --enableInterServ=0 --enablePdcpDiscarding=1 --schedulerType=PF --reorderingTimerMs=10",
+        "True",
+        "True",
+    ),
+    (
+        "cttc-nr-fh-xr --fhCapacity=5000 --fhControlMethod=OptimizeRBs --frequency=30e9 --bandwidth=400e6 --numerology=3 --deployment=SIMPLE --arUeNum=3 --vrUeNum=3 --cgUeNum=3 --voiceUeNum=3 --appDuration=3000 --enableTDD4_1=1 --enableMimoFeedback=1 --txPower=30 --distance=2 --channelUpdatePeriod=0 --channelConditionUpdatePeriod=0 --enableShadowing=0 --isLos=1 --enableHarqRetx=1 --useFixedMcs=0 --enableInterServ=0 --enablePdcpDiscarding=1 --schedulerType=PF --reorderingTimerMs=10",
+        "True",
+        "True",
+        "TAKES_FOREVER",
+    ),
+    (
         "cttc-nr-fh-xr --fhCapacity=2000 --fhControlMethod=OptimizeMcs --frequency=30e9 --bandwidth=400e6 --numerology=3 --deployment=SIMPLE --arUeNum=3 --vrUeNum=3 --cgUeNum=3 --voiceUeNum=3 --appDuration=3000 --enableTDD4_1=1 --enableMimoFeedback=1 --txPower=30 --distance=2 --channelUpdatePeriod=0 --channelConditionUpdatePeriod=0 --enableShadowing=0 --isLos=1 --enableHarqRetx=1 --useFixedMcs=0 --enableInterServ=0 --enablePdcpDiscarding=1 --schedulerType=PF --reorderingTimerMs=10",
+        "True",
+        "True",
+        "TAKES_FOREVER",
+    ),
+    ("gsoc-nr-rl-based-sched", "True", "True"),
+    ("gsoc-nr-channel-models", "True", "True"),
+    ("gsoc-nr-channel-models --channelModel=Friis", "True", "True"),
+    ("cttc-nr-mimo-demo --enableMimoFeedback=0", "True", "True"),
+    (
+        "cttc-nr-mimo-demo --enableMimoFeedback=1 --rankLimit=4 --fullSearchCb=ns3::NrCbTypeOneSp --packetInterval=10us --pmSearchMethod=ns3::NrPmSearchFull --subbandSize=4",
+        "True",
+        "True",
+    ),
+    (
+        "cttc-nr-mimo-demo --enableMimoFeedback=1 --rankLimit=4 --fullSearchCb=ns3::NrCbTypeOneSp --packetInterval=10us --pmSearchMethod=ns3::NrPmSearchSasaoka --subbandSize=4",
+        "True",
+        "True",
+    ),
+    (
+        "cttc-nr-mimo-demo --enableMimoFeedback=1 --rankLimit=4 --fullSearchCb=ns3::NrCbTypeOneSp --packetInterval=10us --pmSearchMethod=ns3::NrPmSearchFast --rankTechnique=SVD --rankThreshold=0.5 --subbandSize=4",
+        "True",
+        "True",
+    ),
+    (
+        "cttc-nr-mimo-demo --enableMimoFeedback=1 --rankLimit=4 --fullSearchCb=ns3::NrCbTypeOneSp --packetInterval=10us --pmSearchMethod=ns3::NrPmSearchFast --rankTechnique=WaterFilling --rankThreshold=0.75 --subbandSize=4",
+        "True",
+        "True",
+    ),
+    (
+        "cttc-nr-mimo-demo --enableMimoFeedback=1 --rankLimit=4 --fullSearchCb=ns3::NrCbTypeOneSp --packetInterval=10us --pmSearchMethod=ns3::NrPmSearchFast --rankTechnique=Sasaoka --rankThreshold=0.0 --subbandSize=4",
+        "True",
+        "True",
+    ),
+    (
+        "cttc-nr-mimo-demo --enableMimoFeedback=1 --rankLimit=4 --fullSearchCb=ns3::NrCbTypeOneSp --packetInterval=10us --pmSearchMethod=ns3::NrPmSearchFast --rankTechnique=Sasaoka --rankThreshold=0.0 --subbandSize=8",
+        "True",
+        "True",
+    ),
+    (
+        "gsoc-leo-demo-example",
+        "True",
+        "True",
+    ),
+    (
+        "gsoc-leo-demo-example --realisticPower=1",
         "True",
         "True",
     ),

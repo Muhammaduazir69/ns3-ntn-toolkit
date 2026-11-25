@@ -7,8 +7,9 @@
 #ifndef NR_AS_SAP_H
 #define NR_AS_SAP_H
 
-#include <ns3/packet.h>
-#include <ns3/ptr.h>
+#include "ns3/nr-export.h"
+#include "ns3/packet.h"
+#include "ns3/ptr.h"
 
 #include <stdint.h>
 
@@ -22,36 +23,42 @@ namespace ns3
  * Provider part of the SAP, i.e., the methods exported by the
  * NrUeRrc and called by the NrEpcUeNas.
  */
-class NrAsSapProvider
+class NR_EXPORT NrAsSapProvider
 {
   public:
     virtual ~NrAsSapProvider() = default;
 
     /**
-     * \brief Set the selected Closed Subscriber Group subscription list to be
+     * @brief Set the selected Closed Subscriber Group subscription list to be
      *        used for cell selection.
      *
-     * \param csgId identity of the subscribed CSG
+     * @param csgId identity of the subscribed CSG
      */
     virtual void SetCsgWhiteList(uint32_t csgId) = 0;
 
     /**
-     * \brief Initiate Idle mode cell selection procedure.
+     * @brief Initiate Idle mode cell selection procedure.
      *
-     * \param dlEarfcn the downlink carrier frequency (EARFCN)
+     * @param arfcn the downlink carrier frequency (ARFCN)
      */
-    virtual void StartCellSelection(uint32_t dlEarfcn) = 0;
+    virtual void StartCellSelection(uint32_t arfcn) = 0;
 
     /**
-     * \brief Force the RRC entity to stay camped on a certain eNodeB.
+     * @brief Initiate Idle mode cell selection procedure in all configured BWPs.
      *
-     * \param cellId the cell ID identifying the eNodeB
-     * \param dlEarfcn the downlink carrier frequency (EARFCN)
      */
-    virtual void ForceCampedOnGnb(uint16_t cellId, uint32_t dlEarfcn) = 0;
+    virtual void StartCellSelection() = 0;
 
     /**
-     * \brief Tell the RRC entity to enter Connected mode.
+     * @brief Force the RRC entity to stay camped on a certain eNodeB.
+     *
+     * @param cellId the cell ID identifying the eNodeB
+     * @param arfcn the downlink carrier frequency (ARFCN)
+     */
+    virtual void ForceCampedOnGnb(uint16_t cellId, uint32_t arfcn) = 0;
+
+    /**
+     * @brief Tell the RRC entity to enter Connected mode.
      *
      * If this function is called when the UE is in a situation where connecting
      * is not possible (e.g. before the simulation begin), then the UE will
@@ -61,15 +68,15 @@ class NrAsSapProvider
     virtual void Connect() = 0;
 
     /**
-     * \brief Send a data packet.
+     * @brief Send a data packet.
      *
-     * \param packet the packet
-     * \param bid the EPS bearer ID
+     * @param packet the packet
+     * @param qfi the QoS Flow ID
      */
-    virtual void SendData(Ptr<Packet> packet, uint8_t bid) = 0;
+    virtual void SendData(Ptr<Packet> packet, uint8_t qfi) = 0;
 
     /**
-     * \brief Tell the RRC entity to release the connection.
+     * @brief Tell the RRC entity to release the connection.
      */
     virtual void Disconnect() = 0;
 };
@@ -81,18 +88,18 @@ class NrAsSapProvider
  * User part of the SAP, i.e., the methods exported by the
  * NrEpcUeNas and called by the NrUeRrc.
  */
-class NrAsSapUser
+class NR_EXPORT NrAsSapUser
 {
   public:
     virtual ~NrAsSapUser() = default;
 
     /**
-     * \brief Notify the NAS that RRC Connection Establishment was successful.
+     * @brief Notify the NAS that RRC Connection Establishment was successful.
      */
     virtual void NotifyConnectionSuccessful() = 0;
 
     /**
-     * \brief Notify the NAS that RRC Connection Establishment failed.
+     * @brief Notify the NAS that RRC Connection Establishment failed.
      */
     virtual void NotifyConnectionFailed() = 0;
 
@@ -102,11 +109,18 @@ class NrAsSapUser
     virtual void NotifyConnectionReleased() = 0;
 
     /**
+     * Notify the NAS that a dedicated QoS flow should be removed
+     * @param qfi the Qos Flow ID
+     */
+    virtual void DeactivateQosFlow(uint8_t qfi) = 0;
+
+    /**
      * receive a data packet
      *
-     * \param packet the packet
+     * @param packet the packet
+     * @param qfi the QoS Flow ID of the flow the packet arrived on
      */
-    virtual void RecvData(Ptr<Packet> packet) = 0;
+    virtual void RecvData(Ptr<Packet> packet, uint8_t qfi) = 0;
 };
 
 /**
@@ -120,7 +134,7 @@ class MemberNrAsSapProvider : public NrAsSapProvider
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrAsSapProvider(C* owner);
 
@@ -129,10 +143,11 @@ class MemberNrAsSapProvider : public NrAsSapProvider
 
     // inherited from NrAsSapProvider
     void SetCsgWhiteList(uint32_t csgId) override;
-    void StartCellSelection(uint32_t dlEarfcn) override;
-    void ForceCampedOnGnb(uint16_t cellId, uint32_t dlEarfcn) override;
+    void StartCellSelection(uint32_t arfcn) override;
+    void StartCellSelection() override;
+    void ForceCampedOnGnb(uint16_t cellId, uint32_t arfcn) override;
     void Connect() override;
-    void SendData(Ptr<Packet> packet, uint8_t bid) override;
+    void SendData(Ptr<Packet> packet, uint8_t qfi) override;
     void Disconnect() override;
 
   private:
@@ -154,16 +169,23 @@ MemberNrAsSapProvider<C>::SetCsgWhiteList(uint32_t csgId)
 
 template <class C>
 void
-MemberNrAsSapProvider<C>::StartCellSelection(uint32_t dlEarfcn)
+MemberNrAsSapProvider<C>::StartCellSelection(uint32_t arfcn)
 {
-    m_owner->DoStartCellSelection(dlEarfcn);
+    m_owner->DoStartCellSelection(arfcn);
 }
 
 template <class C>
 void
-MemberNrAsSapProvider<C>::ForceCampedOnGnb(uint16_t cellId, uint32_t dlEarfcn)
+MemberNrAsSapProvider<C>::StartCellSelection()
 {
-    m_owner->DoForceCampedOnGnb(cellId, dlEarfcn);
+    m_owner->DoStartCellSelection();
+}
+
+template <class C>
+void
+MemberNrAsSapProvider<C>::ForceCampedOnGnb(uint16_t cellId, uint32_t arfcn)
+{
+    m_owner->DoForceCampedOnGnb(cellId, arfcn);
 }
 
 template <class C>
@@ -198,7 +220,7 @@ class MemberNrAsSapUser : public NrAsSapUser
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrAsSapUser(C* owner);
 
@@ -208,8 +230,9 @@ class MemberNrAsSapUser : public NrAsSapUser
     // inherited from NrAsSapUser
     void NotifyConnectionSuccessful() override;
     void NotifyConnectionFailed() override;
-    void RecvData(Ptr<Packet> packet) override;
+    void RecvData(Ptr<Packet> packet, uint8_t qfi) override;
     void NotifyConnectionReleased() override;
+    void DeactivateQosFlow(uint8_t qfi) override;
 
   private:
     C* m_owner; ///< the owner class
@@ -237,9 +260,9 @@ MemberNrAsSapUser<C>::NotifyConnectionFailed()
 
 template <class C>
 void
-MemberNrAsSapUser<C>::RecvData(Ptr<Packet> packet)
+MemberNrAsSapUser<C>::RecvData(Ptr<Packet> packet, uint8_t qfi)
 {
-    m_owner->DoRecvData(packet);
+    m_owner->DoRecvData(packet, qfi);
 }
 
 template <class C>
@@ -247,6 +270,13 @@ void
 MemberNrAsSapUser<C>::NotifyConnectionReleased()
 {
     m_owner->DoNotifyConnectionReleased();
+}
+
+template <class C>
+void
+MemberNrAsSapUser<C>::DeactivateQosFlow(uint8_t qfi)
+{
+    m_owner->DoDeactivateQosFlow(qfi);
 }
 
 } // namespace ns3

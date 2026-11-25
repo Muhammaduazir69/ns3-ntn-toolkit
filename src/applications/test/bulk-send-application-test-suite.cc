@@ -28,8 +28,8 @@
 using namespace ns3;
 
 /**
- * \ingroup applications-test
- * \ingroup tests
+ * @ingroup applications-test
+ * @ingroup tests
  *
  * Basic test, checks that the right quantity of packets are sent and received.
  */
@@ -43,13 +43,13 @@ class BulkSendBasicTestCase : public TestCase
     void DoRun() override;
     /**
      * Record a packet successfully sent
-     * \param p the packet
+     * @param p the packet
      */
     void SendTx(Ptr<const Packet> p);
     /**
      * Record a packet successfully received
-     * \param p the packet
-     * \param addr the sender's address
+     * @param p the packet
+     * @param addr the sender's address
      */
     void ReceiveRx(Ptr<const Packet> p, const Address& addr);
     uint64_t m_sent{0};     //!< number of bytes sent
@@ -99,13 +99,13 @@ BulkSendBasicTestCase::DoRun()
     BulkSendHelper sourceHelper("ns3::TcpSocketFactory", InetSocketAddress(i.GetAddress(1), port));
     sourceHelper.SetAttribute("MaxBytes", UintegerValue(300000));
     ApplicationContainer sourceApp = sourceHelper.Install(nodes.Get(0));
-    sourceApp.Start(Seconds(0.0));
-    sourceApp.Stop(Seconds(10.0));
+    sourceApp.Start(Seconds(0));
+    sourceApp.Stop(Seconds(10));
     PacketSinkHelper sinkHelper("ns3::TcpSocketFactory",
                                 InetSocketAddress(Ipv4Address::GetAny(), port));
     ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(1));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(10.0));
+    sinkApp.Start(Seconds(0));
+    sinkApp.Stop(Seconds(10));
 
     Ptr<BulkSendApplication> source = DynamicCast<BulkSendApplication>(sourceApp.Get(0));
     Ptr<PacketSink> sink = DynamicCast<PacketSink>(sinkApp.Get(0));
@@ -121,8 +121,8 @@ BulkSendBasicTestCase::DoRun()
 }
 
 /**
- * \ingroup applications-test
- * \ingroup tests
+ * @ingroup applications-test
+ * @ingroup tests
  *
  * This test checks that the sequence number is sent and received in sequence
  * despite the sending application having to pause and restart its sending
@@ -138,10 +138,10 @@ class BulkSendSeqTsSizeTestCase : public TestCase
     void DoRun() override;
     /**
      * Record a packet successfully sent
-     * \param p the packet
-     * \param from source address
-     * \param to destination address
-     * \param header the SeqTsSizeHeader
+     * @param p the packet
+     * @param from source address
+     * @param to destination address
+     * @param header the SeqTsSizeHeader
      */
     void SendTx(Ptr<const Packet> p,
                 const Address& from,
@@ -149,10 +149,10 @@ class BulkSendSeqTsSizeTestCase : public TestCase
                 const SeqTsSizeHeader& header);
     /**
      * Record a packet successfully received
-     * \param p the packet
-     * \param from source address
-     * \param to destination address
-     * \param header the SeqTsSizeHeader
+     * @param p the packet
+     * @param from source address
+     * @param to destination address
+     * @param header the SeqTsSizeHeader
      */
     void ReceiveRx(Ptr<const Packet> p,
                    const Address& from,
@@ -226,14 +226,14 @@ BulkSendSeqTsSizeTestCase::DoRun()
     sourceHelper.SetAttribute("MaxBytes", UintegerValue(300000));
     sourceHelper.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(true));
     ApplicationContainer sourceApp = sourceHelper.Install(nodes.Get(0));
-    sourceApp.Start(Seconds(0.0));
-    sourceApp.Stop(Seconds(10.0));
+    sourceApp.Start(Seconds(0));
+    sourceApp.Stop(Seconds(10));
     PacketSinkHelper sinkHelper("ns3::TcpSocketFactory",
                                 InetSocketAddress(Ipv4Address::GetAny(), port));
     sinkHelper.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(true));
     ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(1));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(10.0));
+    sinkApp.Start(Seconds(0));
+    sinkApp.Stop(Seconds(10));
 
     Ptr<BulkSendApplication> source = DynamicCast<BulkSendApplication>(sourceApp.Get(0));
     Ptr<PacketSink> sink = DynamicCast<PacketSink>(sinkApp.Get(0));
@@ -251,10 +251,10 @@ BulkSendSeqTsSizeTestCase::DoRun()
 }
 
 /**
- * \ingroup applications-test
- * \ingroup tests
+ * @ingroup applications-test
+ * @ingroup tests
  *
- * \brief BulkSend TestSuite
+ * @brief BulkSend TestSuite
  */
 class BulkSendTestSuite : public TestSuite
 {

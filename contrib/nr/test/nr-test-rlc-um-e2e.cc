@@ -6,6 +6,19 @@
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
 
+/**
+ * @ingroup test
+ * @file nr-test-rlc-um-e2e.cc
+ *
+ * @brief Test suite `nr-rlc-um-e2e`: end-to-end accounting over RLC UM under packet loss. Using
+ * NrSimpleHelper, a gNB and a UE with real NrRlcUm entities exchange 100-byte RRC SDUs in both
+ * directions (each side transmits every 10 ms for 10 s) over SimpleChannel devices, with the test
+ * MACs granting randomly-timed transmission opportunities and RateErrorModel instances dropping
+ * packets in each direction at rates from 0% to 100%. Since UM does not retransmit, the test
+ * asserts for downlink and uplink separately that the transmitted RRC PDUs equal the received
+ * PDUs plus the drops counted at the device level. Cases sweep the loss rate and the RNG seed.
+ */
+
 #include "nr-test-rlc-um-e2e.h"
 
 #include "nr-simple-helper.h"
@@ -65,7 +78,7 @@ NrRlcUmE2eTestSuite::NrRlcUmE2eTestSuite()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrRlcUmE2eTestSuite nrRlcUmE2eTestSuite;
@@ -141,14 +154,14 @@ NrRlcUmE2eTestCase::DoRun()
     // Note: Just one gNB and UE are supported. Everything is done in InstallGnbDevice and
     // InstallUeDevice
 
-    // Attach one UE per eNodeB
+    // Attach one UE per gNB
     // for (uint16_t i = 0; i < numberOfNodes; i++)
     //   {
     //     nrSimpleHelper->Attach (ueNrDevs.Get(i), nrGnbDevs.Get(i));
     //   }
 
-    // nrSimpleHelper->ActivateEpsBearer (ueNrDevs, NrEpsBearer
-    // (NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT), NrEpcTft::Default ());
+    // nrSimpleHelper->ActivateEpsBearer (ueNrDevs, NrQosFlow);
+    // (NrQosFlow::NGBR_VIDEO_TCP_DEFAULT), NrQosRule::Default ());
 
     // Error models: downlink and uplink
     Ptr<RateErrorModel> dlEm = CreateObject<RateErrorModel>();
@@ -169,7 +182,7 @@ NrRlcUmE2eTestCase::DoRun()
         "PhyRxDrop",
         MakeCallback(&NrRlcUmE2eTestCase::UlDropEvent, this));
 
-    // Sending packets from gNB RRC layer (eNB -> UE)
+    // Sending packets from gNB RRC layer (gNB -> UE)
     nrSimpleHelper->m_gnbRrc->SetArrivalTime(Seconds(0.010));
     nrSimpleHelper->m_gnbRrc->SetPduSize(100);
 
@@ -178,7 +191,7 @@ NrRlcUmE2eTestCase::DoRun()
     nrSimpleHelper->m_gnbMac->SetTxOppTime(Seconds(0.005));
     nrSimpleHelper->m_gnbMac->SetTxOpportunityMode(NrTestMac::RANDOM_MODE);
 
-    // Sending packets from UE RRC layer (UE -> eNB)
+    // Sending packets from UE RRC layer (UE -> gNB)
     nrSimpleHelper->m_ueRrc->SetArrivalTime(Seconds(0.010));
     nrSimpleHelper->m_ueRrc->SetPduSize(100);
 
@@ -210,8 +223,8 @@ NrRlcUmE2eTestCase::DoRun()
     // NS_LOG_INFO ("dl dev drops = " << m_dlDrops);
     // NS_LOG_INFO ("ul dev drops = " << m_ulDrops);
 
-    // NS_LOG_INFO ("eNB tx RRC count = " << txGnbRrcPdus);
-    // NS_LOG_INFO ("eNB rx RRC count = " << rxGnbRrcPdus);
+    // NS_LOG_INFO ("gNB tx RRC count = " << txGnbRrcPdus);
+    // NS_LOG_INFO ("gNB rx RRC count = " << rxGnbRrcPdus);
     // NS_LOG_INFO ("UE tx RRC count = " << txUeRrcPdus);
     // NS_LOG_INFO ("UE rx RRC count = " << rxUeRrcPdus);
 

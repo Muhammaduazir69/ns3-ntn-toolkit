@@ -13,13 +13,15 @@
 
 #include "nr-no-backhaul-epc-helper.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 /**
- * \ingroup helper
+ * @ingroup helper
  *
- * \brief Create an EPC network with PointToPoint links
+ * @brief Create an EPC network with PointToPoint links
  *
  * The class is based on the LTE version. The usage is, in most of the cases,
  * automatic inside the NrHelper. All the user has to do, is:
@@ -43,7 +45,7 @@ namespace ns3
  * SetAttribute call. The list of attributes can be seen in the class
  * PointToPointEpcHelper in the ns-3 code base.
  *
- * \section p2p_epc_pgw Obtaining the PGW node
+ * @section p2p_epc_pgw Obtaining the PGW node
  *
  * You can obtain the pointer to the PGW node by doing:
 \verbatim
@@ -81,10 +83,10 @@ namespace ns3
 (remoteHost->GetObject<Ipv4> ()); remoteHostStaticRouting->AddNetworkRouteTo (Ipv4Address
 ("7.0.0.0"), Ipv4Mask ("255.0.0.0"), 1); \endverbatim
  *
- * \section p2p_epc_ipv4 Assigning IPV4 addresses
+ * @section p2p_epc_ipv4 Assigning IPV4 addresses
  *
  * Another important thing that this helper can do is assigning automatically
- * the IPv4 addresses to the UE:
+ * the IPv4 addresses to the UE and setup the default gateway address with:
  *
 \verbatim
   NetDeviceContainer netDeviceContainerForUe = ...;
@@ -92,8 +94,8 @@ namespace ns3
 (netDeviceContainerForUe);
 \endverbatim
  *
- * And, of course, you would like to set the default routing for the UE,
- * which is the address of the EPC:
+ * You can change the default gateway address for the UE by changing
+ * the EPC address retrieved by nrEpcHelper->GetUeDefaultGatewayAddress () in:
  *
 \verbatim
   // Set the default gateway for the UEs
@@ -107,34 +109,34 @@ namespace ns3
  *
  * For everything else, please see also the NrHelper documentation.
  *
- * \see PointToPointEpcHelper
+ * @see PointToPointEpcHelper
  */
-class NrPointToPointEpcHelper : public NrNoBackhaulEpcHelper
+class NR_EXPORT NrPointToPointEpcHelper : public NrNoBackhaulEpcHelper
 {
   public:
     /**
-     * \brief Constructor
+     * @brief Constructor
      */
     NrPointToPointEpcHelper();
 
     /**
-     * \brief Destructor
+     * @brief Destructor
      */
     ~NrPointToPointEpcHelper() override;
 
     // inherited from Object
     /**
-     *  \brief Register this type.
-     *  \return The object TypeId.
+     *  @brief Register this type.
+     *  @return The object TypeId.
      */
     static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
     void DoDispose() override;
 
     // inherited from NrEpcHelper
-    void AddGnb(Ptr<Node> gnbNode,
-                Ptr<NetDevice> nrGnbNetDevice,
-                std::vector<uint16_t> cellIds) override;
+    void AddGnb(Ptr<Node> gnbNode, Ptr<NetDevice> nrGnbNetDevice, uint16_t cellId) override;
+
+  protected:
+    void NotifyConstructionCompleted() override;
 
   private:
     /**

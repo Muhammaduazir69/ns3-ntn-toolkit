@@ -17,10 +17,10 @@
 using namespace ns3;
 
 /**
- * \ingroup test
- * \file test-antenna-3gpp-model-conf.cc
+ * @ingroup test
+ * @file nr-antenna-3gpp-model-conf.cc
  *
- * \brief This test case checks if the throughput/SINR/MCS
+ * @brief This test case checks if the throughput/SINR/MCS
  * obtained is as expected for the configured antenna model and for
  * different positions of UE. The test scenario consists of a scenario in
  * which a single UE is attached to a gNB.
@@ -112,12 +112,12 @@ TestAntenna3gppModelConf::TestAntenna3gppModelConf(const std::string& name,
     m_ueOmniAntennaElem = ueOmniAntennaElem;
     m_ueNoOfAntennas = ueNoOfAntennas;
     m_losCondition = losCondition;
-    m_sinrCell1 = Create<MinMaxAvgTotalCalculator<double>>();
-    m_sinrCell2 = Create<MinMaxAvgTotalCalculator<double>>();
-    m_mcsCell1 = Create<MinMaxAvgTotalCalculator<double>>();
-    m_mcsCell2 = Create<MinMaxAvgTotalCalculator<double>>();
-    m_rbNumCell1 = Create<MinMaxAvgTotalCalculator<double>>();
-    m_rbNumCell2 = Create<MinMaxAvgTotalCalculator<double>>();
+    m_sinrCell1 = CreateObject<MinMaxAvgTotalCalculator<double>>();
+    m_sinrCell2 = CreateObject<MinMaxAvgTotalCalculator<double>>();
+    m_mcsCell1 = CreateObject<MinMaxAvgTotalCalculator<double>>();
+    m_mcsCell2 = CreateObject<MinMaxAvgTotalCalculator<double>>();
+    m_rbNumCell1 = CreateObject<MinMaxAvgTotalCalculator<double>>();
+    m_rbNumCell2 = CreateObject<MinMaxAvgTotalCalculator<double>>();
 }
 
 // This destructor does nothing but we include it as a reminder that
@@ -137,8 +137,7 @@ TestAntenna3gppModelConf::DoRun()
     uint32_t packetSize = 1000;
     DataRate udpRate = DataRate("2Mbps");
 
-    Config::SetDefault("ns3::LteRlcUm::MaxTxBufferSize", UintegerValue(999999999));
-    Config::SetDefault("ns3::NrEpsBearer::Release", UintegerValue(15));
+    Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
 
     // create base stations and mobile terminals
     NodeContainer gNbNodes;
@@ -198,13 +197,9 @@ TestAntenna3gppModelConf::DoRun()
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
-
     // Put the pointers inside nrHelper
     idealBeamformingHelper->SetAttribute("BeamformingMethod",
                                          TypeIdValue(CellScanBeamforming::GetTypeId()));
-    double beamSearchAngleStep = 30.0;
-    idealBeamformingHelper->SetBeamformingAlgorithmAttribute("BeamSearchAngleStep",
-                                                             DoubleValue(beamSearchAngleStep));
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
 
     // set the number of antenna elements of UE
@@ -256,98 +251,38 @@ TestAntenna3gppModelConf::DoRun()
     double centralFrequency = 28e9;
     double bandwidth = 20e6;
     const uint8_t numCcPerBand = 1;
-    BandwidthPartInfo::Scenario scenario;
-    // set LOS,NLOS condition
-    if (m_losCondition == "l")
-    {
-        scenario = BandwidthPartInfo::UMi_StreetCanyon_LoS;
-    }
-    else if (m_losCondition == "n")
-    {
-        scenario = BandwidthPartInfo::UMi_StreetCanyon_nLoS;
-    }
-    else
-    {
-        scenario = BandwidthPartInfo::UMi_StreetCanyon;
-    }
-    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency,
-                                                   bandwidth,
-                                                   numCcPerBand,
-                                                   scenario);
+    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency, bandwidth, numCcPerBand);
 
     // By using the configuration created, it is time to make the operation bands
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Set the spectrum channel using
+    channelHelper->ConfigureFactories("UMi", m_losCondition);
     // Shadowing
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    /*
-     * Initialize channel and pathloss, plus other things inside band1. If needed,
-     * the band configuration can be done manually, but we leave it for more
-     * sophisticated examples. For the moment, this method will take care
-     * of all the spectrum initialization needs.
-     */
-    nrHelper->InitializeOperationBand(&band);
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    channelHelper->AssignChannelsToBands({band});
     allBwps = CcBwpCreator::GetAllBwps({band});
 
-    //  nrHelper->Initialize();
-
     uint32_t bwpIdForLowLat = 0;
-    // gNb routing between Bearer and bandwidh part
+    // gNb routing between QoS flow and bandwidh part
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB",
                                                  UintegerValue(bwpIdForLowLat));
-    // UE routing between Bearer and bandwidh part
+    // UE routing between QoS flow and bandwidh part
     nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdForLowLat));
 
     // install nr net devices
     NetDeviceContainer gNbDevs = nrHelper->InstallGnbDevice(gNbNodes, allBwps);
     NetDeviceContainer ueNetDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    for (auto it = gNbDevs.Begin(); it != gNbDevs.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDevs.Begin(); it != ueNetDevs.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    // in this container, interface 0 is the pgw, 1 is the remoteHost
-    // Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress (1);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
 
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
     internet.Install(ueNodes);
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDevs));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ueNetDevs, gNbDevs);
@@ -369,14 +304,14 @@ TestAntenna3gppModelConf::DoRun()
     dlClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     clientAppsDl.Add(dlClient.Install(remoteHost));
 
-    Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpf;
+    Ptr<NrQosRule> rule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpf;
     dlpf.localPortStart = dlPort;
     dlpf.localPortEnd = dlPort;
-    tft->Add(dlpf);
+    rule->Add(dlpf);
 
-    NrEpsBearer bearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
-    nrHelper->ActivateDedicatedEpsBearer(ueNetDevs.Get(0), bearer, tft);
+    NrQosFlow flow(NrQosFlow::NGBR_LOW_LAT_EMBB);
+    nrHelper->ActivateDedicatedQosFlow(ueNetDevs.Get(0), flow, rule);
 
     // start UDP server and client apps
     serverAppsDl.Start(udpAppStartTimeDl);
@@ -385,11 +320,20 @@ TestAntenna3gppModelConf::DoRun()
     serverAppsDl.Stop(udpAppStopTimeDl);
     clientAppsDl.Stop(udpAppStopTimeDl);
 
-    Ptr<NrSpectrumPhy> ue1SpectrumPhy = nrHelper->GetUePhy(ueNetDevs.Get(0), 0)->GetSpectrumPhy();
+    Ptr<NrSpectrumPhy> ue1SpectrumPhy = NrHelper::GetUePhy(ueNetDevs.Get(0), 0)->GetSpectrumPhy();
     ue1SpectrumPhy->TraceConnectWithoutContext("RxPacketTraceUe",
                                                MakeBoundCallback(&UETraceReception, this));
 
     // nrHelper->EnableTraces();
+
+    RngSeedManager::SetSeed(1);
+    RngSeedManager::SetRun(1);
+    nrHelper->AssignStreams({.assignEpc = true,
+                             .ueNodes = ueNodes,
+                             .gnbDevs = gNbDevs,
+                             .ueDevs = ueNetDevs,
+                             .ueNodeStream = 1000});
+
     Simulator::Stop(simTime);
     Simulator::Run();
 
@@ -433,7 +377,7 @@ Antenna3gppModelConfTestSuite::Antenna3gppModelConfTestSuite()
 
     std::list<uint8_t> ueNoOfAntennas = {16};
 
-    std::list<std::string> losConditions = {"l"};
+    std::list<std::string> losConditions = {"LOS"};
 
     //  std::list<TypeId> gNbantennaArrayModelTypes = {AntennaArrayModel::GetTypeId(),
     //  AntennaArray3gppModel::GetTypeId ()};

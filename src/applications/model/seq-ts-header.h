@@ -15,9 +15,9 @@
 namespace ns3
 {
 /**
- * \ingroup applications
+ * @ingroup applications
  *
- * \brief Packet header to carry sequence number and timestamp
+ * @brief Packet header to carry sequence number and timestamp
  *
  * The header is used as a payload in applications (typically UDP) to convey
  * a 32 bit sequence number followed by a 64 bit timestamp (12 bytes total).
@@ -28,7 +28,7 @@ namespace ns3
  * If you need space for an application data unit size field (e.g. for
  * stream-based protocols like TCP), use ns3::SeqTsSizeHeader.
  *
- * \sa ns3::SeqTsSizeHeader
+ * @sa ns3::SeqTsSizeHeader
  */
 class SeqTsHeader : public Header
 {
@@ -36,21 +36,21 @@ class SeqTsHeader : public Header
     SeqTsHeader();
 
     /**
-     * \param seq the sequence number
+     * @param seq the sequence number
      */
     void SetSeq(uint32_t seq);
     /**
-     * \return the sequence number
+     * @return the sequence number
      */
     uint32_t GetSeq() const;
     /**
-     * \return the time stamp
+     * @return the time stamp
      */
     Time GetTs() const;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -61,8 +61,8 @@ class SeqTsHeader : public Header
     uint32_t Deserialize(Buffer::Iterator start) override;
 
   private:
-    uint32_t m_seq; //!< Sequence number
-    uint64_t m_ts;  //!< Timestamp
+    uint32_t m_seq{0}; //!< Sequence number
+    Time m_ts;         //!< Timestamp
 };
 
 } // namespace ns3

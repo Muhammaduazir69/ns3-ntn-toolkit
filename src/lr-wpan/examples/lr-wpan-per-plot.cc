@@ -23,13 +23,13 @@
 
 */
 
-#include <ns3/core-module.h>
-#include <ns3/gnuplot.h>
-#include <ns3/lr-wpan-module.h>
-#include <ns3/mobility-module.h>
-#include <ns3/network-module.h>
-#include <ns3/propagation-module.h>
-#include <ns3/spectrum-module.h>
+#include "ns3/core-module.h"
+#include "ns3/gnuplot.h"
+#include "ns3/lr-wpan-module.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/propagation-module.h"
+#include "ns3/spectrum-module.h"
 
 using namespace ns3;
 using namespace ns3::lrwpan;
@@ -40,8 +40,8 @@ NS_LOG_COMPONENT_DEFINE("LrWpanErrorDistancePlot");
 
 /**
  * Function called when a Data indication is invoked
- * \param params MCPS data indication parameters
- * \param p packet
+ * @param params MCPS data indication parameters
+ * @param p packet
  */
 void
 PacketReceivedCallback(McpsDataIndicationParams params, Ptr<Packet> p)

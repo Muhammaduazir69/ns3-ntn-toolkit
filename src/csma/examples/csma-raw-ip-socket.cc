@@ -33,8 +33,8 @@ NS_LOG_COMPONENT_DEFINE("CsmaRawIpSocketExample");
 /**
  * Receive sink function
  *
- * \param p the packet.
- * \param ad the sender's address.
+ * @param p the packet.
+ * @param ad the sender's address.
  */
 static void
 SinkRx(Ptr<const Packet> p, const Address& ad)
@@ -94,8 +94,8 @@ main(int argc, char* argv[])
     NS_LOG_INFO("Create Sink.");
     PacketSinkHelper sink = PacketSinkHelper("ns3::Ipv4RawSocketFactory", dst);
     apps = sink.Install(c.Get(3));
-    apps.Start(Seconds(0.0));
-    apps.Stop(Seconds(12.0));
+    apps.Start(Seconds(0));
+    apps.Stop(Seconds(12));
 
     NS_LOG_INFO("Configure Tracing.");
     // first, pcap tracing in non-promiscuous mode

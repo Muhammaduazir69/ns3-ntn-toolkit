@@ -3,15 +3,28 @@
  *
  */
 
-#include "ns3/brite-module.h"
-#include "ns3/core-module.h"
-#include "ns3/internet-module.h"
-#include "ns3/network-module.h"
+#include "ns3/address.h"
+#include "ns3/application-container.h"
+#include "ns3/brite-topology-helper.h"
+#include "ns3/data-rate.h"
+#include "ns3/inet-socket-address.h"
+#include "ns3/internet-stack-helper.h"
+#include "ns3/ipv4-address-helper.h"
+#include "ns3/ipv4-address.h"
+#include "ns3/ipv4-global-routing-helper.h"
+#include "ns3/ipv4-interface-container.h"
+#include "ns3/net-device-container.h"
+#include "ns3/node-container.h"
+#include "ns3/nstime.h"
 #include "ns3/on-off-helper.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/packet-sink.h"
-#include "ns3/point-to-point-module.h"
+#include "ns3/point-to-point-helper.h"
+#include "ns3/ptr.h"
 #include "ns3/random-variable-stream.h"
+#include "ns3/rng-seed-manager.h"
+#include "ns3/simulator.h"
+#include "ns3/string.h"
 #include "ns3/test.h"
 
 #include <fstream>
@@ -21,9 +34,9 @@
 using namespace ns3;
 
 /**
- * \ingroup brite-tests
+ * @ingroup brite-tests
  *
- * \brief BRITE topology structure Test
+ * @brief BRITE topology structure Test
  *
  * Test that two brite topologies created with same seed value
  * produce same graph (not an exact test)
@@ -90,9 +103,9 @@ BriteTopologyStructureTestCase::DoRun()
 }
 
 /**
- * \ingroup brite-tests
+ * @ingroup brite-tests
  *
- * \brief BRITE topology function Test
+ * @brief BRITE topology function Test
  *
  * Test that packets can be send across a BRITE topology using UDP
  */
@@ -174,19 +187,19 @@ BriteTopologyFunctionTestCase::DoRun()
 
     ApplicationContainer apps = onOff.Install(source.Get(0));
 
-    apps.Start(Seconds(1.0));
-    apps.Stop(Seconds(10.0));
+    apps.Start(Seconds(1));
+    apps.Stop(Seconds(10));
 
     PacketSinkHelper sinkHelper("ns3::UdpSocketFactory",
                                 Address(InetSocketAddress(Ipv4Address::GetAny(), port)));
     apps = sinkHelper.Install(sink.Get(0));
 
-    apps.Start(Seconds(1.0));
-    apps.Stop(Seconds(10.0));
+    apps.Start(Seconds(1));
+    apps.Stop(Seconds(10));
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
-    Simulator::Stop(Seconds(10.0));
+    Simulator::Stop(Seconds(10));
     Simulator::Run();
 
     Ptr<PacketSink> sink1 = DynamicCast<PacketSink>(apps.Get(0));
@@ -196,9 +209,9 @@ BriteTopologyFunctionTestCase::DoRun()
 }
 
 /**
- * \ingroup brite-tests
+ * @ingroup brite-tests
  *
- * \brief BRITE TestSuite
+ * @brief BRITE TestSuite
  */
 class BriteTestSuite : public TestSuite
 {

@@ -43,7 +43,7 @@ class SnssaiAndProfileConformanceTest : public TestCase
 {
   public:
     SnssaiAndProfileConformanceTest()
-        : TestCase("TS 23.501 5.15.2: SST/SD widths and values; TS 22.261 default profiles")
+        : TestCase("TS 23.501 5.15.2: SST-SD widths and values; TS 22.261 default profiles")
     {
     }
 
@@ -99,7 +99,7 @@ class SelectorPrecedenceTest : public TestCase
 {
   public:
     SelectorPrecedenceTest()
-        : TestCase("Selector: first match wins, inclusive ranges, inverted range, RFC 4594/7252 maps")
+        : TestCase("Selector: first match wins, inclusive ranges, inverted range, RFC 4594-7252 maps")
     {
     }
 
@@ -357,6 +357,7 @@ struct CellRun
     uint64_t slotOverflow{0};  //!< slots where RBGs given > RBGs in the slot
     uint64_t slotsUnderUsed{0};
     uint32_t rbgPerSlot{0};
+    uint64_t capFirst0{0}; //!< sum over 1.0..2.0 s of floor(0.4 x the slot's RBGs), slice 0
     uint64_t rxUrllc{0};
     uint64_t rxEmbb{0};
     std::vector<double> quotasApplied;
@@ -450,6 +451,13 @@ RunCell(const CellOptions& opt)
                 a->given += given;
                 a->total = total;
                 o->rbgPerSlot = total;
+                // 5G-LENA v5.2: a slot's data RBGs exclude those its HARQ retransmissions
+                // hold, so the per-slot quota cap is summed slot by slot.
+                const double now = Simulator::Now().GetSeconds();
+                if (slice == 0 && now >= 1.0 && now < 2.0)
+                {
+                    o->capFirst0 += static_cast<uint64_t>(std::floor(0.4 * total + 1e-9));
+                }
                 if (++a->seen == 3)
                 {
                     o->slotOverflow += (a->given > a->total) ? 1 : 0;
@@ -603,7 +611,7 @@ class QuotaWorkConservingSwitchTest : public TestCase
         NS_TEST_ASSERT_MSG_GT(strict.slotsUnderUsed, strict.slots / 2,
                               "strict: RBGs stay idle in most slots");
         NS_TEST_ASSERT_MSG_LT(strict.rbgFirst[0],
-                              strict.slots * static_cast<uint64_t>(std::floor(0.4 * strict.rbgPerSlot + 1e-9)) + 1,
+                              strict.capFirst0 + 1,
                               "strict: eMBB never exceeds floor(0.4 x RBGs) in any slot");
         NS_TEST_ASSERT_MSG_EQ(strict.slotOverflow, 0u, "invariant holds in both modes");
     }

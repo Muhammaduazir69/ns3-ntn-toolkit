@@ -54,7 +54,7 @@ namespace ns3
  * To keep the output of examples, use the \c --retain argument to \c test.py.
  *
  * The output file has the following form:
- * \verbatim
+ * @verbatim
 {
  "simulator_name" : "ns-3",
  "model_name" : "ipv4-raw",
@@ -68,7 +68,7 @@ namespace ns3
   ...
   ["0",0,"0",0]
  ]
-} \endverbatim
+} @endverbatim
  * The first few fields are self-explanatory. The \c event record consists of
  * the source context, the event send time, the destination context,
  * and the event execution time.  Times are given in the
@@ -77,22 +77,22 @@ namespace ns3
  * <b> Enabling DES Metrics </b>
  *
  * Enable DES Metrics at configure time with
- * \verbatim
-   $ ns3 configure ... --enable-des-metrics \endverbatim
+ * @verbatim
+   $ ns3 configure ... --enable-des-metrics @endverbatim
  *
  * <b> Working with DES Metrics </b>
  *
  * Some useful shell pipelines:
  *
- * \li Run everything, retaining the results directory: <br/>
- *   \code  ./test.py --nobuild --retain \endcode
- * \li Example traces end up in \c testpy-output/, so move there: <br/>
- *   \code cd testpy-output/$(date +"%F")*_/  \endcode
+ * @li Run everything, retaining the results directory: <br/>
+ *   @code  ./test.py --no-build --retain @endcode
+ * @li Example traces end up in \c testpy-output/, so move there: <br/>
+ *   @code cd testpy-output/$(date +"%F")*_/  @endcode
  *   (Remove the `_', which is to work around a Doxygen limitation.)
- * \li Remove the traces with less than 10 events: <br/>
- *   \code wc -l *.json | sort -nr | grep "^ *[789] " | cut -d ' ' -f 9 | xargs rm -f \endcode
- * \li Show the largest file, and total number of trace files: <br/>
- *   \code wc -l *.json | sort -n | tail -2 \endcode
+ * @li Remove the traces with less than 10 events: <br/>
+ *   @code wc -l *.json | sort -nr | grep "^ *[789] " | cut -d ' ' -f 9 | xargs rm -f @endcode
+ * @li Show the largest file, and total number of trace files: <br/>
+ *   @code wc -l *.json | sort -n | tail -2 @endcode
  *
  */
 class DesMetrics : public Singleton<DesMetrics>
@@ -104,25 +104,25 @@ class DesMetrics : public Singleton<DesMetrics>
      * The trace file will have the same base name as the main program,
      * '.json' as the extension.
      *
-     * \param args [in] Command line arguments.
-     * \param outDir [in] Directory where the trace file should be written.
+     * @param args [in] Command line arguments.
+     * @param outDir [in] Directory where the trace file should be written.
      */
     void Initialize(std::vector<std::string> args, std::string outDir = "");
 
     /**
      * Trace an event to self at the time it is scheduled.
      *
-     * \param now [in] The local simulation time.
-     * \param delay [in] The delay to the event.
+     * @param now [in] The local simulation time.
+     * @param delay [in] The delay to the event.
      */
     void Trace(const Time& now, const Time& delay);
 
     /**
      * Trace an event (with context) at the time it is scheduled.
      *
-     * \param context [in] The context (NodeId) which will receive the event.
-     * \param now [in] The local simulation time.
-     * \param delay [in] The delay to the event.
+     * @param context [in] The context (NodeId) which will receive the event.
+     * @param now [in] The local simulation time.
+     * @param delay [in] The delay to the event.
      */
     void TraceWithContext(uint32_t context, const Time& now, const Time& delay);
 
@@ -149,8 +149,7 @@ class DesMetrics : public Singleton<DesMetrics>
 
     /** Mutex to control access to the output file. */
     std::mutex m_mutex;
-
-}; // class DesMetrics
+};
 
 } // namespace ns3
 

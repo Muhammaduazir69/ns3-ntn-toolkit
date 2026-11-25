@@ -22,9 +22,9 @@ namespace ns3
 class Packet;
 
 /**
- * \ingroup icmp
+ * @ingroup icmp
  *
- * \brief Base class for all the ICMP packet headers.
+ * @brief Base class for all the ICMP packet headers.
  *
  * This header is the common part in all the ICMP packets.
  */
@@ -48,31 +48,43 @@ class Icmpv4Header : public Header
     void EnableChecksum();
 
     /**
+     * Checks if the message checksum is correct.
+     *
+     * The checksum is verified during Deserialize only if checksum
+     * calculation has been enabled beforehand with EnableChecksum.
+     *
+     * @returns true if the checksum is correct, false otherwise. Returns true
+     * by default if EnableChecksum has not been called before deserializing
+     * this header.
+     */
+    bool IsChecksumOk() const;
+
+    /**
      * Set ICMP type
-     * \param type the ICMP type
+     * @param type the ICMP type
      */
     void SetType(uint8_t type);
 
     /**
      * Set ICMP code
-     * \param code the ICMP code
+     * @param code the ICMP code
      */
     void SetCode(uint8_t code);
 
     /**
      * Get ICMP type
-     * \returns the ICMP type
+     * @returns the ICMP type
      */
     uint8_t GetType() const;
     /**
      * Get ICMP code
-     * \returns the ICMP code
+     * @returns the ICMP code
      */
     uint8_t GetCode() const;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     Icmpv4Header();
@@ -88,56 +100,57 @@ class Icmpv4Header : public Header
     uint8_t m_type;      //!< ICMP type
     uint8_t m_code;      //!< ICMP code
     bool m_calcChecksum; //!< true if checksum is calculated
+    bool m_goodChecksum; //!< true if checksum is correct
 };
 
 /**
- * \ingroup icmp
+ * @ingroup icmp
  *
- * \brief ICMP Echo header
+ * @brief ICMP Echo header
  */
 class Icmpv4Echo : public Header
 {
   public:
     /**
-     * \brief Set the Echo identifier
-     * \param id the identifier
+     * @brief Set the Echo identifier
+     * @param id the identifier
      */
     void SetIdentifier(uint16_t id);
     /**
-     * \brief Set the Echo sequence number
-     * \param seq the sequence number
+     * @brief Set the Echo sequence number
+     * @param seq the sequence number
      */
     void SetSequenceNumber(uint16_t seq);
     /**
-     * \brief Set the Echo data
-     * \param data the data
+     * @brief Set the Echo data
+     * @param data the data
      */
     void SetData(Ptr<const Packet> data);
     /**
-     * \brief Get the Echo identifier
-     * \returns the identifier
+     * @brief Get the Echo identifier
+     * @returns the identifier
      */
     uint16_t GetIdentifier() const;
     /**
-     * \brief Get the Echo sequence number
-     * \returns the sequence number
+     * @brief Get the Echo sequence number
+     * @returns the sequence number
      */
     uint16_t GetSequenceNumber() const;
     /**
-     * \brief Get the Echo data size
-     * \returns the data size
+     * @brief Get the Echo data size
+     * @returns the data size
      */
     uint32_t GetDataSize() const;
     /**
-     * \brief Get the Echo data
-     * \param payload the data (filled)
-     * \returns the data length
+     * @brief Get the Echo data
+     * @param payload the data (filled)
+     * @returns the data length
      */
     uint32_t GetData(uint8_t payload[]) const;
 
     /**
      * Get ICMP type
-     * \returns the ICMP type
+     * @returns the ICMP type
      */
     static TypeId GetTypeId();
     Icmpv4Echo();
@@ -156,9 +169,9 @@ class Icmpv4Echo : public Header
 };
 
 /**
- * \ingroup icmp
+ * @ingroup icmp
  *
- * \brief ICMP Destination Unreachable header
+ * @brief ICMP Destination Unreachable header
  */
 class Icmpv4DestinationUnreachable : public Header
 {
@@ -178,42 +191,42 @@ class Icmpv4DestinationUnreachable : public Header
 
     /**
      * Get ICMP type
-     * \returns the ICMP type
+     * @returns the ICMP type
      */
     static TypeId GetTypeId();
     Icmpv4DestinationUnreachable();
     ~Icmpv4DestinationUnreachable() override;
 
     /**
-     * \brief Set the next hop MTU
-     * \param mtu the MTU
+     * @brief Set the next hop MTU
+     * @param mtu the MTU
      */
     void SetNextHopMtu(uint16_t mtu);
     /**
-     * \brief Get the next hop MTU
-     * \returns the MTU
+     * @brief Get the next hop MTU
+     * @returns the MTU
      */
     uint16_t GetNextHopMtu() const;
 
     /**
-     * \brief Set the ICMP carried data
-     * \param data the data
+     * @brief Set the ICMP carried data
+     * @param data the data
      */
     void SetData(Ptr<const Packet> data);
     /**
-     * \brief Set the ICMP carried IPv4 header
-     * \param header the header
+     * @brief Set the ICMP carried IPv4 header
+     * @param header the header
      */
     void SetHeader(Ipv4Header header);
 
     /**
-     * \brief Get the ICMP carried data
-     * \param payload the data (filled)
+     * @brief Get the ICMP carried data
+     * @param payload the data (filled)
      */
     void GetData(uint8_t payload[8]) const;
     /**
-     * \brief Get the ICMP carried IPv4 header
-     * \returns the header
+     * @brief Get the ICMP carried IPv4 header
+     * @returns the header
      */
     Ipv4Header GetHeader() const;
 
@@ -231,15 +244,15 @@ class Icmpv4DestinationUnreachable : public Header
 };
 
 /**
- * \ingroup icmp
+ * @ingroup icmp
  *
- * \brief ICMP Time Exceeded header
+ * @brief ICMP Time Exceeded header
  */
 class Icmpv4TimeExceeded : public Header
 {
   public:
     /**
-     * \brief ICMP error code : Time Exceeded
+     * @brief ICMP error code : Time Exceeded
      */
     enum ErrorTimeExceeded_e
     {
@@ -248,30 +261,30 @@ class Icmpv4TimeExceeded : public Header
     };
 
     /**
-     * \brief Get the ICMP carried data
-     * \param data the data
+     * @brief Get the ICMP carried data
+     * @param data the data
      */
     void SetData(Ptr<const Packet> data);
     /**
-     * \brief Set the ICMP carried IPv4 header
-     * \param header the header
+     * @brief Set the ICMP carried IPv4 header
+     * @param header the header
      */
     void SetHeader(Ipv4Header header);
 
     /**
-     * \brief Get the ICMP carried data
-     * \param payload the data (filled)
+     * @brief Get the ICMP carried data
+     * @param payload the data (filled)
      */
     void GetData(uint8_t payload[8]) const;
     /**
-     * \brief Get the ICMP carried IPv4 header
-     * \returns the header
+     * @brief Get the ICMP carried IPv4 header
+     * @returns the header
      */
     Ipv4Header GetHeader() const;
 
     /**
      * Get ICMP type
-     * \returns the ICMP type
+     * @returns the ICMP type
      */
     static TypeId GetTypeId();
     Icmpv4TimeExceeded();

@@ -10,14 +10,13 @@
 #include "map-scheduler.h"
 
 #include "assert.h"
-#include "event-impl.h"
 #include "log.h"
 
 #include <string>
 
 /**
- * \file
- * \ingroup scheduler
+ * @file
+ * @ingroup scheduler
  * ns3::MapScheduler implementation.
  */
 

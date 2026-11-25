@@ -4,10 +4,11 @@
 
 #include "nr-mac-scheduler-ofdma-qos.h"
 
+#include "nr-mac-scheduler-ofdma-symbol-per-beam.h"
 #include "nr-mac-scheduler-ue-info-qos.h"
 
-#include <ns3/double.h>
-#include <ns3/log.h>
+#include "ns3/double.h"
+#include "ns3/log.h"
 
 #include <algorithm>
 
@@ -107,7 +108,7 @@ NrMacSchedulerOfdmaQos::AssignedDlResources(const UePtrAndBufferReq& ue,
 {
     NS_LOG_FUNCTION(this);
     auto uePtr = std::dynamic_pointer_cast<NrMacSchedulerUeInfoQos>(ue.first);
-    uePtr->UpdateDlQosMetric(totAssigned, m_timeWindow, m_dlAmc);
+    uePtr->UpdateDlQosMetric(totAssigned, m_timeWindow);
 }
 
 void
@@ -118,7 +119,7 @@ NrMacSchedulerOfdmaQos::NotAssignedDlResources(
 {
     NS_LOG_FUNCTION(this);
     auto uePtr = std::dynamic_pointer_cast<NrMacSchedulerUeInfoQos>(ue.first);
-    uePtr->UpdateDlQosMetric(totAssigned, m_timeWindow, m_dlAmc);
+    uePtr->UpdateDlQosMetric(totAssigned, m_timeWindow);
 }
 
 void
@@ -128,7 +129,7 @@ NrMacSchedulerOfdmaQos::AssignedUlResources(const UePtrAndBufferReq& ue,
 {
     NS_LOG_FUNCTION(this);
     auto uePtr = std::dynamic_pointer_cast<NrMacSchedulerUeInfoQos>(ue.first);
-    uePtr->UpdateUlQosMetric(totAssigned, m_timeWindow, m_ulAmc);
+    uePtr->UpdateUlQosMetric(totAssigned, m_timeWindow);
 }
 
 void
@@ -139,7 +140,7 @@ NrMacSchedulerOfdmaQos::NotAssignedUlResources(
 {
     NS_LOG_FUNCTION(this);
     auto uePtr = std::dynamic_pointer_cast<NrMacSchedulerUeInfoQos>(ue.first);
-    uePtr->UpdateUlQosMetric(totAssigned, m_timeWindow, m_ulAmc);
+    uePtr->UpdateUlQosMetric(totAssigned, m_timeWindow);
 }
 
 void
@@ -148,7 +149,7 @@ NrMacSchedulerOfdmaQos::BeforeDlSched(const UePtrAndBufferReq& ue,
 {
     NS_LOG_FUNCTION(this);
     auto uePtr = std::dynamic_pointer_cast<NrMacSchedulerUeInfoQos>(ue.first);
-    uePtr->CalculatePotentialTPutDl(assignableInIteration, m_dlAmc);
+    uePtr->CalculatePotentialTPutDl(assignableInIteration);
 }
 
 void
@@ -157,7 +158,7 @@ NrMacSchedulerOfdmaQos::BeforeUlSched(const UePtrAndBufferReq& ue,
 {
     NS_LOG_FUNCTION(this);
     auto uePtr = std::dynamic_pointer_cast<NrMacSchedulerUeInfoQos>(ue.first);
-    uePtr->CalculatePotentialTPutUl(assignableInIteration, m_ulAmc);
+    uePtr->CalculatePotentialTPutUl(assignableInIteration);
 }
 
 } // namespace ns3

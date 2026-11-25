@@ -12,22 +12,22 @@
 #include <iostream>
 
 /**
- * \defgroup length-examples Demonstrates usage of the ns3::Length class
- * \ingroup core-examples
- * \ingroup length
+ * @defgroup length-examples Demonstrates usage of the ns3::Length class
+ * @ingroup core-examples
+ * @ingroup length
  */
 
 /**
- * \file
- * \ingroup length-examples
+ * @file
+ * @ingroup length-examples
  * Demonstrates usage of the ns3::Length class
  */
 
 using namespace ns3;
 
 /**
- * \ingroup length-examples
- * \brief Demonstrates the use of ns3::Length constructors.
+ * @ingroup length-examples
+ * @brief Demonstrates the use of ns3::Length constructors.
  */
 void
 Constructors()
@@ -35,21 +35,23 @@ Constructors()
     double input = 5;
     Length::Quantity quantity(input, Length::Unit::Meter);
 
-    std::cout << "\nConstructors:"
-              << "\nLength (" << input << ", Unit::Meter) = " << Length(input, Length::Unit::Meter)
-              << "\nLength (" << input << ", \"m\") = " << Length(input, "m") << "\nLength ("
-              << input << ", \"meter\") = " << Length(input, "meter") << "\nLength (Quantity("
-              << input << ", Unit::Meter)) = " << Length(quantity)
-              << "\nLength (\"5m\") = " << Length("5m") << "\nLength (\"5 m\") = " << Length("5 m")
-              << "\nLength (\"5meter\") = " << Length("5meter")
-              << "\nLength (\"5 meter\") = " << Length("5 meter")
-              << "\nLength (\"5meters\") = " << Length("5meters")
-              << "\nLength (\"5 meters\") = " << Length("5 meters") << std::endl;
+    std::cout << "\nConstructors:\n"
+              << "Length (" << input << ", Unit::Meter) = " << Length(input, Length::Unit::Meter)
+              << "\n"
+              << "Length (" << input << ", \"m\") = " << Length(input, "m") << "\n"
+              << "Length (" << input << ", \"meter\") = " << Length(input, "meter") << "\n"
+              << "Length (Quantity(" << input << ", Unit::Meter)) = " << Length(quantity) << "\n"
+              << "Length (\"5m\") = " << Length("5m") << "\n"
+              << "Length (\"5 m\") = " << Length("5 m") << "\n"
+              << "Length (\"5meter\") = " << Length("5meter") << "\n"
+              << "Length (\"5 meter\") = " << Length("5 meter") << "\n"
+              << "Length (\"5meters\") = " << Length("5meters") << "\n"
+              << "Length (\"5 meters\") = " << Length("5 meters") << std::endl;
 }
 
 /**
- * \ingroup length-examples
- * \brief Demonstrates the use of ns3::Length conversions.
+ * @ingroup length-examples
+ * @brief Demonstrates the use of ns3::Length conversions.
  */
 void
 Conversions()
@@ -67,8 +69,8 @@ Conversions()
 }
 
 /**
- * \ingroup length-examples
- * \brief Demonstrates the use of ns3::Length arithmetic operators.
+ * @ingroup length-examples
+ * @brief Demonstrates the use of ns3::Length arithmetic operators.
  */
 void
 ArithmeticOperators()
@@ -94,8 +96,8 @@ ArithmeticOperators()
 }
 
 /**
- * \ingroup length-examples
- * \brief Demonstrates the use of ns3::Length equality operators.
+ * @ingroup length-examples
+ * @brief Demonstrates the use of ns3::Length equality operators.
  */
 void
 EqualityOperators()
@@ -131,8 +133,8 @@ EqualityOperators()
 }
 
 /**
- * \ingroup length-examples
- * \brief Demonstrates the use of ns3::Length multiplications and divisions.
+ * @ingroup length-examples
+ * @brief Demonstrates the use of ns3::Length multiplications and divisions.
  */
 void
 DivAndMod()

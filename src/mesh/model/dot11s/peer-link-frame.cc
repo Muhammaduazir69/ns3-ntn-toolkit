@@ -43,7 +43,7 @@ PeerLinkOpenStart::PlinkOpenStartFields
 PeerLinkOpenStart::GetFields() const
 {
     PlinkOpenStartFields retval;
-    /// \todo protocol version:
+    /// @todo protocol version:
     retval.capability = m_capability;
     retval.rates = m_rates;
     retval.extendedRates = m_extendedRates;
@@ -99,7 +99,7 @@ PeerLinkOpenStart::Serialize(Buffer::Iterator start) const
 {
     Buffer::Iterator i = start;
 
-    i.WriteHtolsbU16(m_capability);
+    i.WriteU16(m_capability);
     i = m_rates.Serialize(i);
     if (m_extendedRates)
     {
@@ -114,7 +114,7 @@ PeerLinkOpenStart::Deserialize(Buffer::Iterator start)
 {
     Buffer::Iterator i = start;
 
-    m_capability = i.ReadLsbtohU16();
+    m_capability = i.ReadU16();
     i = m_rates.Deserialize(i);
     m_extendedRates.emplace();
     auto tmp = m_extendedRates->DeserializeIfPresent(i);
@@ -169,7 +169,7 @@ PeerLinkCloseStart::PlinkCloseStartFields
 PeerLinkCloseStart::GetFields() const
 {
     PlinkCloseStartFields retval;
-    /// \todo protocol version:
+    /// @todo protocol version:
     retval.meshId = m_meshId;
 
     return retval;
@@ -258,7 +258,7 @@ PeerLinkConfirmStart::PlinkConfirmStartFields
 PeerLinkConfirmStart::GetFields() const
 {
     PlinkConfirmStartFields retval;
-    /// \todo protocol version:
+    /// @todo protocol version:
     retval.capability = m_capability;
     retval.aid = m_aid;
     retval.rates = m_rates;
@@ -311,8 +311,8 @@ PeerLinkConfirmStart::Serialize(Buffer::Iterator start) const
 {
     Buffer::Iterator i = start;
 
-    i.WriteHtolsbU16(m_capability);
-    i.WriteHtolsbU16(m_aid);
+    i.WriteU16(m_capability);
+    i.WriteU16(m_aid);
     i = m_rates.Serialize(i);
     if (m_extendedRates)
     {
@@ -326,8 +326,8 @@ PeerLinkConfirmStart::Deserialize(Buffer::Iterator start)
 {
     Buffer::Iterator i = start;
 
-    m_capability = i.ReadLsbtohU16();
-    m_aid = i.ReadLsbtohU16();
+    m_capability = i.ReadU16();
+    m_aid = i.ReadU16();
     i = m_rates.Deserialize(i);
     m_extendedRates.emplace();
     auto tmp = m_extendedRates->DeserializeIfPresent(i);

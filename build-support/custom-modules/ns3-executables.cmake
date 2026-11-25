@@ -17,9 +17,9 @@ function(set_runtime_outputdirectory target_name output_directory target_prefix)
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_directory}
                RUNTIME_OUTPUT_NAME ${ns3-exec-outputname}
   )
-  if(${XCODE})
-    # Is that so hard not to break people's CI, AAPL?? Why would you output the
-    # targets to a Debug/Release subfolder? Why?
+  if(${MSVC} OR ${XCODE})
+    # Prevent multi-config generators from placing output files into per
+    # configuration directory
     foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
       string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG)
       set_target_properties(
@@ -92,6 +92,14 @@ function(build_exec)
     ${BEXEC_EXECNAME_PREFIX}${BEXEC_EXECNAME} "${BEXEC_SOURCE_FILES}"
   )
 
+  # Inject the CRT debug-report hook when requested (debug MSVC builds only)
+  if(${NS3_CLANGCL_STLCHECKS} AND ${MSVC})
+    target_sources(
+      ${BEXEC_EXECNAME_PREFIX}${BEXEC_EXECNAME}
+      PRIVATE ${PROJECT_SOURCE_DIR}/build-support/windows-crt-report-hook.cc
+    )
+  endif()
+
   target_compile_definitions(
     ${BEXEC_EXECNAME_PREFIX}${BEXEC_EXECNAME} PUBLIC ${BEXEC_DEFINITIONS}
   )
@@ -134,6 +142,17 @@ function(build_exec)
     target_link_libraries(
       ${BEXEC_EXECNAME_PREFIX}${BEXEC_EXECNAME} ${LIB_AS_NEEDED_PRE}
       "${BEXEC_LIBRARIES_TO_LINK}" ${LIB_AS_NEEDED_POST}
+    )
+  endif()
+
+  # Handle ns-3-external-contrib/module (which will have output binaries mapped
+  # to contrib/module)
+  if(${BEXEC_EXECUTABLE_DIRECTORY_PATH} MATCHES "ns-3-external-contrib")
+    string(
+      REGEX
+      REPLACE ".*ns-3-external-contrib" "${PROJECT_SOURCE_DIR}/build/contrib"
+              BEXEC_EXECUTABLE_DIRECTORY_PATH
+              "${BEXEC_EXECUTABLE_DIRECTORY_PATH}"
     )
   endif()
 

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-2.0-only
  *
  * Author: Yufei Cheng   <yfcheng@ittc.ku.edu>
+ * Modified by: Tommaso Pecorella <tommaso.pecorella@unifi.it>
+ *              Lorenzo Bartolini <l.bartolini02@gmail.com>
  *
  * James P.G. Sterbenz <jpgs@ittc.ku.edu>, director
  * ResiliNets Research Group  https://resilinets.org/
@@ -32,6 +34,9 @@ namespace ns3
 {
 namespace dsr
 {
+
+class DsrMaintainBuffEntry;
+
 /**
  * The maintenance buffer is responsible for maintaining packet next hop delivery
  * The data packet is saved in maintenance buffer whenever the data packet is sent out of send
@@ -44,47 +49,21 @@ struct LinkKey
     Ipv4Address m_ourAdd;      ///< local address
     Ipv4Address m_nextHop;     ///< next hop address
 
+    constexpr LinkKey() = default;
+
     /**
-     * Compare maintain Buffer entries
-     * \param o object to compare
-     * \return true if equal
+     * Constructor from a DsrMaintainBuffEntry.
+     * @param entry the DsrMaintainBuffEntry
      */
-    bool operator<(const LinkKey& o) const
-    {
-        if (m_source < o.m_source)
-        {
-            return true;
-        }
-        if (o.m_source < m_source)
-        {
-            return false;
-        }
-        if (m_destination < o.m_destination)
-        {
-            return true;
-        }
-        if (o.m_destination < m_destination)
-        {
-            return false;
-        }
-        if (m_ourAdd < o.m_ourAdd)
-        {
-            return true;
-        }
-        if (o.m_ourAdd < m_ourAdd)
-        {
-            return false;
-        }
-        if (m_nextHop < o.m_nextHop)
-        {
-            return true;
-        }
-        if (o.m_nextHop < m_nextHop)
-        {
-            return false;
-        }
-        return false;
-    }
+    LinkKey(const DsrMaintainBuffEntry& entry);
+
+    /**
+     * @brief Three-way comparison operator.
+     *
+     * @param other the other LinkKey to compare with
+     * @returns comparison result
+     */
+    constexpr std::strong_ordering operator<=>(const LinkKey& other) const = default;
 };
 
 /// NetworkKey structure
@@ -96,55 +75,21 @@ struct NetworkKey
     Ipv4Address m_source;      ///< source address
     Ipv4Address m_destination; ///< destination address
 
+    constexpr NetworkKey() = default;
+
     /**
-     * Compare maintain Buffer entries
-     * \param o object to compare
-     * \return true if equal
+     * Constructor from a DsrMaintainBuffEntry.
+     * @param entry the DsrMaintainBuffEntry
      */
-    bool operator<(const NetworkKey& o) const
-    {
-        if (m_ackId < o.m_ackId)
-        {
-            return true;
-        }
-        if (o.m_ackId < m_ackId)
-        {
-            return false;
-        }
-        if (m_source < o.m_source)
-        {
-            return true;
-        }
-        if (o.m_source < m_source)
-        {
-            return false;
-        }
-        if (m_destination < o.m_destination)
-        {
-            return true;
-        }
-        if (o.m_destination < m_destination)
-        {
-            return false;
-        }
-        if (m_ourAdd < o.m_ourAdd)
-        {
-            return true;
-        }
-        if (o.m_ourAdd < m_ourAdd)
-        {
-            return false;
-        }
-        if (m_nextHop < o.m_nextHop)
-        {
-            return true;
-        }
-        if (o.m_nextHop < m_nextHop)
-        {
-            return false;
-        }
-        return false;
-    }
+    NetworkKey(const DsrMaintainBuffEntry& entry);
+
+    /**
+     * @brief Three-way comparison operator.
+     *
+     * @param other the other NetworkKey to compare with
+     * @returns comparison result
+     */
+    constexpr std::strong_ordering operator<=>(const NetworkKey& other) const = default;
 };
 
 /// PassiveKey structure
@@ -155,52 +100,26 @@ struct PassiveKey
     Ipv4Address m_destination; ///< destination address
     uint8_t m_segsLeft;        ///< segments left
 
+    constexpr PassiveKey() = default;
+
     /**
-     * Compare maintain Buffer entries
-     * \param o is the object to compare
-     * \return true if equal
+     * Constructor from a DsrMaintainBuffEntry.
+     * @param entry the DsrMaintainBuffEntry
      */
-    bool operator<(const PassiveKey& o) const
-    {
-        if (m_ackId < o.m_ackId)
-        {
-            return true;
-        }
-        if (o.m_ackId < m_ackId)
-        {
-            return false;
-        }
-        if (m_source < o.m_source)
-        {
-            return true;
-        }
-        if (o.m_source < m_source)
-        {
-            return false;
-        }
-        if (m_destination < o.m_destination)
-        {
-            return true;
-        }
-        if (o.m_destination < m_destination)
-        {
-            return false;
-        }
-        if (m_segsLeft < o.m_segsLeft)
-        {
-            return true;
-        }
-        if (o.m_segsLeft < m_segsLeft)
-        {
-            return false;
-        }
-        return false;
-    }
+    PassiveKey(const DsrMaintainBuffEntry& entry);
+
+    /**
+     * @brief Three-way comparison operator.
+     *
+     * @param other the other NetworkKey to compare with
+     * @returns comparison result
+     */
+    constexpr std::strong_ordering operator<=>(const PassiveKey& other) const = default;
 };
 
 /**
- * \ingroup dsr
- * \brief DSR Maintain Buffer Entry
+ * @ingroup dsr
+ * @brief DSR Maintain Buffer Entry
  */
 class DsrMaintainBuffEntry
 {
@@ -208,14 +127,14 @@ class DsrMaintainBuffEntry
     /**
      * Construct a DsrMaintainBuffEntry with the given parameters
      *
-     * \param packet packet
-     * \param ourAddress our IPv4 address
-     * \param nextHop next hop IPv4 address
-     * \param src IPv4 address of the source
-     * \param dst IPv4 address of the destination
-     * \param ackId ACK ID
-     * \param segsLeft number of segments left
-     * \param expire expiration time
+     * @param packet packet
+     * @param ourAddress our IPv4 address
+     * @param nextHop next hop IPv4 address
+     * @param src IPv4 address of the source
+     * @param dst IPv4 address of the destination
+     * @param ackId ACK ID
+     * @param segsLeft number of segments left
+     * @param expire expiration time
      */
     DsrMaintainBuffEntry(Ptr<const Packet> packet = nullptr,
                          Ipv4Address ourAddress = Ipv4Address(),
@@ -239,7 +158,7 @@ class DsrMaintainBuffEntry
     // Fields
     /**
      * Get packet
-     * \returns the current packet
+     * @returns the current packet
      */
     Ptr<const Packet> GetPacket() const
     {
@@ -248,7 +167,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Set packet
-     * \param p the current packet
+     * @param p the current packet
      */
     void SetPacket(Ptr<const Packet> p)
     {
@@ -257,7 +176,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Get local address of entry
-     * \returns the local IP address
+     * @returns the local IP address
      */
     Ipv4Address GetOurAdd() const
     {
@@ -266,7 +185,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Set local address of entry
-     * \param us the local IP address
+     * @param us the local IP address
      */
     void SetOurAdd(Ipv4Address us)
     {
@@ -275,7 +194,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Get next hop of entry
-     * \returns the IP address for the next hop
+     * @returns the IP address for the next hop
      */
     Ipv4Address GetNextHop() const
     {
@@ -284,7 +203,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Set next hop of entry
-     * \param n the next hop IP address
+     * @param n the next hop IP address
      */
     void SetNextHop(Ipv4Address n)
     {
@@ -293,7 +212,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Get destination address
-     * \returns the destination IP address
+     * @returns the destination IP address
      */
     Ipv4Address GetDst() const
     {
@@ -302,7 +221,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Set destination address
-     * \param n the destination IP address
+     * @param n the destination IP address
      */
     void SetDst(Ipv4Address n)
     {
@@ -311,7 +230,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Get source address
-     * \returns the source IP address
+     * @returns the source IP address
      */
     Ipv4Address GetSrc() const
     {
@@ -320,7 +239,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Set source address
-     * \param s the source IP address
+     * @param s the source IP address
      */
     void SetSrc(Ipv4Address s)
     {
@@ -329,7 +248,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Get acknowledge ID
-     * \returns the acknowledge ID
+     * @returns the acknowledge ID
      */
     uint16_t GetAckId() const
     {
@@ -338,7 +257,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Set acknowledge ID
-     * \param ackId the acknowledge ID
+     * @param ackId the acknowledge ID
      */
     void SetAckId(uint16_t ackId)
     {
@@ -347,7 +266,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Get segments left
-     * \returns the number of segments left
+     * @returns the number of segments left
      */
     uint8_t GetSegsLeft() const
     {
@@ -356,7 +275,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Set segments left
-     * \param segs the number of segments left
+     * @param segs the number of segments left
      */
     void SetSegsLeft(uint8_t segs)
     {
@@ -365,7 +284,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Set expiration time
-     * \param exp the expire time
+     * @param exp the expire time
      */
     void SetExpireTime(Time exp)
     {
@@ -374,7 +293,7 @@ class DsrMaintainBuffEntry
 
     /**
      * Get expiration time
-     * \returns the expiration time
+     * @returns the expiration time
      */
     Time GetExpireTime() const
     {
@@ -401,8 +320,8 @@ class DsrMaintainBuffEntry
 };
 
 /**
- * \ingroup dsr
- * \brief DSR maintain buffer
+ * @ingroup dsr
+ * @brief DSR maintain buffer
  */
 /************************************************************************************************************************/
 class DsrMaintainBuffer
@@ -417,29 +336,29 @@ class DsrMaintainBuffer
 
     /// Push entry in queue, if there is no entry with the same packet and destination address in
     /// queue.
-    /// \param entry Maintain Buffer Entry
-    /// \return true on success adding the Entry.
+    /// @param entry Maintain Buffer Entry
+    /// @return true on success adding the Entry.
     bool Enqueue(DsrMaintainBuffEntry& entry);
     /// Return first found (the earliest) entry for given destination
-    /// \param [in] dst Entry destination
-    /// \param [out] entry The Entry found (if any).
-    /// \return true on success
+    /// @param [in] dst Entry destination
+    /// @param [out] entry The Entry found (if any).
+    /// @return true on success
     bool Dequeue(Ipv4Address dst, DsrMaintainBuffEntry& entry);
     /// Remove all packets with next hop IP address dst
-    /// \param nextHop Next hop in the route.
+    /// @param nextHop Next hop in the route.
     void DropPacketWithNextHop(Ipv4Address nextHop);
     /// Finds whether a packet with next hop dst exists in the queue
-    /// \param nextHop Next hop in the route.
-    /// \return true if there is a packet directed to the next hop.
+    /// @param nextHop Next hop in the route.
+    /// @return true if there is a packet directed to the next hop.
     bool Find(Ipv4Address nextHop);
     /// Number of entries
-    /// \return The number of entries.
+    /// @return The number of entries.
     uint32_t GetSize();
 
     // Fields
     /**
      * Get maximum queue length
-     * \returns the maximum queue length
+     * @returns the maximum queue length
      */
     uint32_t GetMaxQueueLen() const
     {
@@ -448,7 +367,7 @@ class DsrMaintainBuffer
 
     /**
      * Set maximum queue length
-     * \param len the maximum queue length
+     * @param len the maximum queue length
      */
     void SetMaxQueueLen(uint32_t len)
     {
@@ -457,7 +376,7 @@ class DsrMaintainBuffer
 
     /**
      * Get maintain buffer timeout
-     * \returns the maintain buffer timeout
+     * @returns the maintain buffer timeout
      */
     Time GetMaintainBufferTimeout() const
     {
@@ -466,7 +385,7 @@ class DsrMaintainBuffer
 
     /**
      * Set maintain buffer timeout
-     * \param t the maintain buffer timeout
+     * @param t the maintain buffer timeout
      */
     void SetMaintainBufferTimeout(Time t)
     {
@@ -474,22 +393,22 @@ class DsrMaintainBuffer
     }
 
     /// Verify if all the elements in the maintenance buffer entry is the same
-    /// \note For real this function checks if at most one entry is equal. If it is,
+    /// @note For real this function checks if at most one entry is equal. If it is,
     /// that entry is removed. Further entries are NOT checked. This could be a bug.
-    /// \param entry The Entry to check
-    /// \return true if an Entry was found and removed.
+    /// @param entry The Entry to check
+    /// @return true if an Entry was found and removed.
     bool AllEqual(DsrMaintainBuffEntry& entry);
     /// Verify if the maintain buffer entry is the same in every field for link ack
-    /// \param entry The Entry to check
-    /// \return true if an Entry was found and removed.
+    /// @param entry The Entry to check
+    /// @return true if an Entry was found and removed.
     bool LinkEqual(DsrMaintainBuffEntry& entry);
     /// Verify if the maintain buffer entry is the same in every field for network ack
-    /// \param entry The Entry to check
-    /// \return true if an Entry was found and removed.
+    /// @param entry The Entry to check
+    /// @return true if an Entry was found and removed.
     bool NetworkEqual(DsrMaintainBuffEntry& entry);
     /// Verify if the maintain buffer entry is the same in every field for promiscuous ack
-    /// \param entry The Entry to check
-    /// \return true if an Entry was found and removed.
+    /// @param entry The Entry to check
+    /// @return true if an Entry was found and removed.
     bool PromiscEqual(DsrMaintainBuffEntry& entry);
 
   private:

@@ -5,9 +5,9 @@
 
 #include "traffic-generator-test.h"
 
-#include <ns3/boolean.h>
-#include <ns3/ping-helper.h>
-#include <ns3/rng-seed-manager.h>
+#include "ns3/boolean.h"
+#include "ns3/ping-helper.h"
+#include "ns3/rng-seed-manager.h"
 
 namespace ns3
 {
@@ -168,7 +168,7 @@ TrafficGeneratorNgmnFtpTestCase::DoRun()
 
     uint64_t averageFileSize = totalFileSizeBytes / repetitions;
     Time averageReadingTime = totalReadingTime / repetitions;
-    // According to the NMGN white paper the mean value should be aprox. 2MBytes
+    // According to the NMGN white paper the mean value should be approx. 2MBytes
     NS_TEST_ASSERT_MSG_EQ_TOL(averageFileSize,
                               2e6,
                               2e6 * 0.1,
@@ -452,7 +452,7 @@ TrafficGeneratorNgmnGamingTestCase::DoRun()
 }
 
 TrafficGeneratorNgmnVoipTestCase::TrafficGeneratorNgmnVoipTestCase(std::string transportProtocol)
-    : TestCase("(NGMN VoIP throughput == 12.2 Kbps) when " + transportProtocol)
+    : TestCase("(NGMN VoIP average throughput == 8.375 Kbps) when " + transportProtocol)
 {
     m_transportProtocol = transportProtocol;
 }
@@ -528,12 +528,12 @@ TrafficGeneratorNgmnVoipTestCase::DoRun()
     uint64_t totalBytesReceived = packetSink->GetTotalRx();
 
     NS_TEST_ASSERT_MSG_EQ_TOL(((double)totalBytesSent * 8) / durationInSeconds,
-                              6.475e3,
-                              6.475e3 * 0.15,
+                              8.375e3,
+                              8.375e3 * 0.15,
                               "TX: The NGMN VoIP traffic offered throughput is not as expected!");
     NS_TEST_ASSERT_MSG_EQ_TOL(((double)totalBytesReceived * 8) / durationInSeconds,
-                              6.475e3,
-                              6.475e3 * 0.15,
+                              8.375e3,
+                              8.375e3 * 0.15,
                               "RX: The NGMN VoIP traffic received throughput is not as expected!");
 
     Simulator::Destroy();
@@ -676,6 +676,62 @@ TrafficGeneratorThreeGppHttpTestCase::DoRun()
     Simulator::Destroy();
 }
 
+TrafficGeneratorFtpSingleBurstSizeTestCase::TrafficGeneratorFtpSingleBurstSizeTestCase()
+    : TestCase("A TrafficGeneratorFtpSingle file sends exactly its size")
+{
+}
+
+void
+TrafficGeneratorFtpSingleBurstSizeTestCase::DoRun()
+{
+    const uint32_t fileSize = 10000;
+    NodeContainer nodes;
+    nodes.Create(2);
+    InternetStackHelper internet;
+    internet.Install(nodes);
+    Ptr<SimpleNetDevice> txDev = CreateObject<SimpleNetDevice>();
+    Ptr<SimpleNetDevice> rxDev = CreateObject<SimpleNetDevice>();
+    nodes.Get(0)->AddDevice(txDev);
+    nodes.Get(1)->AddDevice(rxDev);
+    Ptr<SimpleChannel> channel = CreateObject<SimpleChannel>();
+    rxDev->SetChannel(channel);
+    txDev->SetChannel(channel);
+    NetDeviceContainer devices;
+    devices.Add(txDev);
+    devices.Add(rxDev);
+    Ipv4AddressHelper ipv4;
+    ipv4.SetBase("10.1.1.0", "255.255.255.0");
+    Ipv4InterfaceContainer interfaces = ipv4.Assign(devices);
+
+    uint16_t port = 4000;
+    PacketSinkHelper sinkHelper("ns3::UdpSocketFactory",
+                                InetSocketAddress(Ipv4Address::GetAny(), port));
+    ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(1));
+    sinkApp.Start(Seconds(1));
+    TrafficGeneratorHelper generatorHelper("ns3::UdpSocketFactory",
+                                           InetSocketAddress(interfaces.GetAddress(1, 0), port),
+                                           TrafficGeneratorFtpSingle::GetTypeId());
+    generatorHelper.SetAttribute("FileSize", UintegerValue(fileSize));
+    generatorHelper.SetAttribute("PacketSize", UintegerValue(1448));
+    ApplicationContainer generatorApp = generatorHelper.Install(nodes.Get(0));
+    generatorApp.Start(Seconds(1));
+    PingHelper pingHelper(interfaces.GetAddress(1, 0));
+    ApplicationContainer pingApps = pingHelper.Install(nodes.Get(0));
+    pingApps.Start(Seconds(1));
+    pingApps.Stop(Seconds(2));
+
+    auto generator = generatorApp.Get(0)->GetObject<TrafficGenerator>();
+    Simulator::Schedule(Seconds(2), [generator]() { generator->SendPacketBurst(); });
+    Simulator::Stop(Seconds(3));
+    Simulator::Run();
+
+    NS_TEST_ASSERT_MSG_EQ(generator->GetTotalBytes(), fileSize, "The file was not sent exactly");
+    NS_TEST_ASSERT_MSG_EQ(sinkApp.Get(0)->GetObject<PacketSink>()->GetTotalRx(),
+                          fileSize,
+                          "The file was not received exactly");
+    Simulator::Destroy();
+}
+
 TrafficGeneratorTestSuite::TrafficGeneratorTestSuite()
     : TestSuite("traffic-generator-test", Type::UNIT)
 {
@@ -696,6 +752,7 @@ TrafficGeneratorTestSuite::TrafficGeneratorTestSuite()
         }
     }
 
+    AddTestCase(new TrafficGeneratorFtpSingleBurstSizeTestCase(), Duration::QUICK);
     AddTestCase(new TrafficGeneratorNgmnFtpTestCase(), Duration::QUICK);
     AddTestCase(new TrafficGeneratorNgmnVideoTestCase(), Duration::QUICK);
     AddTestCase(new TrafficGeneratorNgmnGamingTestCase(), Duration::QUICK);

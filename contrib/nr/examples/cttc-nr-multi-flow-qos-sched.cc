@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /**
- * \ingroup examples
- * \file cttc-nr-multi-flow-qos-sched.cc
- * \brief This example allows testing the performance of the QoS scheduler
+ * @ingroup examples
+ * @file cttc-nr-multi-flow-qos-sched.cc
+ * @brief This example allows testing the performance of the QoS scheduler
  *        (nr-mac-scheduler-ofdma/tdma-qos) in conjunction with the LC QoS
  *        scheduler versus other schedulers, such as the RR and PF in
  *        conjunction with the LC RR scheduler.
@@ -106,34 +106,34 @@ main(int argc, char* argv[])
     cmd.AddValue("outputDir", "directory where to store simulation results", outputDir);
     cmd.AddValue("enableOfdma",
                  "If set to true it enables Ofdma scheduler. Default value is false (Tdma)",
-                 enableOfdma),
-        cmd.AddValue("schedulerType",
-                     "PF: Proportional Fair (default), RR: Round-Robin, Qos",
-                     schedulerType),
-        cmd.AddValue("enableQoSLcScheduler",
-                     "If set to true, it enables the QoS LC scheduler. Default is RR (false)",
-                     enableQoSLcScheduler),
-        cmd.AddValue("enableNrHelperTraces",
-                     "If true, it enables the generation of the NrHelper traces, otherwise"
-                     "NrHelper traces will not be generated. Default value is false",
-                     enableNrHelperTraces),
-        cmd.AddValue("enableQosTrafficTraces",
-                     "If true, it enables the generation of the the Delay and Throughput"
-                     "traces, otherwise these traces will not be generated. Default value is true",
-                     enableQosTrafficTraces),
-        cmd.AddValue("enablePdcpDiscarding",
-                     "Whether to enable PDCP TX discarding",
-                     enablePdcpDiscarding),
-        cmd.AddValue("discardTimerMs",
-                     "Discard timer value in milliseconds to use for all the flows",
-                     discardTimerMs);
+                 enableOfdma);
+    cmd.AddValue("schedulerType",
+                 "PF: Proportional Fair (default), RR: Round-Robin, Qos",
+                 schedulerType);
+    cmd.AddValue("enableQoSLcScheduler",
+                 "If set to true, it enables the QoS LC scheduler. Default is RR (false)",
+                 enableQoSLcScheduler);
+    cmd.AddValue("enableNrHelperTraces",
+                 "If true, it enables the generation of the NrHelper traces, otherwise"
+                 "NrHelper traces will not be generated. Default value is false",
+                 enableNrHelperTraces);
+    cmd.AddValue("enableQosTrafficTraces",
+                 "If true, it enables the generation of the the Delay and Throughput"
+                 "traces, otherwise these traces will not be generated. Default value is true",
+                 enableQosTrafficTraces);
+    cmd.AddValue("enablePdcpDiscarding",
+                 "Whether to enable PDCP TX discarding",
+                 enablePdcpDiscarding);
+    cmd.AddValue("discardTimerMs",
+                 "Discard timer value in milliseconds to use for all the flows",
+                 discardTimerMs);
 
     cmd.Parse(argc, argv);
 
     // enable logging or not
     if (logging)
     {
-        LogLevel logLevel1 =
+        auto logLevel1 =
             (LogLevel)(LOG_PREFIX_FUNC | LOG_PREFIX_TIME | LOG_PREFIX_NODE | LOG_LEVEL_INFO);
         LogComponentEnable("NrMacSchedulerNs3", logLevel1);
         LogComponentEnable("NrMacSchedulerTdma", logLevel1);
@@ -148,8 +148,6 @@ main(int argc, char* argv[])
      * the gnbs and ue following a pre-defined pattern. Please have a look at the
      * GridScenarioHelper documentation to see how the nodes will be distributed.
      */
-    int64_t randomStream = 1;
-
     GridScenarioHelper gridScenario;
     gridScenario.SetRows(1);
     gridScenario.SetColumns(gNbNum);
@@ -163,7 +161,6 @@ main(int argc, char* argv[])
     gridScenario.SetUtNumber(ueNumPergNb * gNbNum);
     gridScenario.SetScenarioHeight(3); // Create a 3x3 scenario where the UE will
     gridScenario.SetScenarioLength(3); // be distributed.
-    randomStream += gridScenario.AssignStreams(randomStream);
     gridScenario.CreateScenario();
 
     uint32_t udpPacketSize1;
@@ -216,11 +213,7 @@ main(int argc, char* argv[])
     // Put the pointers inside nrHelper
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
-
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     nrEpcHelper->SetAttribute("S1uLinkDelay", TimeValue(MilliSeconds(0)));
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
 
     std::stringstream scheduler;
     std::string subType;
@@ -270,8 +263,6 @@ main(int argc, char* argv[])
     OperationBandInfo band;
     const uint8_t numOfCcs = 1;
 
-    auto bandMask = NrHelper::INIT_PROPAGATION | NrHelper::INIT_CHANNEL;
-
     /*
      * The configured spectrum division for TDD is:
      *
@@ -282,17 +273,19 @@ main(int argc, char* argv[])
 
     // Create the configuration for the CcBwpHelper. SimpleOperationBandConf creates
     // a single BWP per CC
-    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency,
-                                                   bandwidth,
-                                                   numOfCcs,
-                                                   BandwidthPartInfo::UMi_StreetCanyon_LoS);
+    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency, bandwidth, numOfCcs);
 
     bandConf.m_numBwp = 1;
     // By using the configuration created, it is time to make the operation band
     band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-
-    nrHelper->InitializeOperationBand(&band, bandMask);
-    // nrHelper->InitializeOperationBand(&band);
+    // Create the channel helper for the spectrum configuration
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Set the spectrum channel
+    channelHelper->ConfigureFactories("UMi", "LOS", "ThreeGpp");
+    // Set shadowing and update period
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    // Set and create the channel for the band with only the propagation model
+    channelHelper->AssignChannelsToBands({band}, NrChannelHelper::INIT_PROPAGATION);
     allBwps = CcBwpCreator::GetAllBwps({band});
 
     double x = pow(10, totalTxPower / 10);
@@ -304,16 +297,11 @@ main(int argc, char* argv[])
     uint32_t bwpIdUe2Flow1 = 0;
     uint32_t bwpIdUe2Flow2 = 0;
 
-    // gNb routing between Bearer and bandwidh part
+    // gNb routing between QoS flow and bandwidh part
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdUe1));
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdUe2Flow1));
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("DGBR_INTER_SERV_87",
                                                  UintegerValue(bwpIdUe2Flow2));
-
-    // Ue routing between Bearer and bandwidth part
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdUe1));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdUe2Flow1));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("DGBR_INTER_SERV_87", UintegerValue(bwpIdUe2Flow2));
 
     /*
      * We have configured the attributes we needed. Now, install and get the pointers
@@ -324,64 +312,27 @@ main(int argc, char* argv[])
     NetDeviceContainer ue1flowNetDev = nrHelper->InstallUeDevice(ue1flowContainer, allBwps);
     NetDeviceContainer ue2flowsNetDev = nrHelper->InstallUeDevice(ue2flowsContainer, allBwps);
 
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ue1flowNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ue2flowsNetDev, randomStream);
+    NetDeviceContainer ueNetDevs;
+    ueNetDevs.Add(ue1flowNetDev);
+    ueNetDevs.Add(ue2flowsNetDev);
+    nrHelper->AssignStreams({.scenario = &gridScenario, .gnbDevs = gnbNetDev, .ueDevs = ueNetDevs});
 
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Numerology", UintegerValue(numerology));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
-
-    // When all the configuration is done, explicitly call UpdateConfig ()
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ue1flowNetDev.Begin(); it != ue1flowNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-    for (auto it = ue2flowsNetDev.Begin(); it != ue2flowsNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("Numerology", UintegerValue(numerology));
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
 
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
+
     internet.Install(gridScenario.GetUserTerminals());
 
     Ipv4InterfaceContainer ue1FlowIpIface;
     Ipv4InterfaceContainer ue2FlowsIpIface;
     ue1FlowIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ue1flowNetDev));
     ue2FlowsIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ue2flowsNetDev));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < gridScenario.GetUserTerminals().GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(
-            gridScenario.GetUserTerminals().Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ue1flowNetDev, gnbNetDev);
@@ -415,26 +366,24 @@ main(int argc, char* argv[])
      */
     /******************************************************************************/
     UdpClientHelper dlClientUe1flow;
-    dlClientUe1flow.SetAttribute("RemotePort", UintegerValue(dlPortUe1flow));
     dlClientUe1flow.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientUe1flow.SetAttribute("PacketSize", UintegerValue(udpPacketSize1));
     dlClientUe1flow.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambda1)));
 
-    // The bearer that will carry UE with 1 flow Non GBR traffic
-    NrEpsBearer ue1flowBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    // The QoS flow that will carry UE with 1 flow Non GBR traffic
+    NrQosFlow ue1flow(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
     // The filter for the UE with 1 flow Non GBR traffic
-    Ptr<NrEpcTft> ue1flowTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfUe1flow;
+    Ptr<NrQosRule> ue1flowRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfUe1flow;
     dlpfUe1flow.localPortStart = dlPortUe1flow;
     dlpfUe1flow.localPortEnd = dlPortUe1flow;
-    ue1flowTft->Add(dlpfUe1flow);
+    ue1flowRule->Add(dlpfUe1flow);
     /******************************************************************************/
 
     /******************************************************************************/
     // UE with 2 Flows Non GBR configuration and object creation:
     UdpClientHelper dlClientUe2flowsNgbr;
-    dlClientUe2flowsNgbr.SetAttribute("RemotePort", UintegerValue(dlPortUe2flowsNgbr));
     dlClientUe2flowsNgbr.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientUe2flowsNgbr.SetAttribute("PacketSize", UintegerValue(udpPacketSize1));
     dlClientUe2flowsNgbr.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambda1)));
@@ -442,20 +391,19 @@ main(int argc, char* argv[])
     // NrGbrQosInformation qosInfoInterServ2;
     // qosInfoInterServ2.gbrDl = 6e6; // Downlink GBR
 
-    // The bearer that will carry UE with 2 Flows Non GBR traffic
-    NrEpsBearer ue2flowsNgbrBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB); // qosInfoInterServ2);
+    // The QoS flow that will carry UE with 2 Flows Non GBR traffic
+    NrQosFlow ue2flowsNgbr(NrQosFlow::NGBR_LOW_LAT_EMBB); // qosInfoInterServ2);
 
     // The filter for the UE with 2 Flows Non GBR traffic
-    Ptr<NrEpcTft> ue2flowsNgbrTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfUe2flowsNgbr;
+    Ptr<NrQosRule> ue2flowsNgbrRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfUe2flowsNgbr;
     dlpfUe2flowsNgbr.localPortStart = dlPortUe2flowsNgbr;
     dlpfUe2flowsNgbr.localPortEnd = dlPortUe2flowsNgbr;
-    ue2flowsNgbrTft->Add(dlpfUe2flowsNgbr);
+    ue2flowsNgbrRule->Add(dlpfUe2flowsNgbr);
     /******************************************************************************/
 
     /******************************************************************************/
     UdpClientHelper dlClientUe2flowsDcGbr;
-    dlClientUe2flowsDcGbr.SetAttribute("RemotePort", UintegerValue(dlPortUe2flowsDcGbr));
     dlClientUe2flowsDcGbr.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientUe2flowsDcGbr.SetAttribute("PacketSize", UintegerValue(udpPacketSize2));
     dlClientUe2flowsDcGbr.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambda2)));
@@ -463,15 +411,15 @@ main(int argc, char* argv[])
     NrGbrQosInformation qosUe2flowsDcGbr;
     qosUe2flowsDcGbr.gbrDl = 5e6; // Downlink GBR
 
-    // The bearer that will carry Ue 2 Flows DC GBR traffic
-    NrEpsBearer ue2flowsDcGbrBearer(NrEpsBearer::DGBR_INTER_SERV_87, qosUe2flowsDcGbr);
+    // The QoS flow that will carry Ue 2 Flows DC GBR traffic
+    NrQosFlow ue2flowsDcGbr(NrQosFlow::DGBR_INTER_SERV_87, qosUe2flowsDcGbr);
 
     // The filter for the 2 Flows DC GBR traffic
-    Ptr<NrEpcTft> ue2FlowsDcGbrTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfUe2flowsDcGbr;
+    Ptr<NrQosRule> ue2FlowsDcGbrRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfUe2flowsDcGbr;
     dlpfUe2flowsDcGbr.localPortStart = dlPortUe2flowsDcGbr;
     dlpfUe2flowsDcGbr.localPortEnd = dlPortUe2flowsDcGbr;
-    ue2FlowsDcGbrTft->Add(dlpfUe2flowsDcGbr);
+    ue2FlowsDcGbrRule->Add(dlpfUe2flowsDcGbr);
     /******************************************************************************/
 
     //  Install the applications
@@ -484,11 +432,13 @@ main(int argc, char* argv[])
 
         // The client, who is transmitting, is installed in the remote host,
         // with destination address set to the address of the UE
-        dlClientUe1flow.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+        dlClientUe1flow.SetAttribute(
+            "Remote",
+            AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortUe1flow)));
         clientApps.Add(dlClientUe1flow.Install(remoteHost));
 
-        // Activate a dedicated bearer for the traffic type
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, ue1flowBearer, ue1flowTft);
+        // Activate a dedicated QoS flow for the traffic type
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, ue1flow, ue1flowRule);
     }
 
     for (uint32_t i = 0; i < ue2flowsContainer.GetN(); ++i)
@@ -498,11 +448,13 @@ main(int argc, char* argv[])
 
         // The client, who is transmitting, is installed in the remote host,
         // with destination address set to the address of the UE
-        dlClientUe2flowsNgbr.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+        dlClientUe2flowsNgbr.SetAttribute(
+            "Remote",
+            AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortUe2flowsNgbr)));
         clientApps.Add(dlClientUe2flowsNgbr.Install(remoteHost));
 
-        // Activate a dedicated bearer for the traffic type
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, ue2flowsNgbrBearer, ue2flowsNgbrTft);
+        // Activate a dedicated QoS flow for the traffic type
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, ue2flowsNgbr, ue2flowsNgbrRule);
     }
 
     for (uint32_t i = 0; i < ue2flowsContainer.GetN(); ++i)
@@ -512,11 +464,13 @@ main(int argc, char* argv[])
 
         // The client, who is transmitting, is installed in the remote host,
         // with destination address set to the address of the UE
-        dlClientUe2flowsDcGbr.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+        dlClientUe2flowsDcGbr.SetAttribute(
+            "Remote",
+            AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortUe2flowsDcGbr)));
         clientApps.Add(dlClientUe2flowsDcGbr.Install(remoteHost));
 
-        // Activate a dedicated bearer for the traffic type
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, ue2flowsDcGbrBearer, ue2FlowsDcGbrTft);
+        // Activate a dedicated QoS flow for the traffic type
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, ue2flowsDcGbr, ue2FlowsDcGbrRule);
     }
 
     // start UDP server and client apps
@@ -633,9 +587,7 @@ main(int argc, char* argv[])
     outFile.setf(std::ios_base::fixed);
 
     double flowDuration = (simTime - udpAppStartTime).GetSeconds();
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
 

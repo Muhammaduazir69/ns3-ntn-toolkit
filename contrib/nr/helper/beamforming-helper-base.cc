@@ -4,14 +4,14 @@
 
 #include "beamforming-helper-base.h"
 
-#include <ns3/log.h>
-#include <ns3/node.h>
-#include <ns3/nr-gnb-net-device.h>
-#include <ns3/nr-gnb-phy.h>
-#include <ns3/nr-spectrum-phy.h>
-#include <ns3/nr-ue-net-device.h>
-#include <ns3/nr-ue-phy.h>
-#include <ns3/vector.h>
+#include "ns3/log.h"
+#include "ns3/node.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/nr-gnb-phy.h"
+#include "ns3/nr-spectrum-phy.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-ue-phy.h"
+#include "ns3/vector.h"
 
 namespace ns3
 {
@@ -43,6 +43,16 @@ BeamformingHelperBase::RunTask(const Ptr<NrSpectrumPhy>& gnbSpectrumPhy,
                                const Ptr<NrSpectrumPhy>& ueSpectrumPhy) const
 {
     NS_LOG_FUNCTION(this);
+    // A UE that connected to another cell keeps the tasks of its previous cells; steering
+    // its beam towards one of them would break the link with its serving cell
+    if (ueSpectrumPhy->GetCellId() != gnbSpectrumPhy->GetCellId())
+    {
+        NS_LOG_INFO("Skip beamforming task for gNB node Id:"
+                    << gnbSpectrumPhy->GetDevice()->GetNode()->GetId()
+                    << " and UE node Id:" << ueSpectrumPhy->GetDevice()->GetNode()->GetId()
+                    << ", which is served by cell " << ueSpectrumPhy->GetCellId());
+        return;
+    }
     NS_LOG_INFO(" Run beamforming task for gNB node Id:"
                 << gnbSpectrumPhy->GetDevice()->GetNode()->GetId()
                 << " and UE node Id:" << ueSpectrumPhy->GetDevice()->GetNode()->GetId());

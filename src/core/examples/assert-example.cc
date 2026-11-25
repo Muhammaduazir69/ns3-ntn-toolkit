@@ -7,9 +7,9 @@
  */
 
 /**
- * \file
- * \ingroup core-examples
- * \ingroup assert
+ * @file
+ * @ingroup core-examples
+ * @ingroup assert
  * Example program illustrating the use of NS_ASSERT_MSG()
  */
 
@@ -24,7 +24,7 @@ NS_LOG_COMPONENT_DEFINE("AssertExample");
 int
 main(int argc, char** argv)
 {
-    CommandLine cmd;
+    CommandLine cmd(__FILE__);
     cmd.Parse(argc, argv);
 
     std::cout << "NS_ASSERT_MSG example\n"

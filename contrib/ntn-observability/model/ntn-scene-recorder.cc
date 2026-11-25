@@ -186,6 +186,9 @@ NtnSceneRecorder::DoDispose()
 void
 NtnSceneRecorder::SetEnuReference(double lat0Deg, double lon0Deg, double alt0M)
 {
+    // A reference only has meaning in the ENU frame; setting one without SetFrame(LocalEnu)
+    // used to leave positions in ENU metres written as ECEF (a scene at the Earth's centre).
+    m_frame = LocalEnu;
     m_lat0 = lat0Deg;
     m_lon0 = lon0Deg;
     m_alt0 = alt0M;
@@ -295,11 +298,20 @@ NtnSceneRecorder::EnableCzml(const std::string& path)
     m_czmlPath = path;
 }
 
+static uint32_t s_active = 0;
+
+uint32_t
+NtnSceneRecorder::ActiveCount()
+{
+    return s_active;
+}
+
 void
 NtnSceneRecorder::Start()
 {
     NS_ASSERT_MSG(!m_running, "Start called twice");
     m_running = true;
+    ++s_active;
     m_t0Sec = Simulator::Now().GetSeconds();
     m_tLastSec = m_t0Sec;
 
@@ -405,6 +417,11 @@ NtnSceneRecorder::Poll()
         }
     }
     m_tLastSec = t;
+    if (m_frameBudget > 0 && ++m_framesAtDt >= m_frameBudget)
+    {
+        m_framesAtDt = 0;
+        m_sampleDt = m_sampleDt * 2;
+    }
     Simulator::Schedule(m_sampleDt, &NtnSceneRecorder::Poll, this);
 }
 
@@ -576,6 +593,10 @@ NtnSceneRecorder::Stop()
         return;
     }
     m_running = false;
+    if (s_active > 0)
+    {
+        --s_active;
+    }
     if (m_exporter)
     {
         m_exporter->Stop();

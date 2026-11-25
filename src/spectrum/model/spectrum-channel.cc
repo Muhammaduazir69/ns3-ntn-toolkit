@@ -8,10 +8,10 @@
 
 #include "spectrum-channel.h"
 
-#include <ns3/abort.h>
-#include <ns3/double.h>
-#include <ns3/log.h>
-#include <ns3/pointer.h>
+#include "ns3/abort.h"
+#include "ns3/double.h"
+#include "ns3/log.h"
+#include "ns3/pointer.h"
 
 namespace ns3
 {
@@ -33,9 +33,18 @@ void
 SpectrumChannel::DoDispose()
 {
     NS_LOG_FUNCTION(this);
+
+    // Any propagation model that holds a pointer
+    // back to the spectrum channel should not call Dispose()
+    // of its channel pointer, or else a loop may occur.
     m_propagationLoss = nullptr;
     m_propagationDelay = nullptr;
     m_spectrumPropagationLoss = nullptr;
+    if (m_phasedArraySpectrumPropagationLoss)
+    {
+        m_phasedArraySpectrumPropagationLoss->Dispose();
+    }
+    m_phasedArraySpectrumPropagationLoss = nullptr;
 }
 
 TypeId

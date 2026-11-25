@@ -7,6 +7,7 @@
 #include "traffic-generator.h"
 
 #include "ns3/address.h"
+#include "ns3/boolean.h"
 #include "ns3/log.h"
 #include "ns3/node.h"
 #include "ns3/nstime.h"
@@ -31,7 +32,18 @@ TypeId
 TrafficGenerator::GetTypeId()
 {
     static TypeId tid =
-        TypeId("ns3::TrafficGenerator").SetParent<Application>().SetGroupName("Applications");
+        TypeId("ns3::TrafficGenerator")
+            .SetParent<Application>()
+            .SetGroupName("Applications")
+            .AddAttribute("EnableSeqTsSizeHeader",
+                          "Enable use of SeqTsSizeHeader for sequence number and timestamp",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&TrafficGenerator::m_enableSeqTsSizeHeader),
+                          MakeBooleanChecker())
+            .AddTraceSource("TxWithSeqTsSize",
+                            "A new packet is created with SeqTsSizeHeader",
+                            MakeTraceSourceAccessor(&TrafficGenerator::m_txTraceWithSeqTsSize),
+                            "ns3::PacketSink::SeqTsSizeCallback");
     return tid;
 }
 
@@ -269,13 +281,21 @@ TrafficGenerator::SendNextPacket()
     uint32_t toSend = GetNextPacketSize();
     // Make sure we don't send too many
     if ((m_packetBurstSizeInBytes > 0) and
-        (m_packetBurstSizeInBytes - m_currentBurstTotBytes > toSend))
+        (m_packetBurstSizeInBytes - m_currentBurstTotBytes < toSend))
     {
         toSend = std::min(toSend, m_packetBurstSizeInBytes - m_currentBurstTotBytes);
-        NS_LOG_INFO("Sending a packet at " << Simulator::Now() << " of size:" << toSend);
-        //<< ", and left to send: " << (m_packetBurstSizeInBytes - m_currentBurstTotBytes));
     }
-    NS_ASSERT(toSend);
+    if (toSend == 0)
+    {
+        // No packet to send, schedule the next packet
+        Time nextPacketTime = GetNextPacketTime();
+        NS_ASSERT(nextPacketTime.GetSeconds() >= 0);
+        m_eventIdSendNextPacket =
+            Simulator::Schedule(nextPacketTime, &TrafficGenerator::SendNextPacket, this);
+        return;
+    }
+    NS_LOG_INFO("Sending a packet of size: " << toSend << " Bytes");
+    //<< ", and left to send: " << (m_packetBurstSizeInBytes - m_currentBurstTotBytes));
     int actual = 0;
     /*
     XrHeader xrHeader (GetTrafficType());
@@ -283,11 +303,32 @@ TrafficGenerator::SendNextPacket()
     */
     if (m_socket->GetTxAvailable() > toSend)
     {
-        Ptr<Packet> packet = Create<Packet>(toSend);
+        Ptr<Packet> packet;
+        if (m_enableSeqTsSizeHeader)
+        {
+            Address from;
+            Address to;
+            m_socket->GetSockName(from);
+            m_socket->GetPeerName(to);
+            SeqTsSizeHeader header;
+            header.SetSeq(m_seq++);
+            header.SetSize(toSend);
+            NS_ABORT_MSG_IF(toSend < header.GetSerializedSize(),
+                            "Packet too small to use SeqTsSizeHeader");
+            packet = Create<Packet>(toSend - header.GetSerializedSize());
+            NS_LOG_INFO("Packet created with SeqTsSizeHeader. Packet size: "
+                        << packet->GetSize() << " Bytes"
+                        << " + header size: " << header.GetSerializedSize() << " Bytes");
+            // Trace before adding header, for consistency with PacketSink
+            m_txTraceWithSeqTsSize(packet, from, to, header);
+            packet->AddHeader(header);
+        }
+        else
+        {
+            packet = Create<Packet>(toSend);
+        }
         m_txTrace(packet);
         actual = m_socket->Send(packet);
-        // NS_ASSERT (actual == (int) (toSend + xrHeader.GetSerializedSize ()));
-        NS_ASSERT(actual == (int)(toSend));
     }
     else
     {
@@ -299,9 +340,13 @@ TrafficGenerator::SendNextPacket()
         NS_LOG_WARN("Unable to send packet; actual " << actual << " size " << toSend
                                                      << "; caching for later attempt");
     }
-    NS_LOG_INFO("Sent data: " << actual << " bytes.");
 
-    if ((actual < (int)toSend))
+    if (actual == -1)
+    {
+        int errNo = m_socket->GetErrno();
+        NS_LOG_WARN("Socket failed to send with error code " << errNo);
+    }
+    else if ((actual < (int)toSend))
     {
         // We exit this loop when actual < toSend as the send side
         // buffer is full. The "DataSent" callback will pop when

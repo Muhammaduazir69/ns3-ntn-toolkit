@@ -12,8 +12,8 @@
 #include "simulator.h"
 
 /**
- * \file
- * \ingroup events
+ * @file
+ * @ingroup events
  * ns3::EventId implementation.
  */
 
@@ -66,12 +66,6 @@ EventId::IsPending() const
 {
     NS_LOG_FUNCTION(this);
     return !IsExpired();
-}
-
-bool
-EventId::IsRunning() const
-{
-    return IsPending();
 }
 
 EventImpl*

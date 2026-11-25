@@ -48,11 +48,6 @@ TcpSocketDerived::GetTypeId()
     return tid;
 }
 
-TypeId
-TcpSocketDerived::GetInstanceTypeId() const
-{
-    return TcpSocketDerived::GetTypeId();
-}
 
 TcpSocketDerived::TcpSocketDerived()
 {

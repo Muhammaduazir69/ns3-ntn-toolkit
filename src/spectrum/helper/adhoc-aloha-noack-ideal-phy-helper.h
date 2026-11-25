@@ -9,11 +9,11 @@
 #ifndef ADHOC_ALOHA_NOACK_IDEAL_PHY_HELPER_H
 #define ADHOC_ALOHA_NOACK_IDEAL_PHY_HELPER_H
 
-#include <ns3/attribute.h>
-#include <ns3/net-device-container.h>
-#include <ns3/node-container.h>
-#include <ns3/object-factory.h>
-#include <ns3/queue.h>
+#include "ns3/attribute.h"
+#include "ns3/net-device-container.h"
+#include "ns3/node-container.h"
+#include "ns3/object-factory.h"
+#include "ns3/queue.h"
 
 #include <string>
 
@@ -24,8 +24,8 @@ class SpectrumValue;
 class SpectrumChannel;
 
 /**
- * \ingroup spectrum
- * \brief create the AlohaNoackNetDevice
+ * @ingroup spectrum
+ * @brief create the AlohaNoackNetDevice
  */
 class AdhocAlohaNoackIdealPhyHelper
 {
@@ -78,9 +78,9 @@ class AdhocAlohaNoackIdealPhyHelper
     void SetDeviceAttribute(std::string n1, const AttributeValue& v1);
 
     /**
-     * \tparam Ts \deduced Argument types
-     * \param type the type of the model to set
-     * \param [in] args Name and AttributeValue pairs to set.
+     * @tparam Ts @deduced Argument types
+     * @param type the type of the model to set
+     * @param [in] args Name and AttributeValue pairs to set.
      *
      * Configure the AntennaModel instance for each new device to be created
      */
@@ -94,7 +94,7 @@ class AdhocAlohaNoackIdealPhyHelper
     NetDeviceContainer Install(NodeContainer c) const;
     /**
      * @param node the node on which a device must be created
-     * \returns a device container which contains all the devices created by this method.
+     * @returns a device container which contains all the devices created by this method.
      */
     NetDeviceContainer Install(Ptr<Node> node) const;
     /**

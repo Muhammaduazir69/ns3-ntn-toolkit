@@ -54,9 +54,9 @@ NS_LOG_COMPONENT_DEFINE("SixthScriptExample");
 /**
  * Congestion window change callback
  *
- * \param stream The output stream file.
- * \param oldCwnd Old congestion window.
- * \param newCwnd New congestion window.
+ * @param stream The output stream file.
+ * @param oldCwnd Old congestion window.
+ * @param newCwnd New congestion window.
  */
 static void
 CwndChange(Ptr<OutputStreamWrapper> stream, uint32_t oldCwnd, uint32_t newCwnd)
@@ -69,8 +69,8 @@ CwndChange(Ptr<OutputStreamWrapper> stream, uint32_t oldCwnd, uint32_t newCwnd)
 /**
  * Rx drop callback
  *
- * \param file The output PCAP file.
- * \param p The dropped packet.
+ * @param file The output PCAP file.
+ * @param p The dropped packet.
  */
 static void
 RxDrop(Ptr<PcapFileWrapper> file, Ptr<const Packet> p)
@@ -100,6 +100,11 @@ main(int argc, char* argv[])
     devices.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(em));
 
     InternetStackHelper stack;
+
+    // Disabling IPv6 because it is not necessary to show what we want to demonstrate here.
+    // Note: Normal networks typically have both IPv4 and IPv6 enabled.
+    stack.SetIpv6StackInstall(false);
+
     stack.Install(nodes);
 
     Ipv4AddressHelper address;
@@ -129,7 +134,7 @@ main(int argc, char* argv[])
 
     PcapHelper pcapHelper;
     Ptr<PcapFileWrapper> file =
-        pcapHelper.CreateFile("sixth.pcap", std::ios::out, PcapHelper::DLT_PPP);
+        pcapHelper.CreateFile("sixth.pcap", std::ios::out, iana::linktype::PPP);
     devices.Get(1)->TraceConnectWithoutContext("PhyRxDrop", MakeBoundCallback(&RxDrop, file));
 
     Simulator::Stop(Seconds(20));

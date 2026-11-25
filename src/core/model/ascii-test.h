@@ -14,25 +14,34 @@
 #include "ascii-file.h"
 #include "test.h"
 
+#include <filesystem>
 #include <stdint.h>
 
 /**
- * \brief Test that a pair of new/reference ascii files are equal
+ * @brief Test that a pair of new/reference ascii files are equal
  *
- * \param gotFilename The name of the new file to read in including
+ * @param gotFilename The name of the new file to read in including
  * its path
- * \param expectedFilename The name of the reference file to read in
+ * @param expectedFilename The name of the reference file to read in
  * including its path
  */
 #define NS_ASCII_TEST_EXPECT_EQ(gotFilename, expectedFilename)                                     \
     do                                                                                             \
     {                                                                                              \
         uint64_t line(0);                                                                          \
-        bool diff = AsciiFile::Diff(gotFilename, expectedFilename, line);                          \
-        NS_TEST_EXPECT_MSG_EQ(diff,                                                                \
-                              false,                                                               \
-                              "ASCII traces " << gotFilename << " and " << expectedFilename        \
-                                              << " differ starting from line " << line);           \
+        bool fileExists = std::filesystem::exists(expectedFilename);                               \
+        if (fileExists)                                                                            \
+        {                                                                                          \
+            bool diff = AsciiFile::Diff(gotFilename, expectedFilename, line);                      \
+            NS_TEST_EXPECT_MSG_EQ(diff,                                                            \
+                                  false,                                                           \
+                                  "ASCII traces " << gotFilename << " and " << expectedFilename    \
+                                                  << " differ starting from line " << line);       \
+        }                                                                                          \
+        else                                                                                       \
+        {                                                                                          \
+            NS_TEST_EXPECT_MSG_EQ(fileExists, true, "File " << expectedFilename << " not found");  \
+        }                                                                                          \
     } while (false)
 
 #endif /* ASCII_TEST_H */

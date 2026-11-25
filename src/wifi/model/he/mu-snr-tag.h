@@ -10,6 +10,7 @@
 #define MU_SNR_TAG_H
 
 #include "ns3/tag.h"
+#include "ns3/wifi-export.h"
 
 #include <map>
 
@@ -17,17 +18,17 @@ namespace ns3
 {
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  *
  * A tag to be attached to a response to a multi-user UL frame, that carries the SNR
  * values with which the individual frames have been received.
  */
-class MuSnrTag : public Tag
+class WIFI_EXPORT MuSnrTag : public Tag
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     TypeId GetInstanceTypeId() const override;
@@ -49,22 +50,22 @@ class MuSnrTag : public Tag
     /**
      * Set the SNR for the given sender to the given value.
      *
-     * \param staId the STA-ID of the given sender
-     * \param snr the value of the SNR to set in linear scale
+     * @param staId the STA-ID of the given sender
+     * @param snr the value of the SNR to set in linear scale
      */
     void Set(uint16_t staId, double snr);
     /**
      * Return true if the SNR value for the given STA-ID is present
      *
-     * \param staId the STA-ID
-     * \return true if the SNR value for the given STA-ID is present
+     * @param staId the STA-ID
+     * @return true if the SNR value for the given STA-ID is present
      */
     bool IsPresent(uint16_t staId) const;
     /**
      * Return the SNR value for the given sender.
      *
-     * \param staId the STA-ID of the given sender
-     * \return the SNR value in linear scale
+     * @param staId the STA-ID of the given sender
+     * @return the SNR value in linear scale
      */
     double Get(uint16_t staId) const;
 

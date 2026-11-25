@@ -19,6 +19,7 @@
 
 #include "apb.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/ns3-ai-ntn-module.h>
 
 #include <chrono>
@@ -26,6 +27,12 @@
 #include <random>
 
 #define NUM_ENV 10000
+
+// Interface test: this example exercises only the ns3-ai C++/Python bridge
+// (vector-based shared-memory messages).
+// It has no network, channel or NTN node on purpose: the C++ side draws two random
+// integers, the Python agent returns their sum, and the C++ side prints both.
+// No physics is modeled, so the dataset record carries only the run metadata.
 #define APB_SIZE 3
 
 using namespace ns3;
@@ -71,4 +78,6 @@ main()
         std::cout << "\n";
         msgInterface->CppRecvEnd();
     }
+    // ntn-dataset@1: standard manifest + sim_health (shared-memory IPC demo, no network)
+    ns3::ntnobs::WriteDatasetRecord(".", "ns3ai_apb_msg_vec", "analytic", 0, nullptr);
 }

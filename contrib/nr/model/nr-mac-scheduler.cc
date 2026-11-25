@@ -6,7 +6,7 @@
 
 #include "nr-mac-csched-sap.h"
 
-#include <ns3/log.h>
+#include "ns3/log.h"
 
 namespace ns3
 {
@@ -130,6 +130,16 @@ class NrMacGeneralSchedSapProvider : public NrMacSchedSapProvider
     uint8_t GetUlCtrlSyms() const override
     {
         return m_scheduler->GetUlCtrlSyms();
+    }
+
+    bool IsHarqReTxEnable() const override
+    {
+        return m_scheduler->IsHarqReTxEnable();
+    };
+
+    bool IsMaxSrsReached() const override
+    {
+        return m_scheduler->IsMaxSrsReached();
     };
 
   private:

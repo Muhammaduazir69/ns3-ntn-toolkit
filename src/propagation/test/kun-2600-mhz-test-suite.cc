@@ -7,22 +7,22 @@
  *         Nicola Baldo <nbaldo@cttc.es>
  */
 
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/double.h>
-#include <ns3/enum.h>
-#include <ns3/kun-2600-mhz-propagation-loss-model.h>
-#include <ns3/log.h>
-#include <ns3/string.h>
-#include <ns3/test.h>
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/double.h"
+#include "ns3/enum.h"
+#include "ns3/kun-2600-mhz-propagation-loss-model.h"
+#include "ns3/log.h"
+#include "ns3/string.h"
+#include "ns3/test.h"
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("Kun2600MhzPropagationLossModelTest");
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief Kun2600MhzPropagationLossModel Test Case
+ * @brief Kun2600MhzPropagationLossModel Test Case
  *
  */
 class Kun2600MhzPropagationLossModelTestCase : public TestCase
@@ -31,11 +31,11 @@ class Kun2600MhzPropagationLossModelTestCase : public TestCase
     /**
      * Constructor
      *
-     * \param dist 2D distance between UT and BS in meters
-     * \param hb height of BS in meters
-     * \param hm height of UT in meters
-     * \param refValue reference loss value
-     * \param name TestCase name
+     * @param dist 2D distance between UT and BS in meters
+     * @param hb height of BS in meters
+     * @param hm height of UT in meters
+     * @param refValue reference loss value
+     * @param name TestCase name
      */
     Kun2600MhzPropagationLossModelTestCase(double dist,
                                            double hb,
@@ -49,8 +49,8 @@ class Kun2600MhzPropagationLossModelTestCase : public TestCase
 
     /**
      * Create a MobilityModel
-     * \param index mobility model index
-     * \return a new MobilityModel
+     * @param index mobility model index
+     * @return a new MobilityModel
      */
     Ptr<MobilityModel> CreateMobilityModel(uint16_t index);
 
@@ -100,9 +100,9 @@ Kun2600MhzPropagationLossModelTestCase::DoRun()
 }
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief Kun2600MhzPropagationLossModel TestSuite
+ * @brief Kun2600MhzPropagationLossModel TestSuite
  *
  */
 class Kun2600MhzPropagationLossModelTestSuite : public TestSuite

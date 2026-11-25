@@ -7,6 +7,7 @@
  */
 #include "ns3/command-line.h"
 #include "ns3/config.h"
+#include "ns3/example-as-test.h"
 #include "ns3/global-value.h"
 #include "ns3/log.h"
 #include "ns3/string.h"
@@ -15,20 +16,19 @@
 #include "ns3/type-id.h"
 
 #include <cstdarg>
-#include <cstdlib>
 #include <sstream>
 
 /**
- * \file
- * \ingroup core-tests
- * \ingroup commandline
- * \ingroup commandline-tests
+ * @file
+ * @ingroup core-tests
+ * @ingroup commandline
+ * @ingroup commandline-tests
  * CommandLine test suite.
  */
 
 /**
- * \ingroup core-tests
- * \defgroup commandline-tests CommandLine test suite
+ * @ingroup core-tests
+ * @defgroup commandline-tests CommandLine test suite
  */
 
 namespace ns3
@@ -38,7 +38,7 @@ namespace tests
 {
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * A test base class that drives Command Line parsing
  */
 class CommandLineTestCaseBase : public TestCase
@@ -47,7 +47,7 @@ class CommandLineTestCaseBase : public TestCase
     /**
      * Constructor
      *
-     * \param description purpose of this TestCase
+     * @param description purpose of this TestCase
      */
     CommandLineTestCaseBase(std::string description);
 
@@ -59,8 +59,8 @@ class CommandLineTestCaseBase : public TestCase
     /**
      * Exercise the CommandLine with the provided arguments
      *
-     * \param cmd the configured CommandLine
-     * \param n the number of arguments
+     * @param cmd the configured CommandLine
+     * @param n the number of arguments
      */
     void Parse(CommandLine& cmd, int n, ...);
 
@@ -110,7 +110,7 @@ CommandLineTestCaseBase::Parse(CommandLine& cmd, int n, ...)
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test boolean Command Line processing
  */
 class CommandLineBooleanTestCase : public CommandLineTestCaseBase
@@ -180,7 +180,7 @@ CommandLineBooleanTestCase::DoRun()
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test \c uint8_t Command Line processing
  */
 class CommandLineUint8tTestCase : public CommandLineTestCaseBase
@@ -219,7 +219,7 @@ CommandLineUint8tTestCase::DoRun()
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test int Command Line processing
  */
 class CommandLineIntTestCase : public CommandLineTestCaseBase
@@ -267,7 +267,7 @@ CommandLineIntTestCase::DoRun()
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test unsigned int Command Line processing
  */
 class CommandLineUnsignedIntTestCase : public CommandLineTestCaseBase
@@ -312,7 +312,7 @@ CommandLineUnsignedIntTestCase::DoRun()
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test string Command Line processing
  */
 class CommandLineStringTestCase : public CommandLineTestCaseBase
@@ -342,11 +342,13 @@ CommandLineStringTestCase::DoRun()
     CommandLine cmd;
     uint32_t myUint32 = 10;
     std::string myStr = "MyStr";
+    std::string mySpacedStr = "My Spaced Str";
 
     cmd.AddValue("my-uint32", "help", myUint32);
     cmd.AddValue("my-str", "help", myStr);
+    cmd.AddValue("my-spaced-str", "help", mySpacedStr);
 
-    Parse(cmd, 2, "--my-uint32=9", "--my-str=XX");
+    Parse(cmd, 3, "--my-uint32=9", "--my-str=XX", "--my-spaced-str=Hello World Issue Id 1181");
 
     NS_TEST_ASSERT_MSG_EQ(myUint32,
                           9,
@@ -354,10 +356,15 @@ CommandLineStringTestCase::DoRun()
     NS_TEST_ASSERT_MSG_EQ(myStr,
                           "XX",
                           "CommandLine did not correctly set a string value to \"XX\"");
+    // Regression test for issue #1181: a string value containing spaces must be
+    // captured in full, not truncated at the first whitespace.
+    NS_TEST_ASSERT_MSG_EQ(mySpacedStr,
+                          "Hello World Issue Id 1181",
+                          "CommandLine did not capture a string value containing spaces");
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test order of argument parsing
  */
 class CommandLineOrderTestCase : public CommandLineTestCaseBase
@@ -397,7 +404,7 @@ CommandLineOrderTestCase::DoRun()
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test ignoring invalid arguments
  */
 class CommandLineInvalidTestCase : public CommandLineTestCaseBase
@@ -437,7 +444,7 @@ CommandLineInvalidTestCase::DoRun()
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test non-option arguments
  */
 class CommandLineNonOptionTestCase : public CommandLineTestCaseBase
@@ -501,7 +508,7 @@ CommandLineNonOptionTestCase::DoRun()
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * Test \c char* buffer argument
  */
 class CommandLineCharStarTestCase : public CommandLineTestCaseBase
@@ -542,7 +549,7 @@ CommandLineCharStarTestCase::DoRun()
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * The Test Suite that glues all of the Test Cases together.
  */
 class CommandLineTestSuite : public TestSuite
@@ -564,10 +571,20 @@ CommandLineTestSuite::CommandLineTestSuite()
     AddTestCase(new CommandLineInvalidTestCase);
     AddTestCase(new CommandLineNonOptionTestCase);
     AddTestCase(new CommandLineCharStarTestCase);
+    AddTestCase(new ExampleAsTestCase("core-fatal-command-line-duplicate-option",
+                                      "fatal-command-line-duplicate-option-example",
+                                      NS_TEST_SOURCEDIR,
+                                      "",
+                                      false));
+    AddTestCase(new ExampleAsTestCase("core-fatal-command-line-duplicate-non-option",
+                                      "fatal-command-line-duplicate-non-option-example",
+                                      NS_TEST_SOURCEDIR,
+                                      "",
+                                      false));
 }
 
 /**
- * \ingroup commandline-tests
+ * @ingroup commandline-tests
  * CommandLineTestSuite instance variable.
  */
 static CommandLineTestSuite g_commandLineTestSuite;

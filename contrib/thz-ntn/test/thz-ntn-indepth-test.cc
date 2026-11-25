@@ -301,7 +301,7 @@ class ThzHardwareCeilingTest : public TestCase
 {
   public:
     ThzHardwareCeilingTest()
-        : TestCase("PA back-off and the SNR / capacity ceiling set by EVM")
+        : TestCase("PA back-off and the SNR - capacity ceiling set by EVM")
     {
     }
 

@@ -2,7 +2,6 @@
 set(libraries_to_link)
 
 set(config_headers
-    ${CMAKE_HEADER_OUTPUT_DIRECTORY}/config-store-config.h
     ${CMAKE_HEADER_OUTPUT_DIRECTORY}/core-config.h
 )
 if(${ENABLE_BUILD_VERSION})
@@ -83,18 +82,11 @@ elseif(
   )
 endif()
 
-set(example_as_test_sources)
-set(example_as_test_headers)
 set(example_as_test_suite)
 if(${ENABLE_EXAMPLES})
-  set(example_as_test_sources
-      model/example-as-test.cc
-  )
-  set(example_as_test_headers
-      model/example-as-test.h
-  )
   set(example_as_test_suite
       test/examples-as-tests-test-suite.cc
+      test/log-test-suite.cc
   )
 endif()
 
@@ -129,7 +121,6 @@ endif()
 set(source_files
     ${int64x64_sources}
     ${fd-reader-sources}
-    ${example_as_test_sources}
     ${embedded_version_sources}
     helper/csv-reader.cc
     helper/random-variable-stream-helper.cc
@@ -188,6 +179,7 @@ set(source_files
     model/node-printer.cc
     model/show-progress.cc
     model/time-printer.cc
+    model/time-span.cc
     model/system-wall-clock-ms.cc
     model/system-wall-clock-timestamp.cc
     model/length.cc
@@ -196,13 +188,13 @@ set(source_files
     model/wall-clock-synchronizer.cc
     model/matrix-array.cc
     model/demangle.cc
+    model/example-as-test.cc
 )
 
 # Define core lib headers
 set(header_files
     ${config_headers}
     ${int64x64_headers}
-    ${example_as_test_headers}
     ${embedded_version_headers}
     helper/csv-reader.h
     helper/event-garbage-collector.h
@@ -278,12 +270,14 @@ set(header_files
     model/simulator.h
     model/singleton.h
     model/string.h
+    model/struct.h
     model/synchronizer.h
     model/system-path.h
     model/system-wall-clock-ms.h
     model/system-wall-clock-timestamp.h
     model/test.h
     model/time-printer.h
+    model/time-span.h
     model/timer-impl.h
     model/timer.h
     model/trace-source-accessor.h
@@ -293,7 +287,6 @@ set(header_files
     model/tuple.h
     model/type-id.h
     model/type-name.h
-    model/type-traits.h
     model/uinteger.h
     model/uniform-random-bit-generator.h
     model/valgrind.h
@@ -304,6 +297,8 @@ set(header_files
     model/wall-clock-synchronizer.h
     model/val-array.h
     model/matrix-array.h
+    model/example-as-test.h
+    test/traced-callback-typedef-test.h
 )
 
 set(test_sources
@@ -315,6 +310,7 @@ set(test_sources
     test/callback-test-suite.cc
     test/command-line-test-suite.cc
     test/config-test-suite.cc
+    test/des-metrics-test-suite.cc
     test/environment-variable-test-suite.cc
     test/event-garbage-collector-test-suite.cc
     test/global-value-test-suite.cc
@@ -323,6 +319,7 @@ set(test_sources
     test/length-test-suite.cc
     test/many-uniform-random-variables-one-get-value-call-test-suite.cc
     test/names-test-suite.cc
+    test/nlohmann-json-test-suite.cc
     test/object-test-suite.cc
     test/one-uniform-random-variable-many-get-value-calls-test-suite.cc
     test/pair-value-test-suite.cc
@@ -330,6 +327,8 @@ set(test_sources
     test/sample-test-suite.cc
     test/simulator-test-suite.cc
     test/splitstring-test-suite.cc
+    test/struct-value-test-suite.cc
+    test/system-path-test-suite.cc
     test/threaded-test-suite.cc
     test/time-test-suite.cc
     test/timer-test-suite.cc
@@ -337,7 +336,6 @@ set(test_sources
     test/trickle-timer-test-suite.cc
     test/tuple-value-test-suite.cc
     test/type-id-test-suite.cc
-    test/type-traits-test-suite.cc
     test/watchdog-test-suite.cc
     test/val-array-test-suite.cc
     test/matrix-array-test-suite.cc
@@ -350,4 +348,27 @@ build_lib(
   HEADER_FILES ${header_files}
   LIBRARIES_TO_LINK ${libraries_to_link}
   TEST_SOURCES ${test_sources}
+  GENERATE_EXPORT_HEADER
 )
+
+if(${ENABLE_TESTS})
+  set(test-executables
+      fatal-command-line-duplicate-non-option-example
+      fatal-command-line-duplicate-option-example
+  )
+  foreach(
+    test-exec
+    ${test-executables}
+  )
+    build_exec(
+      EXECNAME ${test-exec}
+      SOURCE_FILES ./test/${test-exec}.cc
+      LIBRARIES_TO_LINK ${libcore}
+      EXECUTABLE_DIRECTORY_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/src/core/test/
+    )
+    add_dependencies(
+      test-runner-examples-as-tests
+      ${test-exec}
+    )
+  endforeach()
+endif()

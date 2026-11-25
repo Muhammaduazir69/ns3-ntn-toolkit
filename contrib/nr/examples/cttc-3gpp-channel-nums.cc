@@ -14,9 +14,9 @@
 #include "ns3/nr-module.h"
 #include "ns3/point-to-point-module.h"
 /**
- * \file cttc-3gpp-channel-nums.cc
- * \ingroup examples
- * \brief Simple topology numerologies example.
+ * @file cttc-3gpp-channel-nums.cc
+ * @ingroup examples
+ * @brief Simple topology numerologies example.
  *
  * This example allows users to configure the numerology and test the end-to-end
  * performance for different numerologies. In the following figure we illustrate
@@ -119,6 +119,8 @@ main(int argc, char* argv[])
 
     // setup the nr simulation
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    // Setup the channel helper
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
 
     /*
      * Spectrum division. We create one operation band with one component carrier
@@ -128,30 +130,26 @@ main(int argc, char* argv[])
      */
     CcBwpCreator ccBwpCreator;
     const uint8_t numCcPerBand = 1; // in this example, both bands have a single CC
-    BandwidthPartInfo::Scenario scenario = BandwidthPartInfo::RMa_LoS;
+    std::string scenario = "RMa";
+    std::string condition = "LOS";
     if (ueNumPergNb > 1)
     {
-        scenario = BandwidthPartInfo::InH_OfficeOpen;
+        scenario = "InH-OfficeOpen";
     }
 
+    // Create the spectrum channel using the desired scenario and condition
+    channelHelper->ConfigureFactories(scenario, condition, "ThreeGpp");
+    // Set configurations for the channel model
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     // Create the configuration for the CcBwpHelper. SimpleOperationBandConf creates
     // a single BWP per CC
-    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency,
-                                                   bandwidth,
-                                                   numCcPerBand,
-                                                   scenario);
+    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency, bandwidth, numCcPerBand);
 
     // By using the configuration created, it is time to make the operation bands
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-
-    /*
-     * Initialize channel and pathloss, plus other things inside band1. If needed,
-     * the band configuration can be done manually, but we leave it for more
-     * sophisticated examples. For the moment, this method will take care
-     * of all the spectrum initialization needs.
-     */
-    nrHelper->InitializeOperationBand(&band);
-
+    // Set and create the channel model to the band
+    channelHelper->AssignChannelsToBands({band});
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
 
     /*
@@ -192,10 +190,6 @@ main(int argc, char* argv[])
                                          TypeIdValue(DirectPathBeamforming::GetTypeId()));
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
 
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-    //  nrHelper->SetChannelConditionModelAttribute ("UpdatePeriod", TimeValue (MilliSeconds (0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
     // Error Model: UE and GNB with same spectrum error model.
     nrHelper->SetUlErrorModel("ns3::NrEesmIrT1");
     nrHelper->SetDlErrorModel("ns3::NrEesmIrT1");
@@ -217,9 +211,6 @@ main(int argc, char* argv[])
     // gNb routing between Bearer and bandwidh part
     uint32_t bwpIdForBearer = 0;
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForBearer));
-
-    // Initialize nrHelper
-    nrHelper->Initialize();
 
     /*
      *  Create the gNB and UE nodes according to the network topology
@@ -301,56 +292,18 @@ main(int argc, char* argv[])
 
     NetDeviceContainer ueNetDev = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gNbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
-
-    // When all the configuration is done, explicitly call UpdateConfig ()
-
-    for (auto it = gNbNetDev.Begin(); it != gNbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
+    nrHelper->AssignStreams({.gnbDevs = gNbNetDev, .ueDevs = ueNetDev});
 
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
     internet.Install(ueNodes);
 
     Ipv4InterfaceContainer ueIpIface =
         nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ueNetDev, gNbNetDev);
@@ -365,7 +318,6 @@ main(int argc, char* argv[])
     serverApps.Add(dlPacketSinkHelper.Install(ueNodes.Get(0)));
 
     UdpClientHelper dlClient;
-    dlClient.SetAttribute("RemotePort", UintegerValue(dlPort));
     dlClient.SetAttribute("PacketSize", UintegerValue(udpPacketSize));
     dlClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     if (udpFullBuffer)
@@ -381,14 +333,14 @@ main(int argc, char* argv[])
     }
     dlClient.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambda)));
 
-    // The bearer that will carry low latency traffic
-    NrEpsBearer bearer(NrEpsBearer::GBR_CONV_VOICE);
+    // The flow that will carry low latency traffic
+    NrQosFlow flow(NrQosFlow::GBR_CONV_VOICE);
 
-    Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpf;
+    Ptr<NrQosRule> rule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpf;
     dlpf.localPortStart = dlPort;
     dlpf.localPortEnd = dlPort;
-    tft->Add(dlpf);
+    rule->Add(dlpf);
 
     /*
      * Let's install the applications!
@@ -403,11 +355,13 @@ main(int argc, char* argv[])
 
         // The client, who is transmitting, is installed in the remote host,
         // with destination address set to the address of the UE
-        dlClient.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+        dlClient.SetAttribute(
+            "Remote",
+            AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPort)));
         clientApps.Add(dlClient.Install(remoteHost));
 
-        // Activate a dedicated bearer for the traffic type
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, tft);
+        // Activate a dedicated QoS flow for the traffic type
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, flow, rule);
     }
 
     // start server and client apps
@@ -451,9 +405,7 @@ main(int argc, char* argv[])
     }
     outFile.setf(std::ios_base::fixed);
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;

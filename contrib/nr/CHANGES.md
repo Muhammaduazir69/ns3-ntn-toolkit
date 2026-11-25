@@ -48,6 +48,341 @@ the cracks, unfortunately.  If you, as a user, can suggest improvements
 to this file based on your experience, please contribute a patch or drop
 us a note on ns-developers mailing list.
 
+## Changes from NR-v5.1 to v5.2
+
+### New API:
+- Add the ``NrMacSchedulerNs3::MaxHarqReTx`` attribute to configure the maximum number of HARQ retransmissions per transport block.
+- Add the ``RxPacketTraceParams::m_harqProcessId`` field, the HARQ process ID of the received transport block. It is available to ``RxPacketTraceUe`` and ``RxPacketTraceGnb`` trace sinks; it is not written to ``RxPacketTrace.txt``.
+- Add the ``TrafficGenerator::EnableSeqTsSizeHeader`` attribute and ``TxWithSeqTsSize`` trace source, which add a ``SeqTsSizeHeader`` (sequence number, timestamp and size) to the generated packets, as ``OnOffApplication`` and ``PacketSink`` do, and the ``TrafficGeneratorNgmnVoip::SidEnabled`` attribute, which can disable the SID packets sent in the inactive state (enabled by default).
+- Add unstructured PDU session support (3GPP TS 23.501 Section 5.6.1), carrying a single non-IP network-layer protocol whose payload the network does not parse. This adds the ``NrPduSessionType`` enum, the ``NrQosRule::Unstructured()`` factory, ``NrHelper::ActivateUnstructuredQosFlow()``, and the ``NrEpcHelper::ActivateUnstructuredQosFlow()`` and ``NrEpcHelper::GetUnstructuredSessionDevice()`` methods. Such a session needs no address on the UE and is reached from the external network through a device of its own on the PGW. With local breakout roaming, the PGW of the visited network gives the session an egress device of its own when the UE attaches there; with home-routed roaming, the session keeps the egress device of the home network.
+- Add ``NrSidelinkFilter``, a ``SpectrumTransmitFilter`` that discards gNB-to-gNB and UE-to-UE NR signals, skipping their propagation loss and channel matrix computation. Signals involving non-NR devices are not filtered. It drops sidelink transmissions, so it must not be installed in sidelink scenarios.
+- Add ``NrCoexistenceFilter``, a ``SpectrumTransmitFilter`` that discards the signals exchanged between NR and non-NR devices, skipping their propagation loss and channel matrix computation. It removes the interference between NR and the other technologies, so it must not be installed in coexistence scenarios.
+- Add the ``NrChannelHelper::AddFilters`` attribute, a bitmask of ``NrChannelHelper::Filter`` values (``CSIRS``, ``SIDELINK``, ``COEXISTENCE``) selecting the transmit filters installed on the spectrum channels it creates. It defaults to ``CSIRS`` only, which keeps the previous behavior, and must be set before the channels are created.
+- Add roaming between the core networks of a simulation, with local breakout: ``NrNoBackhaulEpcHelper::AddRoamingPartner()`` makes two core networks roaming partners, ``NrEpcMmeApplication::UpdateLocation()`` and ``NrEpcMmeApplication::CancelLocation()`` exchange the subscription of a UE and release its session in the network that served it before, and the ``Attach`` and ``CancelLocation`` trace sources of ``NrEpcMmeApplication`` report the attachments and the deletions of the sessions. Add ``NrNoBackhaulEpcHelper::GetMmeApplication()``.
+- Add home-routed roaming between the core networks of a simulation: ``NrNoBackhaulEpcHelper::AddRoamingPartner()`` takes a ``homeRouted`` parameter, which connects the SGW of each network to the PGW of the other one with an S8 link (``NrNoBackhaulEpcHelper::S8LinkDataRate``, ``S8LinkDelay`` and ``S8LinkMtu`` attributes), and ``NrGtpcCreateSessionRequestMessage`` carries the PGW S5/S8 address for the control plane (``GetPgwAddress()``, ``SetPgwAddress()``) selected by the MME.
+- Add ``NrEpcMmeApplication::ExternalUpdateLocation()`` and ``NrEpcMmeApplication::SetExternalCancelLocationCallback()``, with which a network outside of the simulation (e.g., an external 5G core network roaming with the home network through a SEPP) serves a subscriber of a core network of the simulation.
+- Add the S1-AP UE Context Release procedure: ``NrEpcS1apSapGnb::UeContextReleaseCommand()``, ``NrEpcS1apSapMme::UeContextReleaseComplete()``, and ``NrEpcGnbS1SapUser::UeContextReleaseCommand()``, with which the gNB application asks the RRC to release the UE. Classes implementing these SAPs must implement the new methods.
+- Add the ``NrNoBackhaulEpcHelper::UeIpv4Network`` and ``NrNoBackhaulEpcHelper::UeIpv4Mask`` attributes, the IPv4 network of the UEs of a core network (7.0.0.0/8 by default).
+- Add the GTP-C Delete Session procedure (``NrGtpcDeleteSessionRequestMessage``, ``NrGtpcDeleteSessionResponseMessage``), with which the MME deletes the session of a UE in the SGW and the PGW, and ``NrEpcPgwApplication::HasUe()``, ``NrEpcPgwApplication::GetUeAddress()`` and ``NrEpcPgwApplication::GetUeAddress6()``.
+- Add the ``NrUePowerControl::P0Srs`` attribute (-80 dBm by default, from -202 to 24 dBm as the ``p0`` field of ``SRS-Config`` in TS 38.331), the ``P0`` of the SRS power control formula of TS 38.213 clause 7.3.1, used when ``TSpec`` is ``TS38.213``.
+- Add ``NrGnbPhy::DeregisterUe()``, removing a UE from the UEs of the gNB, including its CSI-RS.
+- Add the ``NrEesmIr::CreditRateBelowModulationFloor`` attribute, enabled by default (see Changed Behavior).
+- Add the ``Numerology`` attribute to ``NrMacSchedulerOfdmaAi`` and ``NrMacSchedulerTdmaAi``.
+
+### Changes to Existing API
+- Following the ns-3 spectrum change that passes beamforming vectors explicitly (ns-3 issue #1369), ``NYUSpectrumPropagationLossModel`` and ``DistanceBasedThreeGppSpectrumPropagationLossModel`` overrides of ``DoCalcRxPowerSpectralDensity()`` and ``GetLongTerm()`` take the two beamforming vectors as parameters, and callers of ``CalcRxPowerSpectralDensity()`` and ``DoCalcRxPowerSpectralDensity()`` now pass them (typically ``array->GetBeamformingVector()``) instead of relying on the arrays' current state.
+- ``NrAsSapUser::RecvData()`` now takes the QoS Flow ID of the flow the packet arrived on as a second parameter, so that the UE can recover the network-layer protocol of an unstructured PDU session on the downlink. Callers of the previous single-argument form must pass the QFI, or zero for an IP session, whose protocol is read from the packet itself.
+- The ``NrEpcGnbApplication`` constructor now takes an additional ``Ptr<Socket>`` for unstructured PDU sessions, inserted between the ``nrSocket6`` and ``cellId`` parameters.
+
+- Add ``NrRanEpcHelper``, the new base class of ``NrNoBackhaulEpcHelper``, which installs the gNB side of the S1 and X2 interfaces without creating any core network node. Subclasses connect each gNB to their core network in ``NrRanEpcHelper::ConnectGnbToCore()``. ``NrNoBackhaulEpcHelper::DoAddX2Interface()`` is now inherited from ``NrRanEpcHelper``, and the ``X2Link*`` attributes are now defined by ``NrRanEpcHelper``.
+- Add ``NrEpcS1apSapGnb::ErabToBeSetupItem::gnbTeid``, the downlink TEID of a QoS flow at the gNB. When it is not set (zero), the downlink uses the same TEID as the uplink (``sgwTeid``), as with the built-in core network.
+- Add support for GTP-U extension headers in ``NrGtpuHeader`` (``AddExtensionHeader()``, ``GetExtensionHeaders()``), and for the PDU Session Container extension header (``SetPduSessionContainer()``, ``HasPduSessionContainer()``, ``GetPduType()``, ``GetQfi()``), which carries the QFI on the N3 interface.
+- ``NrGtpuHeader::SetExtensionHeaderFlag()`` and ``NrGtpuHeader::SetNextExtensionType()`` are removed: the E flag and the next extension header type are now derived from the extension headers added with ``AddExtensionHeader()``.
+- The following ``NrMacSchedulerNs3`` methods are now ``final``, as they depend on its private state and cannot be meaningfully overridden: ``DoCschedCellConfigReq()``, ``DoCschedUeConfigReq()``, ``DoSchedDlRlcBufferReq()``, ``DoSchedUlMacCtrlInfoReq()``, ``DoSchedDlCqiInfoReq()``, ``DoSchedUlCqiInfoReq()``, ``DoCschedUeReleaseReq()``, ``DoCschedLcConfigReq()``, ``DoCschedLcReleaseReq()``, ``DoSchedDlTriggerReq()``, ``DoSchedUlTriggerReq()``, ``DoSchedUlSrInfoReq()``, ``DoSchedSetMcs()``, ``DoSchedDlRachInfoReq()``, ``GetDlCtrlSyms()``, ``GetUlCtrlSyms()`` and ``IsMaxSrsReached()``. Schedulers that derive from ``NrMacSchedulerNs3`` and override any of them no longer compile.
+- The ``NumMainInterfererGnb`` and ``PrimaryCarrierIndex`` attributes of ``NrInitialAssociation``, and ``NrHelper::InitialAssocParams::primaryCarrierIndex``, are ``uint8_t`` instead of ``double``.
+- ``NrMacSchedulerNs3::ScheduleUlHarq()`` and ``NrMacSchedulerHarqRr::ScheduleUlHarq()`` take the map of the active UL HARQ processes as their third parameter.
+- The TypeIds of the symbol-per-beam allocators are renamed from ``ns3::NrMacSchedulerONrMacSchedulerOfdmaSymbolPerBeam`` and ``ns3::NrMacSchedulerONrMacSchedulerOfdmaSymbolPerBeamLB`` to ``ns3::NrMacSchedulerOfdmaSymbolPerBeam`` and ``ns3::NrMacSchedulerOfdmaSymbolPerBeamLB``.
+- The AI-based schedulers observe UEs instead of logical channels: ``NrMacSchedulerUeInfoAi::LcObservation`` is replaced by ``NrMacSchedulerUeInfoAi::UeObservation``, the ``NrMacSchedulerUeInfoAi`` constructor takes the numerology as its second parameter, and the ``NrMacSchedulerAiNs3GymEnv`` constructor takes the number of UEs instead of the number of flows.
+
+### Changed Behavior
+
+- When another core network serves a UE, the MME of the network that served it before sends a UE Context Release Command to the gNB of the UE, which releases its RRC connection if it still has it.
+- The PGW sends the downlink packets and the GTP-C messages of a session to the SGW that created it, rather than to the SGW of its network, and the SGW sends those of a session to the PGW selected by the MME. The Create Session Request has one more F-TEID IE (the PGW S5/S8 address, which is empty for the PGW of the network of the SGW).
+- A simulation can have several core networks: ``NrHelper`` connects the gNBs to the core network of the EPC helper set when they are installed, and activates the QoS flows of each UE in the core network of the EPC helper set when the UE was installed (its home network), instead of the EPC helper set last. The core networks after the first one use their own addresses for their internal links (``10.<index>.0.0`` for S1-U, and so on) and remote host networks (``1.<index>.0.0/16``); the first one keeps the previous addresses.
+- The GTP-U packets between the gNBs and the SGW now carry the PDU Session Container extension header, with the QFI, in both directions (4 more octets per packet), and the gNB maps the downlink packets to their QoS flow with it.
+- ``NrGtpuHeader`` now omits the optional fields when none of the E, S and PN flags is set, and no longer sets the spare bit of the first octet (TS 29.281).
+- A HARQ process now ends by transmission attempts instead of ``rv == 3``. The PHY clears the soft buffer when a new transport block arrives (NDI == 1) instead of when ``rv == 3``. RV can exceed 3 when ``MaxHarqReTx`` exceeds 3.
+- ``TrafficGeneratorNgmnVoip`` now sends one voice packet per encoder frame (``EncoderFrameLength``, 20 ms by default) during talk spurts, as the NGMN VoIP model specifies, instead of one every ``VoicePayload`` * 8 / 12200 seconds (26.2 ms with the default 40-byte payload). With the default attributes the average offered rate rises from about 6.5 kbit/s to about 8.4 kbit/s (16 kbit/s in talk spurts, 0.75 kbit/s of SID packets in silence, voice activity factor 0.5); the ``traffic-generator`` test expectation is updated accordingly.
+- ``TrafficGenerator`` now accepts a next packet size of zero from a generator, scheduling the next packet without sending one, and logs a warning instead of asserting when the socket fails to send.
+- ``NrHelper::AttachToGnb()`` now activates the default IP QoS flow only for a UE that has an IPv4 or IPv6 stack. A UE reaching the network over an unstructured PDU session alone has no IP stack and gets no default flow. Previously, the default flow was always activated whenever the EPC was used.
+- The gNB EPC application now removes the ``PacketSocketTag`` and the ``DeviceNameTag`` from a packet received on the NR packet socket before relaying it to the S1-U interface. A packet socket stamps every packet it delivers with the parameters of that delivery, and those tags used to travel on with the relayed packet: they were copied onto each RLC segment by ``Packet::CreateFragment()``, carried into the reassembled SDU by ``NrRlc::ReassembleSdus()``, which delivers the held first segment and keeps its packet tags, and ended up aborting the simulation when the packet reached a packet socket that stamped it a second time. Covered by the new ``nr-epc-gnb-relayed-tag`` test suite, which walks that chain step by step.
+- The gNB RRC now keeps the C-RNTI of a UE context destroyed while a handover was still in progress out of the allocation pool until that handover concludes. ``NrGnbRrc::AddUe()`` assigns the first C-RNTI absent from the UE map, so one freed by an interrupted handover (a target that cannot allocate a preamble, or a UE context removal requested during the procedure) was immediately available again while the X2 messages naming it were still in flight; a UE CONTEXT RELEASE arriving afterwards addressed whichever UE had inherited the value and tore down its connection. The reservation is lifted when the UE CONTEXT RELEASE is received, and in any case after the new ``NrGnbRrc::RntiReservationDuration`` attribute (500 ms by default) so that a handover which never concludes cannot hold a C-RNTI forever.
+- The UE MAC now discards a buffer status report whose logical channel is not configured in the MAC, instead of recording it. The RLC entity of a logical channel that the MAC has dropped (on handover, or through the ``DoReset()`` that precedes a re-establishment) keeps the service access point it was given and can still report a buffer status; such a report can never be served, because no ``NrMacSapUser`` is left to receive the transmission opportunity. Recording it left an LCID in the buffer status map with no counterpart in the logical channel map, which ``NrUeMac::SendNewStatusData()``, ``SendRetxData()`` and ``SendTxData()`` then looked up unconditionally, terminating the simulation with an ``std::out_of_range`` exception when the next uplink grant selected that channel.
+- ``NrHelper::AssignStreams()`` now assigns streams to the NYU and FTR (``TwoRay``) channel objects, which previously drew from automatically assigned streams, and to the channel condition model shared with the fading model when no propagation loss model is installed. ``NYUPropagationLossModel`` and ``NYUChannelModel`` now also assign the streams of their shadowing (normal) and gamma random variables, and ``NYUChannelModel`` draws its Poisson and binomial values from its uniform random variable instead of a ``std::mt19937`` seeded by ``std::random_device``, which made NYU simulations non-reproducible even with a fixed seed and run number. The output of simulations using these channel models changes accordingly.
+- With ``NrUePhy::EnableUplinkPowerControl`` set, the UE now transmits the SRS with the power computed by ``NrUePowerControl::GetSrsTxPower()``. It used to reuse the transmit power of the last PUSCH or PUCCH (or the ``NrUePhy::TxPower`` attribute before any uplink transmission), spread over the whole band, so SRS-based SINR and beamforming estimates changed with the preceding transmission. Without uplink power control the SRS still uses ``NrUePhy::TxPower``.
+- With a channel that supports MIMO, the PUSCH CQI used for uplink link adaptation is now computed from the post-MMSE MIMO SINR that the gNB uses to decode the transport block, averaged over the reception time (and over the layers in dB), instead of from the SISO SINR. Gains from receive combining and interference rejection at multi-port gNBs are now reflected in the uplink MCS, and the ``NrGnbPhy::UlSinrTrace`` trace reports that SINR. Without such a channel the SISO SINR is still used.
+- ``NrMacSchedulerHarqRr::ScheduleUlHarq()`` places a UL HARQ retransmission on the symbols of a retransmission already scheduled in the slot when both have the same number of symbols, the UEs share a beam and their RBGs do not overlap. Each retransmission keeps the RBGs, MCS and TBS of its first transmission. Previously every retransmission took its own symbols, so frequency-multiplexed retransmissions (as produced by the OFDMA schedulers) were serialized in time, or deferred when the slot ran out of symbols.
+- With the OFDMA schedulers, new UL data is now scheduled on the RBGs left free by the UL HARQ retransmissions of the slot, over their symbols, for UEs in the beam of those retransmissions. As a UE gets a single grant per slot, a UE is only placed there when its data fits, or when the UEs left behind have enough data to fill the symbols after the retransmissions. Previously the rest of the band stayed empty while a retransmission was sent, and new data only got the symbols left after all retransmissions.
+- With the OFDMA schedulers, new DL data is now scheduled on the RBGs left free by the DL HARQ retransmissions of the slot, over their symbols, for UEs in the beam of those retransmissions. A UE with a retransmission in the slot still gets no new data, since it cannot receive two PDSCHs that overlap in time. As with the UL, a UE is only placed there when its data fits, or when the UEs left behind have enough data to fill the symbols after the retransmissions. Previously the rest of the band stayed empty while a retransmission was sent, and new data only got the symbols left after all retransmissions.
+- ``NrMacSchedulerHarqRr::ScheduleUlHarq()`` reshapes a UL HARQ retransmission that cannot share the symbols of another one, and whose symbols do not fit in the ones left in the slot, into the fewest of them that hold its RBGs times symbols over the UL band. It keeps its MCS and TBS. Previously such a retransmission was deferred to a later slot.
+- ``NrMacSchedulerHarqRr::ScheduleDlHarq()`` reshapes a DL HARQ retransmission whose RBGs are taken by another retransmission of its beam, or whose symbols do not fit in the ones left in the slot, into the fewest of the symbols left after every beam that hold its RBGs times symbols over the DL band. It keeps its MCS and TBS. Previously such a retransmission was deferred to a later slot unless ``NrMacSchedulerHarqRr::ConsolidateHarqRetx`` was enabled.
+- With the OFDMA schedulers, the UEs scheduled on the RBGs left free by HARQ retransmissions are now spread over all the retransmission spans of their beam. Each UE, smallest buffer first, goes to the span in which it gets the most resources, assuming the free RBGs of a span are split evenly among its UEs, as long as that share carries its data and the data of the UEs already there. Previously the spans were filled one at a time, and the first one took every UE whose data fitted in its free resources as a whole, so the following spans could stay empty, and a UE could get less than its data once the RBGs were split.
+- ``NrHelper`` no longer connects the gNB RRC to ``NrEpcGnbApplication`` and ``NrEpcX2``; this is now done by ``NrEpcHelper::AddGnb()`` when it receives an ``NrGnbNetDevice``. Custom ``NrEpcHelper`` subclasses must connect the RRC to an entity implementing ``NrEpcGnbS1SapProvider`` (and to an X2 entity, if X2 is supported). Subclasses of ``NrNoBackhaulEpcHelper`` and ``NrPointToPointEpcHelper`` are not affected.
+- ``NrHelper`` now registers a UE at the gNB of every cell the UE connects to (the ``ConnectionEstablished`` and ``HandoverEndOk`` traces of ``NrUeRrc``), and deregisters it from its previous gNB, so that a UE that changes cell after a handover or a radio link failure gets CSI-RS and a beam from its new gNB. Beamforming tasks only run for the gNB that serves the UE. Previously only the gNB of ``NrHelper::AttachToGnb()`` registered the UE.
+- HARQ-IR (``NrEesmIrT1`` and ``NrEesmIrT2``) now credits the effective code rate below the lowest code rate of the modulation order of the transport block as a repetition gain of the effective SINR, ``SINR_eff * ECR_min / ECR_eff``, through the new ``NrEesmIr::CreditRateBelowModulationFloor`` attribute (enabled by default; set it to false for the previous behavior). Previously such retransmissions gained nothing, so a 64-QAM block that failed twice, or any block at the lowest MCS of its modulation order, practically never recovered and HARQ-IR was worse than HARQ-CC. Results with HARQ-IR and retransmissions change.
+- The spectrum channel matrix built by ``NrSpectrumPhy`` for signals that arrive without one (e.g., with the ``TwoRay`` channel model) is no longer normalized by the transmitter PSD. As with the matrices produced by ``ThreeGppSpectrumPropagationLossModel``, it now carries the received power, so the MIMO SINR used to decode transport blocks is computed against the noise and interference on the same scale, instead of being overestimated by the inverse of the TX PSD (which made those transport blocks practically error-free).
+- When a transport block is decoded with the MIMO SINR, the SINR reported in ``RxPacketTraceParams`` (``RxPacketTrace.txt``) is now the per-layer MIMO SINR passed to the error model, averaged over the allocated RBs and layers, instead of the SISO SINR derived from the received PSD. The SISO value aggregates the power of all layers and ignores inter-layer interference, so it did not match the reported TBLER, e.g., overestimating the SINR of rank-2 transmissions.
+- ``NrRlcUm`` now reports its buffer status after every transmission opportunity that leaves data in its queue. The reported size counts one header per SDU while each segment takes one, so the UE MAC could consider the queue empty with data left in the RLC, pad the rest of the grant and report an empty buffer, delaying the rest of the SDU by ``NrRlcUm::BufferStatusReportTimer``. The output of simulations using RLC UM changes accordingly.
+- The scheduler now keeps the DL HARQ retransmissions of a slot without symbols for DL, because UL took them all, for a later slot. They used to be dropped, leaving the HARQ process waiting for its timer and the RLC waiting for a PDU that would never arrive. A HARQ process waiting for its retransmission also no longer expires by the timer, which only covers feedback that never arrives.
+- The initial association sets the RSRP and the best beam of each gNB from the strongest beam of that gNB, no longer multiplies the received power by the gNB transmit power in dBm, which the channel already includes, and activates the UE panel that best receives the associated gNB, instead of the panel that best receives the strongest beam of all the scanned gNBs before the path loss. The RSRP of each gNB follows its transmit power and the associated gNB may change.
+- The UE now releases the UL CTRL channel access of a slot in which it sends nothing, so it sends its UL CTRL, and the DL HARQ feedback in it, in an SRS slot that follows a slot with UL CTRL (#292).
+- The UE MAC now reserves the MAC subheader and the SHORT_BSR of an RLC STATUS PDU before admitting it, sizes the UL MAC subheaders and the SHORT_BSR exactly, and fills the bytes left in a TB with a padding BSR.
+- The gNB PHY now sends its control messages in the order they were produced (queued messages such as MIB and SIB1 first, then DL and UL DCIs), instead of an order that depended on heap addresses (#290). Simulation outputs change.
+- The UE now only updates its number of RBs from a MIB when the numerology changes, and the numerology of the BWP a connected UE is served on changes only with its configuration, so a MIB no longer aborts an ongoing reception.
+- The UE now ignores an RRC reconfiguration of a connection it has already left, e.g., a handover command sent after it declared a radio link failure.
+- The PMI searches fall back to a full update when a subband update has no precoding to refine. The Maleki search computes different subband PMIs and beam mapping.
+- The gNB no longer transmits CSI-RS towards UEs without an RNTI, and a UE without an RNTI ignores CSI-RS.
+- ``NrMacSchedulerHarqRr::ScheduleUlHarq()`` no longer places two UL retransmissions of a UE on the same symbols.
+- ``NrMacSchedulerNs3::SortUlHarq()`` now calls ``NrMacSchedulerHarqRr::SortUlHarq()``, which sorts as ``SortDlHarq()`` does, so a subclass can sort the UL HARQ retransmissions on its own.
+- The HARQ beam round-robin of ``NrMacSchedulerHarqRr`` now moves the beam served first to the back of its queue in every slot, with separate DL and UL queues, and serves the UL HARQ retransmissions in beam round-robin order too. The same beam was served first in every slot.
+- ``NrFhControl`` now subtracts the per-UE overhead from the capacity in ``GetMaxRegAssignable()`` and ``GetMaxMcsAssignable()``, releases a UE with a HARQ retransmission once it is scheduled, uses the antenna ports of the BWP of each allocation, and returns 0 active UEs for a BWP with only HARQ UEs. ``OptimizeMcs`` and ``OptimizeRBs`` give much higher MCSs and RBs than before.
+
+## Changes from NR-v5.0 to v5.1
+
+### New API:
+- Add ``NrUeMac::GetRachConfig()`` to inspect the RACH configuration currently applied to a UE MAC.
+- Add the ``NrUeMac::SrProhibitTimer`` attribute (``sr-ProhibitTimer`` of TS 38.331, 10 ms by default), the minimum time between two transmissions of the scheduling request. While it runs the pending request is held rather than dropped, and is sent on the first occasion after it expires; set it to zero to transmit on every occasion.
+- Add the ``NrUeMac::SrTransMax`` attribute (``sr-TransMax`` of TS 38.331, 64 by default), the maximum number of transmissions of a pending scheduling request before the request is cancelled and a random access procedure is started to recover uplink resources.
+- Add the ``NrRlcUm::BufferStatusReportTimer`` and ``NrRlcTm::BufferStatusReportTimer`` attributes (10 ms by default), the period at which the buffer status is reported again while the transmission buffer is not empty. ``NrRlcAm`` already had one.
+- Add the ``ulNumerology`` and ``ulCarrierFreq`` fields to ``NrRrcSap::ServingCellConfigCommon`` (broadcast in SIB1 and carried in the handover command), advertising the cell's UL carrier (the equivalent of ``frequencyInfoUL`` in TS 38.331). For TDD carriers they point at the carrier itself; for FDD cells they point at the dedicated UL-only carrier.
+- Add ``BwpManagerGnb::HasOutputLink()`` to check whether an output mapping is installed for a BWP.
+- Add ``NrUeRrc::SetUpdateBwpOutputLinkFn()`` (wired automatically by ``NrHelper``), through which the UE RRC keeps the ``BwpManagerUe`` output links aligned with the primary DL/UL BWP pair whenever it changes (initial camping, handover).
+- Add mobility state estimation attributes on ``NrUeRrc`` (``MseEnable``, ``MseCountWindow``, ``MseHystNormal``, ``MseThreshMedium``, ``MseThreshHigh``, ``MseSfMedium``, ``MseSfHigh``, ``MseFixedScale``), scaling the A3 time-to-trigger with the UE mobility state per TR 36.839. Disabled by default.
+- Add ``NrUeRrc::Tr36839HandoverFailure`` and ``Tr36839HoFailureMinT310Elapsed`` attributes modelling the TR 36.839 handover failure when the handover command arrives out-of-sync (T310 already running). Disabled by default.
+- Add the ``NrUeRrc::RadioLinkFailureCause`` and ``NrGnbRrc::HandoverTotalTime`` trace sources, reporting the cause of each radio link failure and the total handover time from A3 trigger to completion.
+- Add target-admission floors ``MinTargetRsrpDbm`` and ``MinTargetRsrqDb`` on ``NrA3RsrpHandoverAlgorithm`` and the reversal guard ``HandoverMinTimeOfStay`` on ``NrGnbRrc``, all disabled by default.
+- Add ``NrUeRrc::MibWaitReselectTimeout`` and ``MibWaitReselectMaxAttempts`` attributes, making a force-camped UE that never decodes the MIB reselect the strongest untried measured cell. Disabled by default (zero timeout).
+- Add ``RandomDirectionDisc2dMobilityModel``, a random-direction mobility model bounded by a disc, and ``HexagonalGridScenarioHelper::SetUeDiscRadius()`` to place and move UEs inside a disc centred on the central site (a zero radius keeps the legacy per-sector placement).
+- Add the ``NrHelper::AttachWindow`` attribute, deferring the k-th ``AttachToGnb()`` call by ``AttachWindow`` times the base-2 radical inverse of k to stagger the initial attachment of many UEs. Disabled by default.
+- Add ``HexagonalGridScenarioHelper::SetRingOneOnlyPicos()``, restricting picocell deployment to the six ring-1 sites (TR 36.839 no-wraparound dense-A layout). Disabled by default.
+- Accept ``CQI_CSI_RS`` alone as a ``NrHelper`` ``CsiFeedbackFlag`` value; it provides no interference measurement but keeps the channel matrix updated without PDSCH traffic.
+- Add a ``TxDrop`` trace source to the RLC TM mode, fired when a PDU is dropped on transmit-buffer overflow.
+- Stamp every RLC PDU with a monotonically assigned transmitting-entity identity, carried in the ``NrRlcTag``; ``NrRlc::AcceptPduFromPeerEntity()`` discards PDUs of an older epoch and re-establishes the receiving side (per TS 38.322 5.1.2.3) when a newer one appears. Untagged PDUs bypass the check.
+
+### Changed Behavior
+- The UE MAC now retransmits the scheduling request whenever new buffer status arrives while it is backlogged, as the UE keeps requesting resources while a BSR is pending and no UL-SCH resources are available (TS 38.321 clauses 5.4.4 and 5.4.5); previously the scheduling request was re-armed only when the last received UL DCI had HARQ process 0 or rv 3, so when the bootstrap BSR transport blocks were lost the uplink stalled permanently. The scheduler no longer records a scheduling request as 12 bytes of buffer in every uplink logical channel group of the UE; a request carries neither a size nor a group, so it is now tracked as a pending bootstrap grant in ``NrMacSchedulerUeInfo::m_srBytesPending``, which makes the UE eligible for uplink scheduling without making any of its logical channels look active, and is cleared as soon as a grant is issued or a BSR arrives. Previously a backlogged UE repeating the request downgraded the buffer reported by an earlier BSR and kept its signalling group permanently active, which flattened the uplink priorities of ``NrMacSchedulerOfdmaQos`` and ``NrMacSchedulerTdmaQos``. The rate at which the request is repeated is now bounded by the new ``NrUeMac::SrProhibitTimer`` attribute (TS 38.321 clause 5.4.4): while it runs the request stays pending instead of being transmitted on every slot, and it is stopped when a grant that carried the buffer status drains the buffer, so a request triggered by data arriving later is not held back. A request that goes unanswered for ``NrUeMac::SrTransMax`` transmissions is now cancelled, and the UE starts a random access procedure to recover uplink resources instead of asking forever; ``NrUeRrc`` accepts the outcome of a random access started while already connected instead of aborting on it. Covered by the new ``nr-ul-sr-retransmission`` test suite.
+- ``NrRlcUm`` and ``NrRlcTm`` no longer stop their buffer status report timer when a new SDU arrives from PDCP. New data is what triggers a buffer status report (TS 38.321 clause 5.4.5), never a reason to stop reporting, and the timer is only armed again by a transmission opportunity: once the uplink stalled, the last cancellation was final and the reported buffer status went stale. ``NrRlcAm`` already behaved this way.
+- The dedicated RRC configuration delivered to the UE now advertises the bandwidth-part configurations and the QoS flow mapping; previously the UE learned them only through SIB broadcasts or helper-side setup.
+- FDD configuration is now automatic: the gNB advertises its UL carrier in SIB1, the UE derives its primary UL BWP from it at cell selection (and ``NrHelper::AttachToGnb()`` derives it from the gNB configuration for the ideal path), the UE BWP routing follows the primary DL/UL pair, and the gNB routes the outgoing messages of UL-only carriers through its first DL-capable carrier unless an explicit mapping was installed. Manual ``NrUeNetDevice::PrimaryUlIndex`` and ``SetOutputLink()`` configuration is no longer needed for cells with a single DL/UL carrier pair; mixed TDD/FDD carrier-aggregation setups whose pairing does not involve the primary carrier still configure it manually (see ``cttc-lte-ca-demo``).
+- ``BwpManagerGnb::SetOutputLink()`` and ``BwpManagerUe::SetOutputLink()`` now overwrite an existing mapping for the same source BWP; previously a second call for the same source was silently ignored.
+- MIMO SINR chunks are now matched to a transport block by cell as well as by RNTI. An RNTI identifies a UE only within its own cell and the values are reused across cells, so after a handover a chunk measured against the previous cell could be selected for a transport block expected from the new one; where the two cells had granted a different rank the resulting SINR matrix disagreed with the expected rank and decoding aborted. ``MimoSinrChunk`` and ``MimoSignalChunk`` gained a ``cellId`` field for this purpose.
+- A data signal that arrives while a reception is already in progress, but which is not aligned with it in start time or duration, is now discarded instead of aborting the simulation. Only the first reception schedules the end-of-reception event and the SINR of every simultaneously decoded signal is integrated over that one window, so the signals must be time-aligned; a cell or RNTI change in the middle of a reception (handover, or re-synchronisation after radio link failure) could deliver a misaligned one. The discarded signal is still accounted for as interference.
+- Handover now applies the target cell's RACH configuration (carried in the handover command) to the UE MAC; previously the MAC kept whatever RACH configuration the source cell's SIB2 had installed, or none at all when the primary UL moved to a BWP that never decoded system information. Covered by the new ``nr-handover-rach-config`` test suite.
+- Handover between FDD cells now works, including cells with inverted UL/DL carrier roles and different per-carrier numerologies: the handover command carries the target's UL carrier frequency, bandwidth and numerology, the UE re-synchronizes its UL PHY to the target cell, and the target gNB reserves the non-contention preamble on the MAC of the carrier where the random access actually arrives.
+- A UE forced to camp without decoding SIB1 now uses the FR1-safe RACH lock duration instead of reading an uninitialized numerology.
+- The ``cttc-nr-traffic-ngmn-mixed`` example now routes the UE traffic flow through the UL BWP in FDD (previously all uplink traffic was sent to the DL-only BWP and silently dropped, breaking FDD operation), aborts on a simulation time too short for the applications to run, and computes the median flow delay only over flows that received packets.
+- A new transmission (NDI set) on a HARQ process now flushes any HARQ history left on that process by an earlier corrupted transport block. The history feeds both incremental redundancy (IR) and chase combining (CC) error models; previously, when a retransmission chain ended without a successful reception or an rv == 3 transmission (e.g., with HARQ retransmissions disabled), the stale history survived process reuse and the new transport block was incorrectly combined with it. Covered by the new ``nr-test-harq-flush`` test suite.
+- The TDMA schedulers and the OFDMA uplink scheduling now reap allocations whose transport block size is below the minimum required to create a DCI (10 bytes in downlink, 12 bytes in uplink) and redistribute those resources among the other below-minimum UEs, mirroring the reaping already performed by the OFDMA downlink scheduling. Previously, when the number of simultaneously active UEs was greater than or equal to the schedulable resources in a slot and the UEs were still at the initial MCS 0, every UE received an allocation too small to transmit, all the DCIs were silently discarded, and the cell starved indefinitely (no data implies no CSI feedback, which implies the MCS never left 0). The `nr-system-test-scheduler-many-ues` test suite covers this scenario with 100 UEs.
+- A receiver no longer keeps a permanent memory of an expired saturating signal in its interference sum. ``NrInterferenceBase`` kept the total received power as a running sum, exact in real arithmetic but not in floating point: a strong enough signal absorbed the co-resident ordinary signals when added (S + s rounds to S), so the paired subtractions left the sum permanently biased by the absorbed amount, and an infinite signal (overflowed linear received power) turned it into NaN. Every later SISO SINR and interference chunk at that receiver was then computed from the corrupted sum, even when nothing abnormal was on the air anymore. The sum is now rebuilt from the tracked list of live signals at every chunk evaluation, as the MIMO covariance path already did, and healed whenever a subtraction leaves a negative or non-finite residue. Covered by the new ``nr-interference-saturating-signal`` test suite.
+- The RLC UM and AM receiving modes were corrected towards TS 38.322 conformance: AM status report generation (NACK fit in the configured status PDU size), polling and window-based retransmission blocking, UM receive-window rewind and wrap-around advance, and the re-establishment reset of both modes were fixed, and duplicate PDUs of an already-delivered SN no longer reach PDCP twice in out-of-order delivery mode. ``MaxTxBufferSize = 0`` now means an unlimited buffer in ``NrRlcUm`` and ``NrRlcTm``, consistent with ``NrRlcAm``.
+- Connected-mode failures are now accounted per the TR 36.839 definitions: only T310 expiry and failures during a handover count as radio link failures, and a too-late handover command counts as a handover failure. Previously the too-late case was booked as a radio link failure, over-counting the RLF rate, and the handover failure rate double-counted it (and could exceed 100%). The ``RadioLinkFailureCause`` and ``HandoverTotalTime`` traces expose the new accounting.
+- The DCI RBG bitmask is now validated against the RBG count of the bandwidth part instead of its RB count; a bitmask whose set bits fit the RB count but not the RBG count was previously accepted and read out of bounds.
+- ``NrEpcUeNas`` and ``NrSpectrumPhy`` now release their back-pointer and bound callback to the owning ``NrUeNetDevice`` on dispose, breaking a reference cycle that kept the whole UE stack alive for the lifetime of the process.
+- A UE that re-selects a cell and sends a fresh RRC connection request after declaring radio link failure no longer aborts the simulation when the gNB still holds its context in an active state; the stray request is ignored and the state timeout releases the context.
+
+## Changes from NR-v4.2 to v5.0
+
+### New API:
+- Add ``NrHelper::AssignStreams()`` taking a single parameter structure (EPC, gNB/UE nodes and devices, and their base streams), unifying and replacing the previous scattered RNG stream assignment so that simulations are reproducible across runs. See commit 2e444dfa.
+- Add a same-cell primary-BWP switch mechanism: the UE RRC measures RSRP per carrier and can switch its primary BWP within the serving cell, controlled by the new ``NrUeRrc::BwpSwitchHysteresis`` attribute, with a ``BwpManagerUe`` callback exposing the UE primary BWP index. See commits 15d565e7, 363afad1, 02499113 and 4daf7d08.
+- Add ``NrGnbRrc::HandoverDecisionDelay`` and ``NrGnbRrc::HandoverTriggeringDelay`` attributes to model the handover decision and triggering latencies.
+- Add the ``NrGnbNetDevice::NrHandoverAlgorithm`` attribute to configure the handover algorithm per device.
+- Add Cell Individual Offset (CIO) support for handover biasing (cell range expansion), including a ``Hysteresis`` attribute on ``NrA3RsrpHandoverAlgorithm`` and a signed A3 offset to support negative CIO values (TR 36.839 Set 5). See commits 4735ccfc and 590741fe.
+- Add msg3 (UL RRC Connection Request) HARQ retransmission, controlled by the new ``NrMacSchedulerNs3::Msg3MaxRetx`` attribute. See commit 0da21153.
+- Add ``NrUePhy::Qin`` and ``NrUePhy::Qout`` attributes to configure the radio-link-monitoring in-sync/out-of-sync thresholds.
+- Add the ``NrUeRrc::RlcMaxRetxTriggersRlf`` attribute (default false) to declare RLF when RLC-AM reaches its maximum retransmissions, per TS 38.331 Section 5.3.10.3. See commit 0c1e88ed.
+- Add the ``NrFhControl::FunctionalSplit`` attribute to select the fronthaul functional split (``FS_6``, ``FS_7_3``, ``FS_7_2`` -- the default -- and ``FS_7_1``), with the corresponding per-split fronthaul throughput computation. See commits a48d380f and 4554c34f.
+- Add the ``NrGnbPhy::TestDropRachPreambles`` attribute (testing support).
+- Public API classes are now annotated with the ``NR_EXPORT`` macro, and internal symbols are hidden, to support building the module on Windows. See commit 5aa128de.
+
+### Changes to Existing API
+- The ``NumRbPerRbg`` attribute was moved from ``NrGnbMac`` to ``NrHelper``. See commit f3b5e3ed.
+- The ``RbOverhead`` attribute was moved from ``NrGnbPhy`` to ``NrHelper`` and is applied at setup time only. See commit 4f40bd6c.
+- The misspelled ``NrRlcUm::OutOfOfOrderDelivery`` attribute was renamed to ``OutOfOrderDelivery``.
+
+### Changed Behavior
+- NrAmc::CalculateTbSize now computes the number of code blocks with a real-valued division before applying ceil, as mandated by TS 38.212 Section 5.2.2; the integer division previously truncated the ratio, undercounting the code blocks and their CRC overhead, so transport blocks slightly larger than a code block now yield a marginally smaller usable TB size.
+- UE RSRP is now accumulated in linear mW and converted to dBm only when reporting, the measurement sample counters were widened to 32 bits, zero-power PSS samples are skipped, and the RRC layer-3 filter ignores non-finite values. This fixes measurement corruption (reports stuck at reporting range 0) in multi-cell scenarios with data traffic; reported RSRP values in windows mixing different signal levels are slightly higher than before. See commit 6691525f.
+- The RSRP reporting range mapping was updated from LTE to 5G-NR. See commit b6462ad0.
+- The UE RSRQ measurement is now interference-aware (RSSI built from noise plus inter-cell interference). See commit f08b3c06.
+- The ideal (cell scan) and realistic beamforming algorithms now scan the receive-side beams with the receive-side zenith step; previously the transmit-side step was used, incorrectly scanning the UE codebook whenever the two arrays had a different number of rows (fixes #276).
+- The realistic beamforming SRS channel estimation now applies the documented time-domain filtering gain (Delta = 9 dB) and the normalization factor alpha, and draws the complex error with the documented total variance. See commit fea12c41.
+- RLC-UM no longer delivers corrupt SDUs after t-Reordering expiry (stranded partial SDUs are discarded and the reassembly window is resynchronized), and the PDCP discard path actually drops the expired SDU instead of only tracing it. See commits 391f6bb9 and 070c7076 (and fixes #272).
+- Handover: added inter-frequency and inter-numerology handover support (measurements, data-plane continuity and BWP re-tuning), the QoS flow ID is copied to the target on handover, X2-U data received outside the forwarding window is tolerated, and the endless rescheduling of delayed reports and handovers was fixed.
+- Radio link failure: buffers, interference matrices, cell ID and CSI reporting are properly reset after RLF, RLF reselection works across numerologies, and FDD operation was added to the RLF and RRC tests.
+- Initial cell selection now scans all configured BWPs, a forced camping request overrides an in-progress cell selection, and the UE listens with numerology zero by default.
+- Scheduler: unstable sorts were replaced by stable ones and ``std::shuffle`` by the ns-3 shuffle for cross-platform reproducibility (fixes #250), transmission opportunities are assigned to control logical channels before data, MAC subheader overheads are accounted in buffer estimates, minimum control/data allocation sizes are enforced, and signaling messages are prioritized and not segmented.
+- MIB/SIB1 transmissions are deferred to DL-capable slots, SIB1 parameters can be reconfigured via RRC, and the MIB numerology is routed per-carrier by ARFCN.
+- Fixed a DL HARQ ``symAvail`` double-count underflow (fixes #278), a heap overflow in the HARQ round-robin beam ordering, and the RA-preamble sentinel so idle UEs do not match stray RARs.
+- The radio environment map helper now uses the origin antenna element type when copying antennas (fixes #274).
+- Messages are routed between BWPs using the ARFCN, and the signaling radio bearers are installed in the MAC/PHY stacks of all BWPs.
+
+### Changes to build system
+- This release is compatible with ns-3.48, and the minimum CMake version was bumped to 3.25.2 to match ns-3. See commits 5152ffa9 and fe00e81c.
+- The module builds on Windows: internal symbols are hidden and the public API is exported through ``NR_EXPORT``. See commit 5aa128de.
+- The ``cttc-nr-demo-sionna-rt`` example is built only when Sionna RT dependencies are detected and the platform is not Windows.
+- The documentation build generates the figure artifacts from their committed ``.dia``/``.seqdiag``/``.dot`` sources instead of shipping generated images, is self-contained (no ns-3 source tree required), and the CI documentation job stops at the first Sphinx error and verifies that the expected outputs were generated.
+
+## Changes from NR-v4.1.1 to v4.2
+
+### New API:
+- Add ``Get/SetBwpId()`` functions to ``BandwidthPartGnb``. These will be used instead of ``Get/SetCellId()``,
+  minimizing confusion between the use of BwpId as "Physical" CellIds.
+- Add ``NrGnbNetDevice::GetArfcnBwpId()`` function to retrieve device-local BWPId (offset) matching a specific ARFCN. See commit ef6a9043.
+- Add ``NrUeNetDevice::GetBwpArfcn()`` function to retrieve the ARFCN of the specified BWPId. See commits ef6a9043 and fea08a4d.
+- Add ``NrPhy::FrequencyHzToArfcn()`` and ``NrPhy::ArfcnToFrequencyHz()`` functions to compute ARFCN from frequency and vice-versa. See commit be20638d.
+- Add ``NrMacSchedulerOfdma::EstimateTotalTbCapacity()`` function that temporarily allocates all remaining resources to a UE,
+  checks the maximum achievable TB size, and then frees up resources. This function replaces the previously hardcoded eviction factor. See commit f2f00d78.
+
+### Changes to Existing API
+- Changed std:vector<uint16_t> cellIds parameters with a single cellId. In LTE we had multiple cells per gNB netdevice,
+  while in NR we don't. All BWPs will now refer to the same RRC, as configured in the RRC. This affects primarily
+  ``NrEpcHelper``, ``NrHelper``, ``NrNoBackhaulEpcHelper``, ``NrPointToPointEpcHelper`` and tests. See commit 8d50bc6e.
+- ``NrQosRule`` replaces previous use of ``NrEpcTft` to reflect 5G terminology
+- ``NrEpcTftClassifier`` class was renamed to ``NrQosRuleClassifier`` to reflect 5G terminology
+- ``NrEpsBearer`` class was renamed to ``NrQosFlow`` to reflect 5G terminology.  Public API (class method names, 5QI values) that used to refer to ``EpsBearer`` now refers to ``QosFlow``
+- ``NrEpcBearerTag`` class was renamed to ``NrQosFlowTag`` to reflect 5G terminology
+- Replaced ``DlEarfcn`` and ``UlEarfcn`` with a single ``Arfcn``. See commit ef6a9043.
+- The function ``NrGnbNetDevice::GetCellIds()`` was replaced with ``NrGnbNetDevice::GetBwpIds()``. See commit 8d50bc6e.
+- The function ``NrGnbNetDevice::GetBwpId()`` was replaced with ``NrGnbNetDevice::GetCellId()``. See commit 8d50bc6e.
+- The function ``NrGnbNetDevice::GetCellIdDlBandwidth()`` was replaced with ``NrGnbNetDevice::GetBwpDlBandwidth()``. Same for UL. See commits 8d50bc6e.
+- The function ``NrGnbNetDevice::GetCellIdDlEarfcn()`` was replaced with ``NrGnbNetDevice::GetBwpArfcn()``. Same for UL. See commits 8d50bc6e and ef6a9043.
+
+### Changed Behavior
+- The numeration of BWPs was changed, so that BWP Ids match the order they are installed.
+- The iteration order of rules used to classify packets to QoS flows, in the QosRuleClassifier
+  (previously EpcTftClassifier), has changed.  The default bearer is still checked last, but a
+  precedence-based ordering (ascending precedence according to TS 24.501) is now supported, and
+  for rules that do not have precedence explicitly set, they are now evaluated in the order that
+  they were added, rather than in reverse order (previously).
+- The assignments of Data Radio Bearer ID, Logical Channel ID, and Qos Flow ID (formerly EPS Bearer ID)
+  have been slightly changed; most notably, DRBID now aligns with LCID instead of LCID being assigned to (DRBID + 2)
+- NrMacSchedulerLcRR previously divided the number of available bytes in a TxOp equally to all active LCs.
+  Now it distributes them in RR fashion, so LCs with fewer bytes to transmit use less bytes, and LCs with more
+  bytes to transmit get more if all other LCs with fewer bytes are fully satisfied.
+- ARFCNs are now computed according to 3GPP standard, and are used instead of frequencies.
+
+---
+
+## Changes from NR-v4.1 to v4.1.1
+
+### New API:
+
+- ``NrHelper::IsMimoFeedbackEnabled()`` function was added to check whether MIMO feedback should be enabled or not, based on ``NrHelper::CsiFeedbackFlags``.
+- ``NrChannelHelper::SetWraparoundModel()`` function was added to automatically aggregate a wraparound model to created channels.
+- ``GetVirtualMobilityModel()`` function was added to get the wrapped position of an UE related to another position, given a channel which may have
+  or not an aggregated wraparound model. This is necessary in cases where we do not effectively transmit in the channel (which now transparently
+  applies wraparound for real transmissions), such as in ``NrInitialAssociation`` and ideal beamforming techniques.
+
+### Changes to Existing API
+
+- ``NrHelper::EnableMimoFeedback`` attribute was removed. To check if MIMO feedback should be enabled, call the new ``NrHelper::IsMimoFeedbackEnabled()`` function.
+- ``WraparoundThreeGppSpectrumPropagationLossModel`` and ``HexagonalWraparoundModel`` were removed.
+  Now wraparound is transparently applied by the ``MultiModelSpectrumChannel`` and ``SingleModelSpectrumChannel`` if a wraparound model is aggregated to it.
+
+### Changed Behavior
+
+---
+
+## Changes from NR-v4.0 to v4.1
+
+### New API:
+
+- ``ThreeGppFtpM1Helper`` has two new functions ``GetMaxFilesNumPerUe()`` and ``SetMaxFilesNumPerUe()`` that allows users to limit the maximum number of files sent per UE.
+- ``NrInitialAssociation`` and ``KroneckerQuasiOmniBeamforming`` have two additional attributes to set beam column and row angles: ``ColumnAngles`` and ``RowAngles``. These can also be set with the new functions ``ParseColBeamAngles()`` and ``ParseRowBeamAngles()``.
+- ``KroneckerBeamforming`` has four additional attributes to set beam column and row angles for transmitter and receiver: ``TxColumnAngles``, ``TxRowAngles``, ``RxColumnAngles``, and ``RxRowAngles``. These can also be set with the new functions ``ParseColTxBeamAngles()``, ``ParseRowTxBeamAngles()``, ``ParseColRxBeamAngles()``, and ``ParseRowRxBeamAngles()``.
+- ``NrMacSchedulerNs3`` has a new function ``ReshapeAllocation()``, which calls ``NrMacSchedulerTdma::DoReshapeAllocation()`` to perform DCI consolidation, using as many RBGs as possible without reducing MCS.
+- New class ``ResourceAssignmentMatrix``, which can create a resource assignment matrix, which can set beam per symbol, plus RNTI and usage type per RBG. When asserts are enabled, the matrix is used to validate ``NrMacSchedulerNs3::ScheduleDl()`` and ``NrMacSchedulerNs3::ScheduleUl()`` allocations. The matrix can also be printed for visual inspection.
+
+### Changes to Existing API
+
+
+### Changed Behavior
+- Schedulers now have memory, and maintaining their fairness over time. As a result, users should observe less UEs with 0 throughput.
+- Downlink HARQ is now scheduled using a round-robin per beam fashion.
+- To minimize symbols used while maintaining a high MCS, downlink HARQ now passes through a consolidation step implemented in function ``NrMacSchedulerNs3::ReshapeAllocation()``.
+
+---
+
+## Changes from NR-v3.3 to v4.0
+
+### New API:
+
+- Introduced multi-panel antenna support in SpectrumPhy.
+
+- Added a new attachment algorithm `NrInitialAssociation` based on maximum RSRP instead of distance.
+  It can be automatically setup via the new function `NrHelper::AttachToMaxRsrpGnb()`.
+
+- Introduced new beamforming algorithms: `KroneckerBeamforming` and `KroneckerQuasiOmniBeamforming`.
+
+- Added a new helper class, `NrChannelHelper`, to simplify the implementation, configuration, and assignment of spectrum channels with various channel models for band creation. This extends the module to support NYUSIM, Fluctuating Two-Ray (FTR), and 3GPP channel models.
+
+- Introduced a new reinforcement learning–based scheduler in both TDMA and OFDMA variants: `NrMacSchedulerTdmaAi` and `NrMacSchedulerOfdmaAi`. These require additional fields to hold the observation state, provided by the new `NrMacSchedulerUeInfoAi` class. The schedulers communicate with the ns3-gym Python model via `NrMacSchedulerAiNs3GymEnv`.
+
+- Channel state information (CSI) can now be obtained using periodic CSI-RS signaling and CSI-IM measurements. A new signal type, `NrSpectrumSignalParametersCsiRs`, was introduced to represent CSI-RS signals. The type of CSI feedback can be configured using the `NrHelper::CsiFeedbackFlags` attribute.
+
+- Introduced a new spectrum filter, `NrCsiRsFilter`, to reduce the computational complexity of CSI-RS signaling by filtering signals for `SpectrumPhy` instances that should not receive them.
+
+- Added a new function, `NrMacSchedulerUeInfo::GetDlMcs()`, which returns either the wideband MCS or an MCS estimate based on the sub-band CQI of allocated RBGs.
+
+- Added several new functions to `NrMacSchedulerOfdma` to simplify resource allocation: `AttemptAllocationOfCurrentResourceToUe()`, `AllocateCurrentResourceToUe()`, `DeallocateCurrentResourceFromUe()`, `ShouldScheduleUeBasedOnFronthaul()`, and `DeallocateResourcesDueToFronthaulConstraint()`.
+
+- Introduced new symbols-per-beam scheduling options. These can be set using the attribute NrMacSchedulerOfdma::SymPerBeamType, with available values: LOAD_BASED (default), ROUND_ROBIN, and PROPORTIONAL_FAIR.
+
+- A new function, `IsMaxSrsReached()`, was added to `NrGnbRrc`, `NrGnbMac`, `NrMacScheduler`, and `NrMacSchedulerSrs`, allowing the RRC to use the flexible SRS timings implemented in 5G-LENA instead of requiring manual configuration via `NrGnbRrc::SrsPeriodicity`.
+
+- Added two new functions, `NrEpcHelper::SetupRemoteHost` and `NrEpcHelper::SetupRemoteHost6`, to replace the previously copy-and-pasted code for setting up remote hosts in IPv4 and IPv6 networks, respectively.
+
+- Added a new attribute, `NrPmSearch::EnforceSubbandSize`, which controls whether sub-band sizes follow 3GPP specifications, providing greater flexibility.
+
+- Introduced the attribute `NrNetDevice::ReceiveErrorModel` to support packet-drop error models, along with a new trace source, `NrNetDevice::Drop`, for tracking dropped packets.
+
+- Added new functions to `NrUeRrc: SetPrimaryUlIndex()`, `GetPrimaryUlIndex()`, `SetPrimaryDlIndex()`, and `GetPrimaryDlIndex()`—allowing explicit selection of downlink and uplink primary carriers.
+
+- Added new classes to implement alternative symbols-per-beam scheduling policies:
+  - `NrMacSchedulerOfdmaSymbolPerBeamLB` (default, load-based),
+  - `NrMacSchedulerOfdmaSymbolPerBeamRR` (round-robin),
+  - `NrMacSchedulerOfdmaSymbolPerBeamPF` (proportional fair).
+
+### Changes to Existing API
+- Removed the scenario configuration from band creation. Band initialization and channel attribute setting methods were removed from NrHelper.
+
+- Added a new attribute, `NrRlcUm::OutOfOrderDelivery`, corresponding to the TS 36.322 Section 5.1.2.2.3 rlc-OutOfOrderDelivery variable (default: false).
+
+- Merged the `NrMacSchedulerCQIManagement::DlWBCQIReported()` and `DlSBCQIReported()` functions into a single function: `DlCqiReported()`.
+
+- NrAmc pointers previously passed via parameters to `NrMacSchedulerUeInfo` functions are now set during UeInfo creation.
+
+- Functions `NrUeInfo::GetDlRBG()`, `GetUlRBG()`, `GetDlSym()`, and `GetUlSym()` now return vectors instead of single values to support sub-band–aware schedulers.
+
+- Added a new field to `NrHelper::AntennaParams` to configure antenna downtilt angles.
+
+- Removed the class `CellScanBeamformingAzimuthZenith`. The corresponding method `BeamManager::SetSectorAz(double azimuth, double zenith)` was removed in favor of the refactored `CellScanBeamforming`.
+
+- Changed the type of the sector parameter in `BeamManager::SetSector()` from uint16_t to double to support oversampling.
+
+- Removed the attribute `NrGnbRrc::SrsPeriodicity` in favor of `NrMacSchedulerSrsDefault::StartingPeriodicity`.
+
+### Changed Behavior
+- `CellScanBeamforming` and `RealisticBeamformingAlgorithm` were refactored to scan all azimuth and elevation sectors based on the number of antenna elements and the oversampling factor.
+
+- Since release 3.0, UEs received unintended transmissions in NrSpectrumPhy to estimate the channel on unused PRBs. This workaround (`isIntendedRx = true`) has now been removed, as CSI-RS and CSI-IM are sufficient for full-bandwidth estimation. Using only `NrHelper::CsiFeedbackFlags = CQI_PDSCH_MIMO` now estimates the channel exclusively on allocated RBGs.
+
+- Since release 3.2, MSG3 could be incorrectly transmitted in DL and S slots.
+  This has been fixed, and MSG3 scheduling is now restricted to F and UL slots.
+
+- Since release 3.2, FDD setup was incorrectly mixing DL and UL carriers. This has been fixed. When using FDD:
+
+  - Ensure that two bandwidth parts are used.
+  - Explicitly set the uplink primary index.
+  - Set appropriate TDD patterns.
+
+```
+// 1x10MHz in TDD, 2x5MHz in FDD
+uint8_t bands = 1 + m_isFdd;
+auto bwAndBWPPair = m_nrHelper->CreateBandwidthParts({{2.8e9, 10e6 / bands, bands}}, "UMa");
+NrHelper::GetGnbPhy(gnbDevs.Get(i), 0)
+          ->SetAttribute("Pattern", StringValue("DL|DL|DL|DL|DL|DL|DL|UL|UL|UL|"));
+if (m_isFdd)
+{
+    Config::SetDefault("ns3::NrUeNetDevice::PrimaryUlIndex", UintegerValue(1));
+    NrHelper::GetGnbPhy(gnbDevs.Get(i), 0)
+              ->SetAttribute("Pattern", StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
+    NrHelper::GetGnbPhy(gnbDevs.Get(i), 1)
+              ->SetAttribute("Pattern", StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
+}
+```
+
 ---
 
 ## Changes from NR-v3.2 to v3.3
@@ -323,7 +658,7 @@ into account the resource type and the e_rabGuaranteedBitRate of a flow.
 
 This release contains the upgrade of the supported ns-3 release, i.e., upgrade
 from ns-3.37 to ns-3.38, including updating to the new and updated interfaces in
-antenna and spectrum module (ns-3 !1046 abd ns-3 !1269).
+antenna and spectrum module (ns-3 !1046 and ns-3 !1269).
 
 ### New API:
 

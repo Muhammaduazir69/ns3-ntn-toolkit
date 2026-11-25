@@ -9,10 +9,10 @@
 using namespace ns3;
 
 /**
- * \ingroup test
- * \file test-antenna-3gpp-model-conf.cc
+ * @ingroup test
+ * @file nr-power-allocation.cc
  *
- * \brief This test case checks whether the power allocation assigns
+ * @brief This test case checks whether the power allocation assigns
  * correctly power over active RBs using the specified power allocation
  * type.
  */
@@ -51,10 +51,8 @@ PowerAllocationTestCase::DoRun()
     NS_LOG_INFO("Testing for number of RBs:" << sm->GetNumBands());
 
     // fill in all RBs
-    for (size_t rbId = 0; rbId < sm->GetNumBands(); rbId++)
-    {
-        activeRbs.push_back(rbId);
-    }
+    activeRbs.resize(sm->GetNumBands());
+    std::iota(activeRbs.begin(), activeRbs.end(), 0);
 
     txPsd = NrSpectrumValueHelper::CreateTxPowerSpectralDensity(
         totalPower,

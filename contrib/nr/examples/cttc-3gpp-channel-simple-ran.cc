@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /**
- * \ingroup examples
- * \file cttc-3gpp-channel-simple-ran.cc
- * \brief Simple RAN
+ * @ingroup examples
+ * @file cttc-3gpp-channel-simple-ran.cc
+ * @brief Simple RAN
  *
  * This example describes how to setup a simulation using the 3GPP channel model
  * from TR 38.901. This example consists of a simple topology of 1 UE and 1 gNb,
@@ -18,16 +18,12 @@
 #include "ns3/antenna-module.h"
 #include "ns3/config-store.h"
 #include "ns3/core-module.h"
-#include "ns3/grid-scenario-helper.h"
+#include "ns3/iana-ieee802-numbers.h"
+#include "ns3/iana-internet-protocol-numbers.h"
 #include "ns3/internet-module.h"
-#include "ns3/ipv4-global-routing-helper.h"
-#include "ns3/log.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
-#include "ns3/nr-eps-bearer-tag.h"
-#include "ns3/nr-helper.h"
 #include "ns3/nr-module.h"
-#include "ns3/nr-point-to-point-epc-helper.h"
 
 using namespace ns3;
 
@@ -53,11 +49,11 @@ SendPacket(Ptr<NetDevice> device, Address& addr, uint32_t packetSize)
 {
     Ptr<Packet> pkt = Create<Packet>(packetSize);
     Ipv4Header ipv4Header;
-    ipv4Header.SetProtocol(UdpL4Protocol::PROT_NUMBER);
+    ipv4Header.SetProtocol(iana::internetprotocolnumbers::UDP);
     pkt->AddHeader(ipv4Header);
-    NrEpsBearerTag tag(1, 1);
+    NrQosFlowTag tag(1 /* RNTI */, 1 /* QFI */);
     pkt->AddPacketTag(tag);
-    device->Send(pkt, addr, Ipv4L3Protocol::PROT_NUMBER);
+    device->Send(pkt, addr, iana::ieee802numbers::IPV4);
 }
 
 /**
@@ -103,11 +99,16 @@ RxRlcPDU(std::string path, uint16_t rnti, uint8_t lcid, uint32_t bytes, uint64_t
 void
 ConnectPdcpRlcTraces()
 {
-    Config::Connect("/NodeList/*/DeviceList/*/NrUeRrc/DataRadioBearerMap/1/NrPdcp/RxPDU",
-                    MakeCallback(&RxPdcpPDU));
+    // Data Radio Bearer ID value of 3 corresponds to the QFI value of 1 set above
+    auto connected = Config::ConnectFailSafe(
+        "/NodeList/*/DeviceList/*/NrUeRrc/DataRadioBearerMap/3/NrPdcp/RxPDU",
+        MakeCallback(&RxPdcpPDU));
+    NS_ASSERT_MSG(connected, "Failed to connect to RxPdcpPDU trace");
 
-    Config::Connect("/NodeList/*/DeviceList/*/NrUeRrc/DataRadioBearerMap/1/NrRlc/RxPDU",
-                    MakeCallback(&RxRlcPDU));
+    connected =
+        Config::ConnectFailSafe("/NodeList/*/DeviceList/*/NrUeRrc/DataRadioBearerMap/3/NrRlc/RxPDU",
+                                MakeCallback(&RxRlcPDU));
+    NS_ASSERT_MSG(connected, "Failed to connect to RxRlcPDU trace");
 }
 
 /**
@@ -146,7 +147,6 @@ main(int argc, char* argv[])
     cmd.AddValue("enableUl", "Enable Uplink", enableUl);
     cmd.Parse(argc, argv);
 
-    int64_t randomStream = 1;
     // Create the scenario
     GridScenarioHelper gridScenario;
     gridScenario.SetRows(1);
@@ -160,15 +160,20 @@ main(int argc, char* argv[])
     gridScenario.SetUtNumber(ueNumPergNb * gNbNum);
     gridScenario.SetScenarioHeight(3); // Create a 3x3 scenario where the UE will
     gridScenario.SetScenarioLength(3); // be distributed.
-    randomStream += gridScenario.AssignStreams(randomStream);
     gridScenario.CreateScenario();
 
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
 
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
+    // Configure the spectrum channel
+    channelHelper->ConfigureFactories("UMi", "Default", "ThreeGpp");
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
     // Create one operational band containing one CC with one bandwidth part
     BandwidthPartInfoPtrVector allBwps;
@@ -178,20 +183,16 @@ main(int argc, char* argv[])
     // Create the configuration for the CcBwpHelper
     CcBwpCreator::SimpleOperationBandConf bandConf1(centralFrequencyBand1,
                                                     bandwidthBand1,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon_LoS);
+                                                    numCcPerBand);
 
     // By using the configuration created, it is time to make the operation band
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
+    // Set and create the channel
+    channelHelper->AssignChannelsToBands({band1});
+    allBwps = CcBwpCreator::GetAllBwps({band1});
 
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
     nrHelper->SetSchedulerAttribute("FixedMcsDl", BooleanValue(true));
     nrHelper->SetSchedulerAttribute("StartingMcsDl", UintegerValue(28));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    nrHelper->InitializeOperationBand(&band1);
-    allBwps = CcBwpCreator::GetAllBwps({band1});
 
     // Beamforming method
     idealBeamformingHelper->SetAttribute("BeamformingMethod",
@@ -215,22 +216,11 @@ main(int argc, char* argv[])
     NetDeviceContainer ueNetDev =
         nrHelper->InstallUeDevice(gridScenario.GetUserTerminals(), allBwps);
 
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+    nrHelper->AssignStreams({.scenario = &gridScenario, .gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     // Set the attribute of the netdevice (gnbNetDev.Get (0)) and bandwidth part (0)
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("Numerology", UintegerValue(numerologyBwp1));
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
 
     InternetStackHelper internet;
     internet.Install(gridScenario.GetUserTerminals());

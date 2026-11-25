@@ -12,8 +12,8 @@
 
 #include "nr-common.h"
 
-#include <ns3/log.h>
-#include <ns3/random-variable-stream.h>
+#include "ns3/log.h"
+#include "ns3/random-variable-stream.h"
 
 namespace ns3
 {
@@ -77,14 +77,14 @@ NrNoOpComponentCarrierManager::DoTransmitPdu(NrMacSapProvider::TransmitPduParame
 }
 
 void
-NrNoOpComponentCarrierManager::DoReportBufferStatus(
-    NrMacSapProvider::ReportBufferStatusParameters params)
+NrNoOpComponentCarrierManager::DoTransmitBufferStatusReport(
+    NrMacSapProvider::BufferStatusReportParameters params)
 {
     NS_LOG_FUNCTION(this);
     auto ueManager = m_ccmRrcSapUser->GetUeManager(params.rnti);
     auto it = m_macSapProvidersMap.find(ueManager->GetComponentCarrierId());
     NS_ASSERT_MSG(it != m_macSapProvidersMap.end(), "could not find Sap for NrComponentCarrier ");
-    it->second->ReportBufferStatus(params);
+    it->second->BufferStatusReport(params);
 }
 
 void
@@ -164,8 +164,8 @@ NrNoOpComponentCarrierManager::DoRemoveUe(uint16_t rnti)
 }
 
 std::vector<NrCcmRrcSapProvider::LcsConfig>
-NrNoOpComponentCarrierManager::DoSetupDataRadioBearer(NrEpsBearer bearer,
-                                                      uint8_t bearerId,
+NrNoOpComponentCarrierManager::DoSetupDataRadioBearer(NrQosFlow flow,
+                                                      uint8_t qfi,
                                                       uint16_t rnti,
                                                       uint8_t lcid,
                                                       uint8_t lcGroup,
@@ -189,14 +189,14 @@ NrNoOpComponentCarrierManager::DoSetupDataRadioBearer(NrEpsBearer bearer,
         lci.rnti = rnti;
         lci.lcId = lcid;
         lci.lcGroup = lcGroup;
-        lci.qci = bearer.qci;
+        lci.fiveQi = flow.fiveQi;
         if (ncc == 0)
         {
-            lci.resourceType = bearer.GetResourceType();
-            lci.mbrUl = bearer.gbrQosInfo.mbrUl;
-            lci.mbrDl = bearer.gbrQosInfo.mbrDl;
-            lci.gbrUl = bearer.gbrQosInfo.gbrUl;
-            lci.gbrDl = bearer.gbrQosInfo.gbrDl;
+            lci.resourceType = flow.GetResourceType();
+            lci.mbrUl = flow.gbrQosInfo.mbrUl;
+            lci.mbrDl = flow.gbrQosInfo.mbrDl;
+            lci.gbrUl = flow.gbrQosInfo.gbrUl;
+            lci.gbrDl = flow.gbrQosInfo.gbrDl;
         }
         else
         {
@@ -220,12 +220,12 @@ NrNoOpComponentCarrierManager::DoSetupDataRadioBearer(NrEpsBearer bearer,
         lcinfo.rnti = rnti;
         lcinfo.lcId = lcid;
         lcinfo.lcGroup = lcGroup;
-        lcinfo.qci = bearer.qci;
-        lcinfo.resourceType = bearer.GetResourceType();
-        lcinfo.mbrUl = bearer.gbrQosInfo.mbrUl;
-        lcinfo.mbrDl = bearer.gbrQosInfo.mbrDl;
-        lcinfo.gbrUl = bearer.gbrQosInfo.gbrUl;
-        lcinfo.gbrDl = bearer.gbrQosInfo.gbrDl;
+        lcinfo.fiveQi = flow.fiveQi;
+        lcinfo.resourceType = flow.GetResourceType();
+        lcinfo.mbrUl = flow.gbrQosInfo.mbrUl;
+        lcinfo.mbrDl = flow.gbrQosInfo.mbrDl;
+        lcinfo.gbrUl = flow.gbrQosInfo.gbrUl;
+        lcinfo.gbrDl = flow.gbrQosInfo.gbrDl;
         rntiIt->second.m_rlcLcInstantiated.emplace(lcinfo.lcId, lcinfo);
         rntiIt->second.m_ueAttached.emplace(lcinfo.lcId, msu);
     }
@@ -241,8 +241,11 @@ NrNoOpComponentCarrierManager::DoReleaseDataRadioBearer(uint16_t rnti, uint8_t l
 {
     NS_LOG_FUNCTION(this << rnti << +lcid);
 
-    // Here we receive directly the RNTI and the LCID, instead of only DRB ID
-    // DRB ID are mapped as DRBID = LCID + 2
+    // Here we receive directly the RNTI and the LCID, instead of only DRB ID.
+    // With the updated mapping scheme:
+    // DRBID = LCID (direct mapping, no offset)
+    // LCID 3: Default DRB (QFI 1)
+    // LCID 5+: Dedicated DRBs
     auto rntiIt = m_ueInfo.find(rnti);
     NS_ASSERT_MSG(rntiIt != m_ueInfo.end(),
                   "request to Release Data Radio Bearer on UE with unknown RNTI " << rnti);
@@ -287,6 +290,23 @@ NrNoOpComponentCarrierManager::DoConfigureSignalBearer(NrGnbCmacSapProvider::LcI
     }
 
     return m_ccmMacSapUser;
+}
+
+void
+NrNoOpComponentCarrierManager::DoRegisterSignalBearer(uint16_t rnti,
+                                                      uint8_t lcid,
+                                                      NrMacSapUser* rlcMacSapUser)
+{
+    NS_LOG_FUNCTION(this << rnti << +lcid);
+    // No-op: signal bearer registration is handled by the concrete CCM implementation.
+}
+
+void
+NrNoOpComponentCarrierManager::DoSetUePrimaryBwp(uint16_t rnti, uint8_t bwpId)
+{
+    NS_LOG_FUNCTION(this << rnti << +bwpId);
+    // No-op: the plain no-op manager keeps all traffic on the primary carrier
+    // and has no per-UE BWP override. BwpManagerGnb overrides this.
 }
 
 void
@@ -384,8 +404,8 @@ NrRrComponentCarrierManager::GetTypeId()
 }
 
 void
-NrRrComponentCarrierManager::DoReportBufferStatus(
-    NrMacSapProvider::ReportBufferStatusParameters params)
+NrRrComponentCarrierManager::DoTransmitBufferStatusReport(
+    NrMacSapProvider::BufferStatusReportParameters params)
 {
     NS_LOG_FUNCTION(this);
 
@@ -394,7 +414,7 @@ NrRrComponentCarrierManager::DoReportBufferStatus(
     {
         NS_LOG_INFO("Buffer status forwarded to the primary carrier.");
         auto ueManager = m_ccmRrcSapUser->GetUeManager(params.rnti);
-        m_macSapProvidersMap.at(ueManager->GetComponentCarrierId())->ReportBufferStatus(params);
+        m_macSapProvidersMap.at(ueManager->GetComponentCarrierId())->BufferStatusReport(params);
     }
     else
     {
@@ -404,7 +424,7 @@ NrRrComponentCarrierManager::DoReportBufferStatus(
         {
             NS_ASSERT_MSG(m_macSapProvidersMap.find(i) != m_macSapProvidersMap.end(),
                           "Mac sap provider does not exist.");
-            m_macSapProvidersMap.at(i)->ReportBufferStatus(params);
+            m_macSapProvidersMap.at(i)->BufferStatusReport(params);
         }
     }
 }

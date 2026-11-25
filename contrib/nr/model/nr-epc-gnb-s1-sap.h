@@ -7,9 +7,10 @@
 #ifndef NR_EPC_GNB_S1_SAP_H
 #define NR_EPC_GNB_S1_SAP_H
 
-#include "nr-eps-bearer.h"
+#include "nr-qos-flow.h"
 
-#include <ns3/ipv4-address.h>
+#include "ns3/ipv4-address.h"
+#include "ns3/nr-export.h"
 
 #include <list>
 
@@ -22,7 +23,7 @@ namespace ns3
  * Provider part of the SAP, i.e., the methods exported by the
  * NrEpcGnbApplication and called by the NrGnbRrc.
  */
-class NrEpcGnbS1SapProvider
+class NR_EXPORT NrEpcGnbS1SapProvider
 {
   public:
     virtual ~NrEpcGnbS1SapProvider() = default;
@@ -30,39 +31,39 @@ class NrEpcGnbS1SapProvider
     /**
      * Initial UE message.
      *
-     * \param imsi IMSI
-     * \param rnti RNTI
+     * @param imsi IMSI
+     * @param rnti RNTI
      */
     virtual void InitialUeMessage(uint64_t imsi, uint16_t rnti) = 0;
 
     /**
-     * \brief Triggers epc-gnb-application to send ERAB Release Indication message towards MME
-     * \param imsi the UE IMSI
-     * \param rnti the UE RNTI
-     * \param bearerId Bearer Identity which is to be de-activated
+     * @brief Triggers epc-gnb-application to send ERAB Release Indication message towards MME
+     * @param imsi the UE IMSI
+     * @param rnti the UE RNTI
+     * @param qfi QoS flow ID which is to be de-activated
      */
-    virtual void DoSendReleaseIndication(uint64_t imsi, uint16_t rnti, uint8_t bearerId) = 0;
+    virtual void DoSendReleaseIndication(uint64_t imsi, uint16_t rnti, uint8_t qfi) = 0;
 
-    /// BearerToBeSwitched structure
-    struct BearerToBeSwitched
+    /// FlowToBeSwitched structure
+    struct NR_EXPORT FlowToBeSwitched
     {
-        uint8_t epsBearerId; ///< Bearer ID
-        uint32_t teid;       ///< TEID
+        uint8_t qfi;   ///< QoS flow ID
+        uint32_t teid; ///< TEID
     };
 
     /// PathSwitchRequestParameters structure
-    struct PathSwitchRequestParameters
+    struct NR_EXPORT PathSwitchRequestParameters
     {
-        uint16_t rnti;      ///< RNTI
-        uint16_t cellId;    ///< cell ID
-        uint32_t mmeUeS1Id; ///< mmeUeS1Id in practice, we use the IMSI
-        std::list<BearerToBeSwitched> bearersToBeSwitched; ///< list of bearers to be switched
+        uint16_t rnti;                                 ///< RNTI
+        uint16_t cellId;                               ///< cell ID
+        uint32_t mmeUeS1Id;                            ///< mmeUeS1Id in practice, we use the IMSI
+        std::list<FlowToBeSwitched> flowsToBeSwitched; ///< list of flows to be switched
     };
 
     /**
      * Path Switch Request
      *
-     * \param params
+     * @param params
      */
     virtual void PathSwitchRequest(PathSwitchRequestParameters params) = 0;
 
@@ -71,7 +72,7 @@ class NrEpcGnbS1SapProvider
      * reception of the UE CONTEXT RELEASE X2 message from the target gNB
      * during X2-based handover
      *
-     * \param rnti RNTI
+     * @param rnti RNTI
      */
     virtual void UeContextRelease(uint16_t rnti) = 0;
 };
@@ -82,7 +83,7 @@ class NrEpcGnbS1SapProvider
  * User part of the SAP, i.e., the methods exported by the NrGnbRrc
  * and called by the NrEpcGnbApplication.
  */
-class NrEpcGnbS1SapUser
+class NR_EXPORT NrEpcGnbS1SapUser
 {
   public:
     virtual ~NrEpcGnbS1SapUser() = default;
@@ -90,7 +91,7 @@ class NrEpcGnbS1SapUser
     /**
      * Parameters passed to InitialContextSetupRequest ()
      */
-    struct InitialContextSetupRequestParameters
+    struct NR_EXPORT InitialContextSetupRequestParameters
     {
         uint16_t rnti; /**< the RNTI identifying the UE */
     };
@@ -98,32 +99,32 @@ class NrEpcGnbS1SapUser
     /**
      * Initial context setup request
      *
-     * \param params Parameters
+     * @param params Parameters
      */
     virtual void InitialContextSetupRequest(InitialContextSetupRequestParameters params) = 0;
 
     /**
      * Parameters passed to DataRadioBearerSetupRequest ()
      */
-    struct DataRadioBearerSetupRequestParameters
+    struct NR_EXPORT DataRadioBearerSetupRequestParameters
     {
-        uint16_t rnti;      /**< the RNTI identifying the UE for which the
-                                 DataRadioBearer is to be created */
-        NrEpsBearer bearer; /**< the characteristics of the bearer to be setup */
-        uint8_t bearerId;   /**< the EPS Bearer Identifier */
-        uint32_t gtpTeid;   /**< S1-bearer GTP tunnel endpoint identifier, see 36.423 9.2.1 */
+        uint16_t rnti;    /**< the RNTI identifying the UE for which the
+                               DataRadioBearer is to be created */
+        NrQosFlow flow;   /**< the characteristics of the bearer to be setup */
+        uint8_t qfi;      /**< the QoS Flow Identifier */
+        uint32_t gtpTeid; /**< S1-bearer GTP tunnel endpoint identifier, see 36.423 9.2.1 */
         Ipv4Address transportLayerAddress; /**< IP Address of the SGW, see 36.423 9.2.1 */
     };
 
     /**
      * Request the setup of a DataRadioBearer
      *
-     * \param params Parameters
+     * @param params Parameters
      */
     virtual void DataRadioBearerSetupRequest(DataRadioBearerSetupRequestParameters params) = 0;
 
     /// PathSwitchRequestAcknowledgeParameters structure
-    struct PathSwitchRequestAcknowledgeParameters
+    struct NR_EXPORT PathSwitchRequestAcknowledgeParameters
     {
         uint16_t rnti; ///< RNTI
     };
@@ -131,9 +132,18 @@ class NrEpcGnbS1SapUser
     /**
      * Request a path switch acknowledge
      *
-     * \param params Parameters
+     * @param params Parameters
      */
     virtual void PathSwitchRequestAcknowledge(PathSwitchRequestAcknowledgeParameters params) = 0;
+
+    /**
+     * Release the context of a UE, as requested by the core network (UE Context Release
+     * Command), if the RNTI still identifies that UE: the RRC connection of the UE is released.
+     *
+     * @param imsi the IMSI of the UE
+     * @param rnti the RNTI of the UE
+     */
+    virtual void UeContextReleaseCommand(uint64_t imsi, uint16_t rnti) = 0;
 };
 
 /**
@@ -147,7 +157,7 @@ class NrMemberEpcGnbS1SapProvider : public NrEpcGnbS1SapProvider
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     NrMemberEpcGnbS1SapProvider(C* owner);
 
@@ -212,7 +222,7 @@ class NrMemberEpcGnbS1SapUser : public NrEpcGnbS1SapUser
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     NrMemberEpcGnbS1SapUser(C* owner);
 
@@ -223,6 +233,7 @@ class NrMemberEpcGnbS1SapUser : public NrEpcGnbS1SapUser
     void InitialContextSetupRequest(InitialContextSetupRequestParameters params) override;
     void DataRadioBearerSetupRequest(DataRadioBearerSetupRequestParameters params) override;
     void PathSwitchRequestAcknowledge(PathSwitchRequestAcknowledgeParameters params) override;
+    void UeContextReleaseCommand(uint64_t imsi, uint16_t rnti) override;
 
   private:
     C* m_owner; ///< owner class
@@ -255,6 +266,13 @@ NrMemberEpcGnbS1SapUser<C>::PathSwitchRequestAcknowledge(
     PathSwitchRequestAcknowledgeParameters params)
 {
     m_owner->DoPathSwitchRequestAcknowledge(params);
+}
+
+template <class C>
+void
+NrMemberEpcGnbS1SapUser<C>::UeContextReleaseCommand(uint64_t imsi, uint16_t rnti)
+{
+    m_owner->DoUeContextReleaseCommand(imsi, rnti);
 }
 
 } // namespace ns3

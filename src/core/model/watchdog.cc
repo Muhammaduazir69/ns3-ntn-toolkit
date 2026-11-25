@@ -10,8 +10,8 @@
 #include "log.h"
 
 /**
- * \file
- * \ingroup timer
+ * @file
+ * @ingroup timer
  * ns3::Watchdog timer class implementation.
  */
 
@@ -23,7 +23,7 @@ NS_LOG_COMPONENT_DEFINE("Watchdog");
 Watchdog::Watchdog()
     : m_impl(nullptr),
       m_event(),
-      m_end(MicroSeconds(0))
+      m_end()
 {
     NS_LOG_FUNCTION_NOARGS();
 }
@@ -60,6 +60,12 @@ Watchdog::Expire()
     {
         m_event = Simulator::Schedule(m_end - Now(), &Watchdog::Expire, this);
     }
+}
+
+bool
+Watchdog::IsExpired() const
+{
+    return (m_end <= Simulator::Now());
 }
 
 } // namespace ns3

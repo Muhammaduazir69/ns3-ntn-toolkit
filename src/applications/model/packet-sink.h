@@ -10,9 +10,8 @@
 #define PACKET_SINK_H
 
 #include "seq-ts-size-header.h"
+#include "sink-application.h"
 
-#include "ns3/address.h"
-#include "ns3/application.h"
 #include "ns3/event-id.h"
 #include "ns3/inet-socket-address.h"
 #include "ns3/inet6-socket-address.h"
@@ -24,13 +23,11 @@
 namespace ns3
 {
 
-class Address;
-class Socket;
 class Packet;
 
 /**
- * \ingroup applications
- * \defgroup packetsink PacketSink
+ * @ingroup applications
+ * @defgroup packetsink PacketSink
  *
  * This application was written to complement OnOffApplication, but it
  * is more general so a PacketSink name was selected.  Functionally it is
@@ -42,9 +39,9 @@ class Packet;
  */
 
 /**
- * \ingroup packetsink
+ * @ingroup packetsink
  *
- * \brief Receive and consume traffic generated to an IP address and port
+ * @brief Receive and consume traffic generated to an IP address and port
  *
  * This application was written to complement OnOffApplication, but it
  * is more general so a PacketSink name was selected.  Functionally it is
@@ -60,40 +57,40 @@ class Packet;
  * enabled, it prints out the size of packets and their address.
  * A tracing source to Receive() is also available.
  */
-class PacketSink : public Application
+class PacketSink : public SinkApplication
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
-    PacketSink();
 
+    PacketSink();
     ~PacketSink() override;
 
     /**
-     * \return the total bytes received in this sink app
+     * @return the total bytes received in this sink app
      */
     uint64_t GetTotalRx() const;
 
     /**
-     * \return pointer to listening socket
+     * @return pointer to listening socket
      */
     Ptr<Socket> GetListeningSocket() const;
 
     /**
-     * \return list of pointers to accepted sockets
+     * @return list of pointers to accepted sockets
      */
     std::list<Ptr<Socket>> GetAcceptedSockets() const;
 
     /**
      * TracedCallback signature for a reception with addresses and SeqTsSizeHeader
      *
-     * \param p The packet received (without the SeqTsSize header)
-     * \param from From address
-     * \param to Local address
-     * \param header The SeqTsSize header
+     * @param p The packet received (without the SeqTsSize header)
+     * @param from From address
+     * @param to Local address
+     * @param header The SeqTsSize header
      */
     typedef void (*SeqTsSizeCallback)(Ptr<const Packet> p,
                                       const Address& from,
@@ -104,36 +101,36 @@ class PacketSink : public Application
     void DoDispose() override;
 
   private:
-    void StartApplication() override;
-    void StopApplication() override;
+    void DoStartApplication() override;
+    void DoStopApplication() override;
 
     /**
-     * \brief Handle a packet received by the application
-     * \param socket the receiving socket
+     * @brief Handle a packet received by the application
+     * @param socket the receiving socket
      */
     void HandleRead(Ptr<Socket> socket);
     /**
-     * \brief Handle an incoming connection
-     * \param socket the incoming connection socket
-     * \param from the address the connection is from
+     * @brief Handle an incoming connection
+     * @param socket the incoming connection socket
+     * @param from the address the connection is from
      */
     void HandleAccept(Ptr<Socket> socket, const Address& from);
     /**
-     * \brief Handle an connection close
-     * \param socket the connected socket
+     * @brief Handle an connection close
+     * @param socket the connected socket
      */
     void HandlePeerClose(Ptr<Socket> socket);
     /**
-     * \brief Handle an connection error
-     * \param socket the connected socket
+     * @brief Handle an connection error
+     * @param socket the connected socket
      */
     void HandlePeerError(Ptr<Socket> socket);
 
     /**
-     * \brief Packet received: assemble byte stream to extract SeqTsSizeHeader
-     * \param p received packet
-     * \param from from address
-     * \param localAddress local address
+     * @brief Packet received: assemble byte stream to extract SeqTsSizeHeader
+     * @param p received packet
+     * @param from from address
+     * @param localAddress local address
      *
      * The method assembles a received byte stream and extracts SeqTsSizeHeader
      * instances from the stream to export in a trace source.
@@ -141,14 +138,14 @@ class PacketSink : public Application
     void PacketReceived(const Ptr<Packet>& p, const Address& from, const Address& localAddress);
 
     /**
-     * \brief Hashing for the Address class
+     * @brief Hashing for the Address class
      */
     struct AddressHash
     {
         /**
-         * \brief operator ()
-         * \param x the address of which calculate the hash
-         * \return the hash of x
+         * @brief operator ()
+         * @param x the address of which calculate the hash
+         * @return the hash of x
          *
          * Should this method go in address.h?
          *
@@ -161,12 +158,12 @@ class PacketSink : public Application
             if (InetSocketAddress::IsMatchingType(x))
             {
                 InetSocketAddress a = InetSocketAddress::ConvertFrom(x);
-                return Ipv4AddressHash()(a.GetIpv4());
+                return std::hash<Ipv4Address>{}(a.GetIpv4());
             }
             else if (Inet6SocketAddress::IsMatchingType(x))
             {
                 Inet6SocketAddress a = Inet6SocketAddress::ConvertFrom(x);
-                return Ipv6AddressHash()(a.GetIpv6());
+                return std::hash<Ipv6Address>{}(a.GetIpv6());
             }
 
             NS_ABORT_MSG("PacketSink: unexpected address type, neither IPv4 nor IPv6");
@@ -178,24 +175,20 @@ class PacketSink : public Application
 
     // In the case of TCP, each socket accept returns a new socket, so the
     // listening socket is stored separately from the accepted sockets
-    Ptr<Socket> m_socket;                //!< Listening socket
     std::list<Ptr<Socket>> m_socketList; //!< the accepted sockets
 
-    Address m_local;      //!< Local address to bind to (address and port)
-    uint16_t m_localPort; //!< Local port to bind to
-    uint64_t m_totalRx;   //!< Total bytes received
-    TypeId m_tid;         //!< Protocol TypeId
+    uint64_t m_totalRx{0}; //!< Total bytes received
 
     bool m_enableSeqTsSizeHeader{false}; //!< Enable or disable the export of SeqTsSize header
 
-    /// Traced Callback: received packets, source address.
-    TracedCallback<Ptr<const Packet>, const Address&> m_rxTrace;
     /// Callback for tracing the packet Rx events, includes source and destination addresses
     TracedCallback<Ptr<const Packet>, const Address&, const Address&> m_rxTraceWithAddresses;
     /// Callbacks for tracing the packet Rx events, includes source, destination addresses, and
     /// headers
     TracedCallback<Ptr<const Packet>, const Address&, const Address&, const SeqTsSizeHeader&>
         m_rxTraceWithSeqTsSize;
+
+    uint8_t m_tos{0}; //!< Type of Service for outbound packets
 };
 
 } // namespace ns3

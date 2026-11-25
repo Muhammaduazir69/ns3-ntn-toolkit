@@ -976,7 +976,7 @@ class ChoEphemerisErrorShiftsExitTestCase : public TestCase
 {
   public:
     ChoEphemerisErrorShiftsExitTestCase()
-        : TestCase("ephemeris error: an along-track offset shifts the predicted exit by offset/v")
+        : TestCase("ephemeris error: an along-track offset shifts the predicted exit by offset-v")
     {
     }
 
@@ -1023,7 +1023,7 @@ class ChoTteSigmaPropagationTestCase : public TestCase
 {
   public:
     ChoTteSigmaPropagationTestCase()
-        : TestCase("ComputeTteSigma: along-track sigma maps to sigma/v; cross-track vanishes overhead")
+        : TestCase("ComputeTteSigma: along-track sigma maps to sigma-v; cross-track vanishes overhead")
     {
     }
 

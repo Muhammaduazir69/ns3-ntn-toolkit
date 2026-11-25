@@ -29,14 +29,14 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("WifiPhyThresholdsTest");
 
 static const uint8_t CHANNEL_NUMBER = 36;
-static const MHz_u FREQUENCY = 5180;
-static const MHz_u CHANNEL_WIDTH = 20;
+static const MHz_u FREQUENCY{5180};
+static const MHz_u CHANNEL_WIDTH{20};
 
 /**
- * \ingroup wifi-test
- * \ingroup tests
+ * @ingroup wifi-test
+ * @ingroup tests
  *
- * \brief Wifi Phy Threshold Test base class
+ * @brief Wifi Phy Threshold Test base class
  */
 class WifiPhyThresholdsTest : public TestCase
 {
@@ -44,64 +44,64 @@ class WifiPhyThresholdsTest : public TestCase
     /**
      * Constructor
      *
-     * \param test_name the test name
+     * @param test_name the test name
      */
     WifiPhyThresholdsTest(std::string test_name);
 
   protected:
     /**
      * Make wifi signal function
-     * \param txPower the transmit power
-     * \param channel the operating channel of the PHY used for the transmission
-     * \returns Ptr<SpectrumSignalParameters>
+     * @param txPower the transmit power
+     * @param channel the operating channel of the PHY used for the transmission
+     * @returns Ptr<SpectrumSignalParameters>
      */
     virtual Ptr<SpectrumSignalParameters> MakeWifiSignal(Watt_u txPower,
                                                          const WifiPhyOperatingChannel& channel);
     /**
      * Make foreign signal function
-     * \param txPower the transmit power
-     * \returns Ptr<SpectrumSignalParameters>
+     * @param txPower the transmit power
+     * @returns Ptr<SpectrumSignalParameters>
      */
     virtual Ptr<SpectrumSignalParameters> MakeForeignSignal(Watt_u txPower);
     /**
      * Send signal function
-     * \param txPower the transmit power
-     * \param wifiSignal whether the signal is a wifi signal or not
+     * @param txPower the transmit power
+     * @param wifiSignal whether the signal is a wifi signal or not
      */
     virtual void SendSignal(Watt_u txPower, bool wifiSignal);
     /**
      * PHY receive success callback function
-     * \param psdu the PSDU
-     * \param rxSignalInfo the info on the received signal (\see RxSignalInfo)
-     * \param txVector the transmit vector
-     * \param statusPerMpdu reception status per MPDU
+     * @param psdu the PSDU
+     * @param rxSignalInfo the info on the received signal (\see RxSignalInfo)
+     * @param txVector the transmit vector
+     * @param statusPerMpdu reception status per MPDU
      */
     virtual void RxSuccess(Ptr<const WifiPsdu> psdu,
                            RxSignalInfo rxSignalInfo,
-                           WifiTxVector txVector,
-                           std::vector<bool> statusPerMpdu);
+                           const WifiTxVector& txVector,
+                           const std::vector<bool>& statusPerMpdu);
     /**
      * PHY receive failure callback function
-     * \param psdu the PSDU
+     * @param psdu the PSDU
      */
     virtual void RxFailure(Ptr<const WifiPsdu> psdu);
     /**
      * PHY dropped packet callback function
-     * \param p the packet
-     * \param reason the reason
+     * @param p the packet
+     * @param reason the reason
      */
     void RxDropped(Ptr<const Packet> p, WifiPhyRxfailureReason reason);
     /**
      * PHY state changed callback function
-     * \param start the start time of the new state
-     * \param duration the duration of the new state
-     * \param newState the new state
+     * @param start the start time of the new state
+     * @param duration the duration of the new state
+     * @param newState the new state
      */
     virtual void PhyStateChanged(Time start, Time duration, WifiPhyState newState);
 
     Ptr<SpectrumWifiPhy> m_phy;   ///< PHY object
     uint32_t m_rxSuccess;         ///< count number of successfully received packets
-    uint32_t m_rxFailure;         ///< count number of unsuccessfuly received packets
+    uint32_t m_rxFailure;         ///< count number of unsuccessfully received packets
     uint32_t m_rxDropped;         ///< count number of dropped packets
     uint32_t m_stateChanged;      ///< count number of PHY state change
     uint32_t m_rxStateCount;      ///< count number of PHY state change to RX state
@@ -129,7 +129,7 @@ Ptr<SpectrumSignalParameters>
 WifiPhyThresholdsTest::MakeWifiSignal(Watt_u txPower, const WifiPhyOperatingChannel& channel)
 {
     WifiTxVector txVector{OfdmPhy::GetOfdmRate6Mbps(),
-                          0,
+                          WIFI_MIN_TX_PWR_LEVEL,
                           WIFI_PREAMBLE_LONG,
                           NanoSeconds(800),
                           1,
@@ -146,7 +146,7 @@ WifiPhyThresholdsTest::MakeWifiSignal(Watt_u txPower, const WifiPhyOperatingChan
 
     auto psdu = Create<WifiPsdu>(pkt, hdr);
     const auto txDuration =
-        m_phy->CalculateTxDuration(psdu->GetSize(), txVector, m_phy->GetPhyBand());
+        SpectrumWifiPhy::CalculateTxDuration(psdu->GetSize(), txVector, m_phy->GetPhyBand());
 
     auto ppdu = Create<OfdmPpdu>(psdu, txVector, channel, 0);
 
@@ -194,8 +194,8 @@ WifiPhyThresholdsTest::SendSignal(Watt_u txPower, bool wifiSignal)
 void
 WifiPhyThresholdsTest::RxSuccess(Ptr<const WifiPsdu> psdu,
                                  RxSignalInfo rxSignalInfo,
-                                 WifiTxVector txVector,
-                                 std::vector<bool> statusPerMpdu)
+                                 const WifiTxVector& txVector,
+                                 const std::vector<bool>& statusPerMpdu)
 {
     NS_LOG_FUNCTION(this << *psdu << rxSignalInfo << txVector);
     m_rxSuccess++;
@@ -268,10 +268,10 @@ WifiPhyThresholdsTest::DoTeardown()
 }
 
 /**
- * \ingroup wifi-test
- * \ingroup tests
+ * @ingroup wifi-test
+ * @ingroup tests
  *
- * \brief Wifi Phy Threshold Weak Wifi Signal Test
+ * @brief Wifi Phy Threshold Weak Wifi Signal Test
  *
  * This test makes sure PHY ignores a Wi-Fi signal
  * if its received power lower than RxSensitivity.
@@ -291,7 +291,7 @@ WifiPhyThresholdsWeakWifiSignalTest::WifiPhyThresholdsWeakWifiSignalTest()
 void
 WifiPhyThresholdsWeakWifiSignalTest::DoRun()
 {
-    const auto txPower = DbmToW(-110);
+    const auto txPower = DbmToW(dBm_u{-110});
 
     Simulator::Schedule(Seconds(1),
                         &WifiPhyThresholdsWeakWifiSignalTest::SendSignal,
@@ -313,10 +313,10 @@ WifiPhyThresholdsWeakWifiSignalTest::DoRun()
 }
 
 /**
- * \ingroup wifi-test
- * \ingroup tests
+ * @ingroup wifi-test
+ * @ingroup tests
  *
- * \brief Wifi Phy Threshold Weak Foreign Signal Test
+ * @brief Wifi Phy Threshold Weak Foreign Signal Test
  *
  * This test makes sure PHY keeps the state as IDLE if reception involves
  * a foreign signal with a received power lower than CcaEdThreshold.
@@ -341,7 +341,7 @@ WifiPhyThresholdsWeakForeignSignalTest::~WifiPhyThresholdsWeakForeignSignalTest(
 void
 WifiPhyThresholdsWeakForeignSignalTest::DoRun()
 {
-    const auto txPower = DbmToW(-90);
+    const auto txPower = DbmToW(dBm_u{-90});
 
     Simulator::Schedule(Seconds(1),
                         &WifiPhyThresholdsWeakForeignSignalTest::SendSignal,
@@ -362,10 +362,10 @@ WifiPhyThresholdsWeakForeignSignalTest::DoRun()
 }
 
 /**
- * \ingroup wifi-test
- * \ingroup tests
+ * @ingroup wifi-test
+ * @ingroup tests
  *
- * \brief Wifi Phy Threshold Strong Wifi Signal Test
+ * @brief Wifi Phy Threshold Strong Wifi Signal Test
  *
  * This test makes sure PHY processes a Wi-Fi signal
  * with a received power higher than RxSensitivity.
@@ -390,7 +390,7 @@ WifiPhyThresholdsStrongWifiSignalTest::~WifiPhyThresholdsStrongWifiSignalTest()
 void
 WifiPhyThresholdsStrongWifiSignalTest::DoRun()
 {
-    const auto txPower = DbmToW(-60);
+    const auto txPower = DbmToW(dBm_u{-60});
 
     Simulator::Schedule(Seconds(1),
                         &WifiPhyThresholdsStrongWifiSignalTest::SendSignal,
@@ -415,10 +415,10 @@ WifiPhyThresholdsStrongWifiSignalTest::DoRun()
 }
 
 /**
- * \ingroup wifi-test
- * \ingroup tests
+ * @ingroup wifi-test
+ * @ingroup tests
  *
- * \brief Wifi Phy Threshold Strong Foreign Signal Test
+ * @brief Wifi Phy Threshold Strong Foreign Signal Test
  *
  * This test makes sure PHY declare the state as CCA_BUSY if reception involves
  * a foreign signal with a received power higher than CcaEdThreshold.
@@ -443,7 +443,7 @@ WifiPhyThresholdsStrongForeignSignalTest::~WifiPhyThresholdsStrongForeignSignalT
 void
 WifiPhyThresholdsStrongForeignSignalTest::DoRun()
 {
-    const auto txPower = DbmToW(-60);
+    const auto txPower = DbmToW(dBm_u{-60});
 
     Simulator::Schedule(Seconds(1),
                         &WifiPhyThresholdsStrongForeignSignalTest::SendSignal,
@@ -463,10 +463,10 @@ WifiPhyThresholdsStrongForeignSignalTest::DoRun()
 }
 
 /**
- * \ingroup wifi-test
- * \ingroup tests
+ * @ingroup wifi-test
+ * @ingroup tests
  *
- * \brief Wifi Phy Thresholds Test Suite
+ * @brief Wifi Phy Thresholds Test Suite
  */
 class WifiPhyThresholdsTestSuite : public TestSuite
 {

@@ -59,10 +59,10 @@ netdevice_traits = {
     ns.BridgeNetDevice: NetDeviceTraits(is_virtual=True),
     ns.LoopbackNetDevice: NetDeviceTraits(is_virtual=True, is_wireless=False),
     ns.MeshPointDevice: NetDeviceTraits(is_virtual=True),
-    ns.SubscriberStationNetDevice: NetDeviceTraits(is_wireless=True),
-    ns.BaseStationNetDevice: NetDeviceTraits(is_wireless=True),
     ns.LteUeNetDevice: NetDeviceTraits(is_wireless=True),
     ns.LteEnbNetDevice: NetDeviceTraits(is_wireless=True),
+    ns.lrwpan.LrWpanNetDevice: NetDeviceTraits(is_wireless=True),
+    ns.SixLowPanNetDevice: NetDeviceTraits(is_virtual=False, is_wireless=True),
 }
 
 

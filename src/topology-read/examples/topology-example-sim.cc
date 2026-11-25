@@ -23,17 +23,17 @@
 #include <sstream>
 
 /**
- * \ingroup topology
+ * @ingroup topology
  * Example of TopologyReader: read in a topology in a specified format.
  *
  * This example can be used with the following parameters:
- *   - <tt>--format=Inet --input=src/topology-read/examples/Inet_small_toposample.txt</tt>
- *   - <tt>--format=Inet --input=src/topology-read/examples/Inet_toposample.txt</tt>
- *   - <tt>--format=Orbis --input=src/topology-read/examples/Orbis_toposample.txt</tt>
- *   - <tt>--format=Rocket
- *     --input=src/topology-read/examples/RocketFuel_sample_4755.r0.cch_maps.txt</tt>
- *   - <tt>--format=Rocket
- *     --input=src/topology-read/examples/RocketFuel_toposample_1239_weights.txt</tt>
+ *   - ``--format=Inet --input=src/topology-read/examples/Inet_small_toposample.txt``
+ *   - ``--format=Inet --input=src/topology-read/examples/Inet_toposample.txt``
+ *   - ``--format=Orbis --input=src/topology-read/examples/Orbis_toposample.txt``
+ *   - ``--format=Rocket
+ *     --input=src/topology-read/examples/RocketFuel_sample_4755.r0.cch_maps.txt``
+ *   - ``--format=Rocket
+ *     --input=src/topology-read/examples/RocketFuel_toposample_1239_weights.txt``
  */
 
 using namespace ns3;
@@ -42,8 +42,8 @@ NS_LOG_COMPONENT_DEFINE("TopologyCreationExperiment");
 
 /**
  * Print the TTL of received packet
- * \param p received packet
- * \param ad sender address
+ * @param p received packet
+ * @param ad sender address
  */
 static void
 SinkRx(Ptr<const Packet> p, const Address& ad)
@@ -172,13 +172,13 @@ main(int argc, char* argv[])
     }
 
     ApplicationContainer apps = onoff.Install(clientNodes);
-    apps.Start(Seconds(1.0));
-    apps.Stop(Seconds(2.0));
+    apps.Start(Seconds(1));
+    apps.Stop(Seconds(2));
 
     PacketSinkHelper sink = PacketSinkHelper("ns3::Ipv4RawSocketFactory", dst);
     apps = sink.Install(randomServerNode);
-    apps.Start(Seconds(0.0));
-    apps.Stop(Seconds(3.0));
+    apps.Start(Seconds(0));
+    apps.Stop(Seconds(3));
 
     // we trap the packet sink receiver to extract the TTL.
     Config::ConnectWithoutContext("/NodeList/*/ApplicationList/*/$ns3::PacketSink/Rx",

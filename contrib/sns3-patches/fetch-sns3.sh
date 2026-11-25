@@ -13,7 +13,7 @@
 # `ntn-traffic`).
 set -euo pipefail
 
-BASE=165b49152a25195d3ee04d77699a7bc184fb9ddf   # sns3-satellite, 21 Jul 2025
+BASE=2c0c6d4d7fd1628eda1b923a7e135749513769fa   # sns3-satellite tag 3.48 (validated with ns-3.48), 8 Jul 2026
 REPO=https://github.com/sns3/sns3-satellite.git
 DATA_REPO=https://github.com/sns3/sns3-data.git
 HERE=$(cd "$(dirname "$0")" && pwd)

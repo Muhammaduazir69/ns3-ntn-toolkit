@@ -56,6 +56,7 @@
 // edges). --linkModel=gate restores the old binary budget gate.
 //
 // Quick test:  --simSeconds=360 --dataRateMbps=4
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/boolean.h"
 #include "ns3/command-line.h"
@@ -661,6 +662,20 @@ main(int argc, char* argv[])
     sched->Start();
     Simulator::Schedule(Seconds(2.0), &Report, simSeconds);
     Simulator::Stop(Seconds(simSeconds + 0.1));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4). The link budgets use
+    // free-standing mobility models; attach them to their nodes so the scene (and any other
+    // node-level observer) sees the same SGP4 / WGS-84 positions. Nothing else reads them.
+    nSatA.Get(0)->AggregateObject(satA);
+    nSatB.Get(0)->AggregateObject(satB);
+    if (hapsMob)
+    {
+        haps.Get(0)->AggregateObject(hapsMob);
+    }
+    if (gwMob)
+    {
+        gw.Get(0)->AggregateObject(gwMob);
+    }
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
     sched->Stop();
 
@@ -720,6 +735,9 @@ main(int argc, char* argv[])
                         (unsigned long)l.lostA, l.rxA ? double(l.lostA) / l.rxA : 0.0);
         }
     }
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "sagin-sgp4-routed-traffic", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

@@ -1,0 +1,24 @@
+digraph NrFhFunctionalSplits {
+
+    rankdir=TB;
+    node [shape="box", width=3.6, style="filled", fillcolor="lightblue", fontname="Helvetica"];
+    edge [fontname="Helvetica", fontsize=9, arrowhead=none];
+
+    // Downlink processing chain, DU (top) -> RU (bottom).
+    mac [label="RLC / MAC scheduling"]
+    cod [label="Channel coding (LDPC)"]
+    mod [label="Modulation / layer mapping / precoding"]
+    re  [label="Resource-element mapping / beamforming"]
+    rf  [label="iFFT / CP / RF", fillcolor="mistyrose"]
+
+    mac -> cod [label="  FS_6   DU: up to MAC | RU: full PHY\l  FH ~ (peak + control rate) x MCS x rank   [lightest]\l",
+                fontcolor="darkgreen"]
+    cod -> mod [label="  FS_7_3   DU: + channel coding | RU: modulation & below\l  FH x 1/R  (coded bits)\l"]
+    mod -> re  [label="  FS_7_2 (default)   DU: + modulation | RU: iFFT + RF\l  FH ~ IQ per layer (rank); optional modulation compression\l",
+                fontcolor="blue"]
+    re  -> rf  [label="  FS_7_1   DU: + RE mapping | RU: iFFT + RF only\l  FH ~ IQ per antenna port, 32-bit/sample   [heaviest]\l",
+                fontcolor="red"]
+
+    labelloc="b"; fontsize=10; fontname="Helvetica";
+    label="\nNrFhControl functional splits (model/nr-fh-control.cc, GetFhThr()).\nDU centralizes the blocks above each cut; the RU implements those below.\nThe fronthaul bit-rate grows as the split moves toward the antenna.";
+}

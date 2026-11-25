@@ -6,8 +6,8 @@
 
 #include "nr-phy-mac-common.h"
 
-#include <ns3/attribute-accessor-helper.h>
-#include <ns3/log.h>
+#include "ns3/attribute-accessor-helper.h"
+#include "ns3/log.h"
 
 #include <algorithm>
 
@@ -15,6 +15,28 @@ namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("NrPhyMacCommon");
+
+uint8_t
+SlotAllocInfo::GetAllocInfoNumSymbols(uint8_t type) const
+{
+    NS_LOG_FUNCTION(this << +type);
+    using DciType = DciInfoElementTdma::VarTtiType;
+    NS_ASSERT_MSG(DciType::SRS <= type &&
+                      type <= (DciType::SRS | DciType::CTRL | DciType::DATA | DciType::MSG3),
+                  "Unknown combination of DciInfoElementTdma::VarTtiTypes");
+    std::array<bool, 14> symUsed{false};
+    for (const auto& allocation : m_varTtiAllocInfo)
+    {
+        // If DCI does not match one of the specified types, ignore it
+        if (allocation.m_dci->m_type & type)
+        {
+            auto startSym = allocation.m_dci->m_symStart;
+            auto lastSym = startSym + allocation.m_dci->m_numSym;
+            std::fill(symUsed.begin() + startSym, symUsed.begin() + lastSym, true);
+        }
+    }
+    return std::count(symUsed.begin(), symUsed.end(), true);
+}
 
 void
 SlotAllocInfo::Merge(const SlotAllocInfo& other)
@@ -28,12 +50,14 @@ SlotAllocInfo::Merge(const SlotAllocInfo& other)
         m_type = BOTH;
     }
 
-    m_numSymAlloc += other.m_numSymAlloc;
-
     for (const auto& extAlloc : other.m_varTtiAllocInfo)
     {
         m_varTtiAllocInfo.push_front(extAlloc);
     }
+
+    m_numSymAlloc = GetAllocInfoNumSymbols();
+    NS_ASSERT_MSG(m_numSymAlloc <= 14,
+                  "Invalid number of symbols: " << m_numSymAlloc << " symbols. ");
 
     // Sort over the symStart of the DCI (VarTtiAllocInfo::operator <)
     std::stable_sort(m_varTtiAllocInfo.begin(), m_varTtiAllocInfo.end());
@@ -176,36 +200,36 @@ operator<<(std::ostream& os, const SlotAllocInfo& item)
        << " composed by the following allocations: " << std::endl;
     for (const auto& alloc : item.m_varTtiAllocInfo)
     {
-        std::string direction;
-        std::string type;
+        std::stringstream direction;
+        std::stringstream type;
         if (alloc.m_dci->m_type == DciInfoElementTdma::CTRL)
         {
-            type = "CTRL";
+            type << "CTRL";
         }
         else if (alloc.m_dci->m_type == DciInfoElementTdma::SRS)
         {
-            type = "SRS";
+            type << "SRS";
         }
         else if (alloc.m_dci->m_type == DciInfoElementTdma::MSG3)
         {
-            type = "MSG3";
+            type << "MSG3";
         }
         else
         {
-            type = "DATA";
+            type << "DATA";
         }
 
         if (alloc.m_dci->m_format == DciInfoElementTdma::UL)
         {
-            direction = "UL";
+            direction << "UL";
         }
         else
         {
-            direction = "DL";
+            direction << "DL";
         }
         os << "[Allocation from sym " << static_cast<uint32_t>(alloc.m_dci->m_symStart)
            << " to sym " << static_cast<uint32_t>(alloc.m_dci->m_numSym + alloc.m_dci->m_symStart)
-           << " direction " << direction << " type " << type << "]" << std::endl;
+           << " direction " << direction.str() << " type " << type.str() << "]" << std::endl;
     }
     return os;
 }
@@ -276,4 +300,57 @@ operator<<(std::ostream& os, const DciInfoElementTdma& item)
     return os;
 }
 
+namespace nr
+{
+uint8_t
+CountUsedSymbolsFromVarAllocTtiRange(uint8_t startSym,
+                                     std::deque<VarTtiAllocInfo>::iterator begin,
+                                     std::deque<VarTtiAllocInfo>::iterator end)
+{
+    auto usedSymbols = 0;
+    if (std::distance(begin, end) == 0)
+    {
+        return usedSymbols;
+    }
+
+    // Count number of allocated symbols from newly scheduled DCIs
+    auto smallestStartSymbol = std::numeric_limits<uint8_t>::max();
+    auto largestFinalSymbol = startSym;
+    for (auto it = begin; it != end; it++)
+    {
+        if (smallestStartSymbol > it->m_dci->m_symStart)
+        {
+            smallestStartSymbol = it->m_dci->m_symStart;
+        }
+        if (largestFinalSymbol < (it->m_dci->m_symStart + it->m_dci->m_numSym))
+        {
+            largestFinalSymbol = it->m_dci->m_symStart + it->m_dci->m_numSym;
+        }
+    }
+    NS_ASSERT_MSG(smallestStartSymbol != std::numeric_limits<uint8_t>::max(),
+                  "There must have been a valid starting symbol");
+    usedSymbols = largestFinalSymbol - smallestStartSymbol;
+    return usedSymbols;
+}
+
+int
+NumRbsPerRbg(int numRbs)
+{
+    NS_ABORT_MSG_IF(numRbs <= 0, "Number of RBs should be bigger than 0");
+    if (numRbs <= 36)
+    {
+        return 2;
+    }
+    if (numRbs <= 72)
+    {
+        return 4;
+    }
+    if (numRbs <= 144)
+    {
+        return 8;
+    }
+    return 16;
+}
+
+} // namespace nr
 } // namespace ns3

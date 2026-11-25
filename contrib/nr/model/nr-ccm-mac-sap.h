@@ -10,66 +10,68 @@
 #include "nr-mac-sap.h"
 #include "nr-phy-mac-common.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 /**
- * \ingroup nr
+ * @ingroup nr
  *
- * \brief Service Access Point (SAP) offered by the component carrier manager (CCM)
+ * @brief Service Access Point (SAP) offered by the component carrier manager (CCM)
  *  by MAC to CCM.
  *
  * This is the *Component Carrier Manager SAP Provider*, i.e., the part of the SAP
- * that contains the MAC methods called by the eNodeB CCM
+ * that contains the MAC methods called by the gNB CCM
  * instance.
  */
-class NrCcmMacSapProvider
+class NR_EXPORT NrCcmMacSapProvider
 {
   public:
     virtual ~NrCcmMacSapProvider() = default;
 
     /**
-     * \brief Add the Buffer Status Report to the list.
-     * \param bsr NrGnbComponentCarrierManager used this function to
+     * @brief Add the Buffer Status Report to the list.
+     * @param bsr NrGnbComponentCarrierManager used this function to
      *  send back an uplink BSR to some of the MAC instances
      */
     virtual void ReportMacCeToScheduler(nr::MacCeListElement_s bsr) = 0;
 
     /**
-     * \brief Report SR to the right scheduler
-     * \param rnti RNTI of the user that requested the SR
+     * @brief Report SR to the right scheduler
+     * @param rnti RNTI of the user that requested the SR
      *
-     * \see NrCcmMacSapUser::UlReceiveSr
+     * @see NrCcmMacSapUser::UlReceiveSr
      */
     virtual void ReportSrToScheduler(uint16_t rnti) = 0;
 
 }; // end of class NrCcmMacSapProvider
 
 /**
- * \ingroup nr
+ * @ingroup nr
  *
- * \brief Service Access Point (SAP) offered by MAC to the
+ * @brief Service Access Point (SAP) offered by MAC to the
  *        component carrier manager (CCM).
  *
  *
  * This is the *CCM MAC SAP User*, i.e., the part of the SAP
  * that contains the component carrier manager methods called
- * by the eNodeB MAC instance.
+ * by the gNB MAC instance.
  */
-class NrCcmMacSapUser : public NrMacSapUser
+class NR_EXPORT NrCcmMacSapUser : public NrMacSapUser
 {
   public:
     /**
-     * \brief When the Primary Component carrier receive a buffer status report
+     * @brief When the Primary Component carrier receive a buffer status report
      *  it is sent to the CCM.
-     * \param bsr Buffer Status Report received from a Ue
-     * \param componentCarrierId
+     * @param bsr Buffer Status Report received from a Ue
+     * @param componentCarrierId
      */
     virtual void UlReceiveMacCe(nr::MacCeListElement_s bsr, uint8_t componentCarrierId) = 0;
 
     /**
-     * \brief The MAC received a SR
-     * \param rnti RNTI of the UE that requested a SR
-     * \param componentCarrierId CC that received the SR
+     * @brief The MAC received a SR
+     * @param rnti RNTI of the UE that requested a SR
+     * @param componentCarrierId CC that received the SR
      *
      * NOTE: Not implemented in the LTE module. The FemtoForum API requires
      * that this function gets as parameter a struct  SchedUlSrInfoReqParameters.
@@ -81,9 +83,9 @@ class NrCcmMacSapUser : public NrMacSapUser
     virtual void UlReceiveSr(uint16_t rnti, uint8_t componentCarrierId) = 0;
 
     /**
-     * \brief Notifies component carrier manager about physical resource block occupancy
-     * \param prbOccupancy The physical resource block occupancy
-     * \param componentCarrierId The component carrier id
+     * @brief Notifies component carrier manager about physical resource block occupancy
+     * @param prbOccupancy The physical resource block occupancy
+     * @param componentCarrierId The component carrier id
      */
     virtual void NotifyPrbOccupancy(double prbOccupancy, uint8_t componentCarrierId) = 0;
 
@@ -97,7 +99,7 @@ class MemberNrCcmMacSapProvider : public NrCcmMacSapProvider
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrCcmMacSapProvider(C* owner);
     // inherited from NrCcmRrcSapProvider
@@ -136,7 +138,7 @@ class MemberNrCcmMacSapUser : public NrCcmMacSapUser
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrCcmMacSapUser(C* owner);
     // inherited from NrCcmRrcSapUser

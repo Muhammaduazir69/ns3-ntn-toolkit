@@ -14,9 +14,10 @@
 #include "nr-net-device.h"
 #include "nr-spectrum-phy.h"
 
+#include "ns3/boolean.h"
 #include "ns3/pointer.h"
+#include "ns3/simulator.h"
 #include "ns3/uniform-planar-array.h"
-#include <ns3/boolean.h>
 
 #include <algorithm>
 
@@ -59,9 +60,13 @@ class NrMemberPhySapProvider : public NrPhySapProvider
     Time GetSlotPeriod() const override;
 
     uint32_t GetRbNum() const override;
-
     PuschPowerHeadroom GetPuschPowerHeadroom(
-        const std::vector<uint8_t>& rbgBitmask) const override;
+        const std::vector<bool>& rbgBitmask) const override;
+
+
+    void RegisterToGnb(uint16_t cellId) override;
+
+    uint32_t GetArfcn() const override;
 
   private:
     NrPhy* m_phy;
@@ -148,8 +153,20 @@ NrMemberPhySapProvider::GetRbNum() const
     return m_phy->GetRbNum();
 }
 
+void
+NrMemberPhySapProvider::RegisterToGnb(uint16_t cellId)
+{
+    m_phy->RegisterToGnb(cellId);
+}
+
+uint32_t
+NrMemberPhySapProvider::GetArfcn() const
+{
+    return m_phy->DoGetArfcn();
+}
+
 NrPhySapProvider::PuschPowerHeadroom
-NrMemberPhySapProvider::GetPuschPowerHeadroom(const std::vector<uint8_t>& rbgBitmask) const
+NrMemberPhySapProvider::GetPuschPowerHeadroom(const std::vector<bool>& rbgBitmask) const
 {
     return m_phy->GetPuschPowerHeadroom(rbgBitmask);
 }
@@ -171,13 +188,13 @@ NrPhy::GetTypeId()
 }
 
 NrPhySapProvider::PuschPowerHeadroom
-NrPhy::GetPuschPowerHeadroom([[maybe_unused]] const std::vector<uint8_t>& rbgBitmask) const
+NrPhy::GetPuschPowerHeadroom([[maybe_unused]] const std::vector<bool>& rbgBitmask) const
 {
     return NrPhySapProvider::PuschPowerHeadroom{};
 }
 
 std::vector<int>
-NrPhy::FromRBGBitmaskToRBAssignment(const std::vector<uint8_t> rbgBitmask) const
+NrPhy::FromRBGBitmaskToRBAssignment(const std::vector<bool> rbgBitmask) const
 {
     std::vector<int> ret;
 
@@ -187,13 +204,16 @@ NrPhy::FromRBGBitmaskToRBAssignment(const std::vector<uint8_t> rbgBitmask) const
         {
             for (uint32_t k = 0; k < GetNumRbPerRbg(); ++k)
             {
-                ret.push_back((i * GetNumRbPerRbg()) + k);
+                uint32_t prbIndex = (i * GetNumRbPerRbg()) + k;
+                if (prbIndex >= GetRbNum())
+                {
+                    break;
+                }
+                ret.push_back(prbIndex);
             }
         }
     }
-
-    NS_ASSERT(static_cast<uint32_t>(std::count(rbgBitmask.begin(), rbgBitmask.end(), 1) *
-                                    GetNumRbPerRbg()) == ret.size());
+    NS_ASSERT(ret.size() <= GetRbNum());
     return ret;
 }
 
@@ -203,12 +223,12 @@ NrPhy::NrPhy()
 {
     NS_LOG_FUNCTION(this);
     m_phySapProvider = new NrMemberPhySapProvider(this);
-    SetNumerology(0); // Initialize sub-carrier spacing assuming numerology 0
 }
 
 NrPhy::~NrPhy()
 {
     NS_LOG_FUNCTION(this);
+    delete m_phySapProvider;
 }
 
 void
@@ -226,7 +246,16 @@ NrPhy::DoDispose()
         m_spectrumPhy->Dispose();
     }
     m_spectrumPhy = nullptr;
-    delete m_phySapProvider;
+}
+
+void
+NrPhy::DoInitialize()
+{
+    NS_LOG_FUNCTION(this);
+    if (m_spectrumPhy)
+    {
+        m_spectrumPhy->Initialize();
+    }
 }
 
 void
@@ -241,7 +270,8 @@ NrPhy::InstallCentralFrequency(double f)
 {
     NS_LOG_FUNCTION(this);
     NS_ABORT_IF(m_centralFrequency >= 0.0);
-    m_centralFrequency = f;
+    m_arfcn = FrequencyHzToArfcn(f);
+    m_centralFrequency = ArfcnToFrequencyHz(m_arfcn);
 }
 
 void
@@ -267,6 +297,12 @@ void
 NrPhy::SetNumerology(uint16_t numerology)
 {
     NS_LOG_FUNCTION(this);
+    // The UE RRC applies the numerology of every MIB it receives. Updating the number of RBs
+    // resets the noise PSD, which aborts an ongoing reception, so only do it on a change
+    if (numerology == m_numerology && m_slotPeriod.IsStrictlyPositive())
+    {
+        return;
+    }
     m_numerology = numerology;
     m_slotsPerSubframe = static_cast<uint16_t>(std::pow(2, numerology));
     m_slotPeriod = Seconds(0.001 / m_slotsPerSubframe);
@@ -471,30 +507,14 @@ NrPhy::EnqueueCtrlMsgNow(const std::list<Ptr<NrControlMessage>>& listOfMsgs)
     }
 }
 
-uint64_t
-NrPhy::RemoveQueuedCtrlMsgs(const std::set<NrControlMessage::messageType>& types)
-{
-    NS_LOG_FUNCTION(this);
-    auto match = [&types](const Ptr<NrControlMessage>& m) {
-        return types.count(m->GetMessageType()) > 0;
-    };
-    uint64_t n = 0;
-    for (auto& slotMsgs : m_controlMessageQueue)
-    {
-        const auto before = slotMsgs.size();
-        slotMsgs.remove_if(match);
-        n += before - slotMsgs.size();
-    }
-    const auto before = m_ctrlMsgs.size();
-    m_ctrlMsgs.remove_if(match);
-    n += before - m_ctrlMsgs.size();
-    return n;
-}
-
 void
 NrPhy::EncodeCtrlMsg(const Ptr<NrControlMessage>& msg)
 {
     NS_LOG_FUNCTION(this);
+    if (m_ctrlMsgs.empty())
+    {
+        m_ctrlMsgsEncodedAt = Simulator::Now();
+    }
     m_ctrlMsgs.push_back(msg);
 }
 
@@ -508,6 +528,19 @@ bool
 NrPhy::HasUlSlot() const
 {
     return NrPhy::HasUlSlot(m_tddPattern);
+}
+
+uint64_t
+NrPhy::GetCurrentSlotInPattern() const
+{
+    NS_ABORT_MSG_IF(m_tddPattern.empty(), "TDD pattern is empty");
+    return GetCurrentSfnSf().Normalize() % m_tddPattern.size();
+}
+
+LteNrTddSlotType
+NrPhy::GetCurrentSlotType() const
+{
+    return m_tddPattern.at(GetCurrentSlotInPattern());
 }
 
 bool
@@ -855,6 +888,78 @@ NrPhy::PeekSlotAllocInfo(const SfnSf& sfnsf)
     NS_FATAL_ERROR("Didn't found the slot");
 }
 
+void
+NrPhy::ClearRntiSlotAllocInfo(uint16_t rnti)
+{
+    NS_LOG_FUNCTION(this);
+    for (auto& alloc : m_slotAllocInfo)
+    {
+        std::erase_if(alloc.m_buildRarList,
+                      [rnti](const auto& rar) { return rar.ulMsg3Dci->m_rnti == rnti; });
+
+        std::deque<VarTtiAllocInfo> filteredVarTtiAllocInfo;
+        for (auto& varTti : alloc.m_varTtiAllocInfo)
+        {
+            if (varTti.m_dci->m_rnti == rnti)
+            {
+                NS_LOG_DEBUG("Removing VarTti DCI to removed rnti " << rnti);
+            }
+            else
+            {
+                filteredVarTtiAllocInfo.push_back(varTti);
+            }
+        }
+        alloc.m_varTtiAllocInfo = filteredVarTtiAllocInfo;
+        std::array<bool, 14> usedSymbols{false};
+        for (const auto& varTti : alloc.m_varTtiAllocInfo)
+        {
+            auto startingSymbol = usedSymbols.begin() + varTti.m_dci->m_symStart;
+            auto finalSymbol = startingSymbol + varTti.m_dci->m_numSym;
+            std::fill(startingSymbol, finalSymbol, true);
+        }
+        alloc.m_numSymAlloc = std::count(usedSymbols.begin(), usedSymbols.end(), true);
+        // update the slot type to stay consistent
+        bool hasDl = false;
+        bool hasUl = false;
+
+        for (const auto& varTti : alloc.m_varTtiAllocInfo)
+        {
+            if (!varTti.m_dci)
+            {
+                continue;
+            }
+
+            if (varTti.m_dci->m_format == DciInfoElementTdma::DL)
+            {
+                hasDl = true;
+            }
+            else if (varTti.m_dci->m_format == DciInfoElementTdma::UL)
+            {
+                hasUl = true;
+            }
+        }
+
+        alloc.m_type = hasDl && hasUl ? SlotAllocInfo::BOTH
+                       : hasDl        ? SlotAllocInfo::DL
+                       : hasUl        ? SlotAllocInfo::UL
+                                      : SlotAllocInfo::NONE;
+    }
+}
+
+void
+NrPhy::PurgeStaleSlotAllocInfo()
+{
+    // Purge any SlotAllocInfo entries whose SfnSf was stamped under a
+    // different numerology (e.g. from the initial temporary BW during
+    // cell selection, before the MIB updates the numerology).
+    m_slotAllocInfo.erase(std::remove_if(m_slotAllocInfo.begin(),
+                                         m_slotAllocInfo.end(),
+                                         [this](const SlotAllocInfo& a) {
+                                             return a.m_sfnSf.GetNumerology() != GetNumerology();
+                                         }),
+                          m_slotAllocInfo.end());
+}
+
 size_t
 NrPhy::SlotAllocInfoSize() const
 {
@@ -914,6 +1019,91 @@ Time
 NrPhy::GetTbDecodeLatency() const
 {
     return m_tbDecodeLatencyUs;
+}
+
+uint32_t
+NrPhy::DoGetArfcn() const
+{
+    return m_arfcn;
+}
+
+void
+NrPhy::DoSetArfcn(uint32_t arfcn)
+{
+    m_arfcn = arfcn;
+    m_centralFrequency = ArfcnToFrequencyHz(arfcn);
+}
+
+uint32_t
+NrPhy::FrequencyHzToArfcn(double freqHz)
+{
+    uint32_t arfcn = 0;
+
+    if (freqHz >= 0 && freqHz < 3000000000.0)
+    {
+        // FR1 segment 1: 0–3 GHz (ΔF = 5 kHz)
+        arfcn = static_cast<uint32_t>(freqHz / 5000.0);
+    }
+    else if (freqHz >= 3000000000.0 && freqHz < 24250080000.0)
+    {
+        // FR1 segment 2: 3–24.25 GHz (ΔF = 15 kHz)
+        arfcn = 600000 + static_cast<uint32_t>((freqHz - 3000000000.0) / 15000.0);
+    }
+    else if (freqHz >= 24250080000.0 && freqHz < 100000000000.0)
+    {
+        // FR2: 24.25–100 GHz (ΔF = 60 kHz)
+        arfcn = 2016667 + static_cast<uint32_t>((freqHz - 24250080000.0) / 60000.0);
+    }
+    else if (freqHz >= 100000000000.0 && freqHz <= 114250000000.0)
+    {
+        // FR3 (non-standardized, up to 114.25 GHz)
+        // Based on Patent WO2021033328A1
+        arfcn = 3279166 + static_cast<uint32_t>((freqHz - 100000000000.0) / 240.0);
+    }
+    else
+    {
+        NS_ABORT_MSG("Frequency out of supported FR1/FR2/FR3 range");
+    }
+
+    return arfcn;
+}
+
+double
+NrPhy::ArfcnToFrequencyHz(uint32_t arfcn)
+{
+    double freq = -1.0;
+
+    if (arfcn < 600000)
+    {
+        // FR1 (0–3 GHz)
+        freq = static_cast<double>(arfcn) * 5000.0;
+    }
+    else if (arfcn >= 600000 && arfcn < 2016667)
+    {
+        // FR1 extended (3–24.25 GHz)
+        freq = 3000000000.0 + static_cast<double>(arfcn - 600000) * 15000.0;
+    }
+    else if (arfcn >= 2016667 && arfcn < 3279166)
+    {
+        // FR2 (24.25–100 GHz)
+        freq = 24250080000.0 + static_cast<double>(arfcn - 2016667) * 60000.0;
+    }
+    else if (arfcn >= 3279166 && arfcn <= 62654166)
+    {
+        // FR3 (100–114.25 GHz)
+        // Based on Patent EP4021097A1
+        freq = 100000000000.0 + static_cast<double>(arfcn - 3279166) * 240.0;
+    }
+    else
+    {
+        NS_ABORT_MSG("ARFCN out of supported FR1/FR2/Patent range");
+    }
+    return freq;
+}
+
+void
+NrPhy::RegisterToGnb(uint16_t cellId)
+{
 }
 
 } // namespace ns3

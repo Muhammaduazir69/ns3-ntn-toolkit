@@ -64,41 +64,41 @@ constexpr bool USEIPV6_FALSE = false;
 constexpr bool USEIPV6_TRUE = true;
 
 /**
- * \ingroup ping
- * \defgroup ping-test ping tests
+ * @ingroup ping
+ * @defgroup ping-test ping tests
  */
 
 /**
- * \ingroup ping-test
- * \ingroup tests
+ * @ingroup ping-test
+ * @ingroup tests
  *
- * \brief ping basic tests
+ * @brief ping basic tests
  */
 class PingTestCase : public TestCase
 {
   public:
     /**
      * Constructor.
-     * \param name TestCase name.
-     * \param useIpv6 Use IPv6.
+     * @param name TestCase name.
+     * @param useIpv6 Use IPv6.
      */
     PingTestCase(std::string name, bool useIpv6);
 
     /**
      * Set the Simulation stop time.
-     * \param stopTime The simulation stop time.
+     * @param stopTime The simulation stop time.
      */
     void SetSimulatorStopTime(Time stopTime);
 
     /**
      * Set the destination address (either IPv4 or IPv6).
-     * \param address The destination address.
+     * @param address The destination address.
      */
     void SetDestinationAddress(Address address);
 
     /**
      * Set the PING start time.
-     * \param startTime Ping start time.
+     * @param startTime Ping start time.
      */
     void SetStartTime(Time startTime)
     {
@@ -107,7 +107,7 @@ class PingTestCase : public TestCase
 
     /**
      * Set the PING stop time.
-     * \param stopTime Ping stop time.
+     * @param stopTime Ping stop time.
      */
     void SetStopTime(Time stopTime)
     {
@@ -116,7 +116,7 @@ class PingTestCase : public TestCase
 
     /**
      * Set the number of pings to send.
-     * \param count Number of pings to send.
+     * @param count Number of pings to send.
      */
     void SetCount(uint32_t count)
     {
@@ -125,7 +125,7 @@ class PingTestCase : public TestCase
 
     /**
      * Set the size of pings.
-     * \param size Size of pings.
+     * @param size Size of pings.
      */
     void SetSize(uint32_t size)
     {
@@ -134,7 +134,7 @@ class PingTestCase : public TestCase
 
     /**
      * Set the interval of pings.
-     * \param interval Interval of pings.
+     * @param interval Interval of pings.
      */
     void SetInterval(Time interval)
     {
@@ -143,7 +143,7 @@ class PingTestCase : public TestCase
 
     /**
      * Set the packet drop list on the Ping node's interface
-     * \param dropList packet drop list
+     * @param dropList packet drop list
      */
     void SetDropList(const std::list<uint32_t>& dropList)
     {
@@ -152,37 +152,37 @@ class PingTestCase : public TestCase
 
     /**
      * Enable the check on Tx pings counted in Tx trace source.
-     * \param expectedTx Expected Tx.
+     * @param expectedTx Expected Tx.
      */
     void CheckTraceTx(uint32_t expectedTx);
 
     /**
      * Enable the check on Rtt event count in Rtt trace source.
-     * \param expectedRtt Expected Rtt.
+     * @param expectedRtt Expected Rtt.
      */
     void CheckTraceRtt(uint32_t expectedRtt);
 
     /**
      * Enable the check on Tx pings.
-     * \param expectedReportTx Expected Tx.
+     * @param expectedReportTx Expected Tx.
      */
     void CheckReportTransmitted(uint32_t expectedReportTx);
 
     /**
      * Enable the check on Rx pings.
-     * \param expectedReportRx Expected Rx.
+     * @param expectedReportRx Expected Rx.
      */
     void CheckReportReceived(uint32_t expectedReportRx);
 
     /**
      * Enable the check on Lost pings.
-     * \param expectedReportLoss Expected Lost.
+     * @param expectedReportLoss Expected Lost.
      */
     void CheckReportLoss(uint16_t expectedReportLoss);
 
     /**
      * Enable the check on average RTT.
-     * \param expectedTime Expected RTT.
+     * @param expectedTime Expected RTT.
      */
     void CheckReportTime(Time expectedTime);
 
@@ -193,28 +193,28 @@ class PingTestCase : public TestCase
 
     /**
      * Trace TX events.
-     * \param seq Sequence number.
-     * \param p Tx packet.
+     * @param seq Sequence number.
+     * @param p Tx packet.
      */
     void TxTraceSink(uint16_t seq, Ptr<Packet> p);
 
     /**
      * Trace RTT events.
-     * \param seq Sequence number.
-     * \param rttSample RTT sample.
+     * @param seq Sequence number.
+     * @param rttSample RTT sample.
      */
     void RttTraceSink(uint16_t seq, Time rttSample);
 
     /**
      * Trace Drop events.
-     * \param seq Sequence number.
-     * \param reason Drop reason.
+     * @param seq Sequence number.
+     * @param reason Drop reason.
      */
     void DropTraceSink(uint16_t seq, Ping::DropReason reason);
 
     /**
      * Trace Report generation events.
-     * \param report The report sample.
+     * @param report The report sample.
      */
     void ReportTraceSink(const Ping::PingReport& report);
 
@@ -242,13 +242,13 @@ class PingTestCase : public TestCase
     bool m_checkReportLoss{false};        //!< Set to true to check the Loss number
     bool m_checkReportTime{false};        //!< Set to true to check the Time
 
-    Time m_startTime{Seconds(1)};             //!< Start time
-    Time m_stopTime{Seconds(5)};              //!< Stop time
-    Time m_simulatorStopTime{Seconds(6)};     //!< Simulator stop time
-    bool m_useIpv6{false};                    //!< Use IPv6 (true) or IPv4 (false)
-    Time m_interpacketInterval{Seconds(1.0)}; //!< Time between pings
-    Time m_lastTx;                            //!< Last ping Tx time
-    std::list<uint32_t> m_dropList;           //!< Drop first reply (true)
+    Time m_startTime{Seconds(1)};           //!< Start time
+    Time m_stopTime{Seconds(5)};            //!< Stop time
+    Time m_simulatorStopTime{Seconds(6)};   //!< Simulator stop time
+    bool m_useIpv6{false};                  //!< Use IPv6 (true) or IPv4 (false)
+    Time m_interpacketInterval{Seconds(1)}; //!< Time between pings
+    Time m_lastTx;                          //!< Last ping Tx time
+    std::list<uint32_t> m_dropList;         //!< Drop first reply (true)
 
     NodeContainer m_nodes;                   //!< The simulation nodes
     Ipv4InterfaceContainer m_ipv4Interfaces; //!< The IPv4 interfaces
@@ -381,7 +381,7 @@ PingTestCase::TxTraceSink(uint16_t seq, Ptr<Packet> p)
 {
     NS_LOG_FUNCTION(this << seq << p);
     m_countTraceTx++;
-    if (m_lastTx == Seconds(0))
+    if (m_lastTx.IsZero())
     {
         m_lastTx = Simulator::Now();
     }
@@ -544,10 +544,10 @@ PingTestCase::DoRun()
 }
 
 /**
- * \ingroup ping-test
- * \ingroup tests
+ * @ingroup ping-test
+ * @ingroup tests
  *
- * \brief ping TestSuite
+ * @brief ping TestSuite
  */
 class PingTestSuite : public TestSuite
 {
@@ -605,7 +605,7 @@ PingTestSuite::PingTestSuite()
     testcase2v4->SetSimulatorStopTime(Seconds(5));
     testcase2v4->CheckReportTransmitted(1);
     testcase2v4->CheckReportReceived(0);
-    testcase1v4->SetDestinationAddress(Ipv4Address("10.0.0.2"));
+    testcase2v4->SetDestinationAddress(Ipv4Address("10.0.0.2"));
     AddTestCase(testcase2v4, TestCase::Duration::QUICK);
 
     auto testcase2v6 = new PingTestCase(
@@ -671,7 +671,7 @@ PingTestSuite::PingTestSuite()
     //                     The number sent (2) is equal to number received (2)
     // How validated:  PingReport trace is checked for number of packets
     //                 transmitted (2) and received (2), and number of drops (0)
-    Time interval = Seconds(3.0);
+    Time interval = Seconds(3);
     auto testcase4v4 =
         new PingTestCase("4. Test for the operation of interval attribute for IPv4", USEIPV6_FALSE);
     testcase4v4->SetStartTime(Seconds(1));
@@ -697,8 +697,8 @@ PingTestSuite::PingTestSuite()
     // 5. Test for behavior of pinging an unreachable host when the
     //    network does not send an ICMP unreachable message.
     // Unlimited pings, StopApplication () with no packet in flight
-    // Configuration:  Ping::Count = 0,  Ping start time = 1s
-    //                 Ping stop time = 5.5s.  Ping to unknown destination.
+    // Configuration:  Ping::Count = 5,  Ping start time = 1s
+    //                 Ping stop time = 6.5s.  Ping to unknown destination.
     // Expected behavior:  By default, the timeout value is 1 second.  Ping
     //                     sends first packet at time 1 second, and does not
     //                     receive a response.  At the timeout (simulation time
@@ -900,30 +900,39 @@ PingTestSuite::PingTestSuite()
     testcase9v6->CheckReportTime(MicroSeconds(3040000));
     AddTestCase(testcase9v6, TestCase::Duration::QUICK);
 
-#ifdef NOTYET
-    //
-    // 10. Test for behavior of pinging on a link that causes IPv4 fragmentation
-    // Configuration:  Ping::Count = 1,  Ping start time = 1s
-    //                 Ping stop time = 2.5s.  Ping to Node 1
-    //                 Ping size set to 2000 bytes.
-    // Expected behavior:  At shortly after time 1 seconds, Ping should
-    //                     successfully exit by recording the successful
-    //                     exchange of one echo request and reply.
-    // How validated:  PingReport trace is checked for number of packets
-    //                 transmitted (5) and  received (0).
-    //                 PingReport time is checked for an explicit time
-    //                 (1.020028s) corresponding to 2000 bytes
-    //                 The packet loss rate should be checked to be 100 percent
-    PingTestCase* testcase10v4 = new PingTestCase("10. Test for IPv4 fragmentation", USEIPV6_FALSE);
+    // 10. Test for behavior of pinging with a big size that causes fragmentation
+    //    Configuration:  Ping::Count = 5,  Ping::Interval = 1s, Ping start
+    //                    time = 1s, Ping stop time = 6.5s,
+    //                    Payload size = 60000B
+    //    Expected behavior:  Pings are sent at times 1, 2, 3, 4, 5 sec.  The
+    //                        number sent equals number received, which equals 5.
+    //    How validated:  PingReport trace is checked for number of packets
+    //                    transmitted and received (5), and number of drops (0).
+    auto testcase10v4 = new PingTestCase("10. 5 pings, heavy payload, no losses, "
+                                         "StopApplication () with no packets in flight IPv4",
+                                         USEIPV6_FALSE);
     testcase10v4->SetStartTime(Seconds(1));
-    testcase10v4->SetStopTime(Seconds(2.5));
-    testcase10v4->SetCount(1);
-    testcase10v4->SetSize(2000);
-    testcase10v4->CheckReportTransmitted(1);
-    testcase10v4->CheckReportReceived(1);
-    testcase10v4->CheckReportTime(MicroSeconds(1020028));
+    testcase10v4->SetStopTime(Seconds(6.5));
+    testcase10v4->SetCount(5);
+    testcase10v4->SetSize(60000);
+    testcase10v4->CheckReportTransmitted(5);
+    testcase10v4->CheckReportReceived(5);
+    testcase10v4->CheckTraceTx(5);
+    testcase10v4->SetDestinationAddress(Ipv4Address("10.0.0.2"));
     AddTestCase(testcase10v4, TestCase::Duration::QUICK);
-#endif
+
+    auto testcase10v6 = new PingTestCase("10. 5 pings, heavy payload,  no losses, "
+                                         "StopApplication () with no packets in flight IPv6",
+                                         USEIPV6_TRUE);
+    testcase10v6->SetStartTime(Seconds(1));
+    testcase10v6->SetStopTime(Seconds(6.5));
+    testcase10v6->SetCount(5);
+    testcase10v6->SetSize(60000);
+    testcase10v6->CheckReportTransmitted(5);
+    testcase10v6->CheckReportReceived(5);
+    testcase10v6->CheckTraceTx(5);
+    testcase10v6->SetDestinationAddress(Ipv6Address("2001:1::200:ff:fe00:2"));
+    AddTestCase(testcase10v6, TestCase::Duration::QUICK);
 }
 
 static PingTestSuite pingTestSuite; //!< Static variable for test initialization

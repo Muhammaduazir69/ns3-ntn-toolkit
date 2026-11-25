@@ -8,15 +8,15 @@
 #include "bwp-manager-ue.h"
 #include "nr-epc-ue-nas.h"
 #include "nr-gnb-net-device.h"
+#include "nr-initial-association.h"
 #include "nr-ue-component-carrier-manager.h"
 #include "nr-ue-mac.h"
 #include "nr-ue-phy.h"
 #include "nr-ue-rrc.h"
 
-#include <ns3/ipv4-l3-protocol.h>
-#include <ns3/ipv6-l3-protocol.h>
-#include <ns3/object-map.h>
-#include <ns3/pointer.h>
+#include "ns3/error-model.h"
+#include "ns3/object-map.h"
+#include "ns3/pointer.h"
 
 namespace ns3
 {
@@ -45,7 +45,7 @@ NrUeNetDevice::GetTypeId()
             .AddAttribute("Imsi",
                           "International Mobile Subscriber Identity assigned to this UE",
                           UintegerValue(0),
-                          MakeUintegerAccessor(&NrUeNetDevice::m_imsi),
+                          MakeUintegerAccessor(&NrUeNetDevice::SetImsi, &NrUeNetDevice::GetImsi),
                           MakeUintegerChecker<uint64_t>())
             .AddAttribute(
                 "PrimaryDlIndex",
@@ -75,7 +75,12 @@ NrUeNetDevice::GetTypeId()
                           "List of all component Carrier.",
                           ObjectMapValue(),
                           MakeObjectMapAccessor(&NrUeNetDevice::m_ccMap),
-                          MakeObjectMapChecker<BandwidthPartUe>());
+                          MakeObjectMapChecker<BandwidthPartUe>())
+            .AddAttribute("InitAssoc",
+                          "Pointer to nr Initial Accos",
+                          PointerValue(),
+                          MakePointerAccessor(&NrUeNetDevice::m_nrInitAcc),
+                          MakePointerChecker<NrInitialAssociation>());
     return tid;
 }
 
@@ -92,8 +97,12 @@ void
 NrUeNetDevice::DoInitialize()
 {
     NS_LOG_FUNCTION(this);
-
-    m_rrc->Initialize();
+    // While these may have been previously set, the values may not
+    // have propagated to the other objects depending on whether they
+    // had been created upon the previous setting time.
+    m_nas->SetImsi(m_imsi);
+    m_rrc->SetImsi(m_imsi);
+    m_nas->SetCsgId(m_csgId); // this also handles propagation to RRC
 }
 
 void
@@ -113,6 +122,7 @@ NrUeNetDevice::DoDispose()
     m_ccMap.clear();
     m_componentCarrierManager->Dispose();
     m_componentCarrierManager = nullptr;
+    m_nrInitAcc = nullptr;
     NrNetDevice::DoDispose();
 }
 
@@ -143,15 +153,19 @@ NrUeNetDevice::EnqueueDlHarqFeedback(const DlHarqInfo& m) const
 
 void
 NrUeNetDevice::RouteIngoingCtrlMsgs(const std::list<Ptr<NrControlMessage>>& msgList,
-                                    uint8_t sourceBwpId)
+                                    uint32_t sourceBwpArfcn)
 {
     NS_LOG_FUNCTION(this);
 
     for (const auto& msg : msgList)
     {
-        uint8_t bwpId = DynamicCast<BwpManagerUe>(m_componentCarrierManager)
-                            ->RouteIngoingCtrlMsg(msg, sourceBwpId);
-        m_ccMap.at(bwpId)->GetPhy()->PhyCtrlMessagesReceived(msg);
+        uint32_t bwpArfcn = DynamicCast<BwpManagerUe>(m_componentCarrierManager)
+                                ->RouteIngoingCtrlMsg(msg, sourceBwpArfcn);
+        auto bwpIt = std::find_if(m_ccMap.begin(), m_ccMap.end(), [bwpArfcn](auto& bwp) {
+            return bwp.second->GetArfcn() == bwpArfcn;
+        });
+        NS_ASSERT_MSG(bwpIt != m_ccMap.end(), "UE missing BWP with ARFCN: " << bwpArfcn);
+        bwpIt->second->GetPhy()->PhyCtrlMessagesReceived(msg);
     }
 }
 
@@ -196,7 +210,10 @@ NrUeNetDevice::SetCsgId(uint32_t csgId)
 {
     NS_LOG_FUNCTION(this << csgId);
     m_csgId = csgId;
-    UpdateConfig(); // propagate the change down to NAS and RRC
+    if (m_nas)
+    {
+        m_nas->SetCsgId(m_csgId); // this also handles propagation to RRC
+    }
 }
 
 Ptr<NrUeMac>
@@ -210,20 +227,38 @@ void
 NrUeNetDevice::UpdateConfig()
 {
     NS_LOG_FUNCTION(this);
-    m_nas->SetImsi(m_imsi);
-    m_rrc->SetImsi(m_imsi);
-    m_nas->SetCsgId(m_csgId); // this also handles propagation to RRC
 }
 
 bool
 NrUeNetDevice::DoSend(Ptr<Packet> packet, const Address& dest, uint16_t protocolNumber)
 {
     NS_LOG_FUNCTION(this << packet << dest << protocolNumber);
-    NS_ABORT_MSG_IF(protocolNumber != Ipv4L3Protocol::PROT_NUMBER &&
-                        protocolNumber != Ipv6L3Protocol::PROT_NUMBER,
-                    "unsupported protocol " << protocolNumber
-                                            << ", only IPv4 and IPv6 are supported");
+    // The NAS dispatches IP to the sessions matching its packet filters, and any
+    // other protocol to the unstructured session activated for it, if any.
     return m_nas->Send(packet, protocolNumber);
+}
+
+void
+NrUeNetDevice::Receive(Ptr<Packet> p, uint16_t protocolNumber)
+{
+    NS_LOG_FUNCTION(this << p << protocolNumber);
+
+    if (protocolNumber == 0)
+    {
+        // An IP session: the protocol is carried by the packet.
+        NrNetDevice::Receive(p);
+        return;
+    }
+
+    if (m_receiveErrorModel && m_receiveErrorModel->IsCorrupt(p))
+    {
+        NS_LOG_INFO("Dropping " << p->GetSize() << " bytes");
+        m_dropTrace(p);
+        return;
+    }
+
+    NS_LOG_INFO("Received " << p->GetSize() << " bytes of protocol " << protocolNumber);
+    ForwardUp(p, protocolNumber);
 }
 
 Ptr<NrUePhy>
@@ -254,6 +289,21 @@ NrUeNetDevice::GetRrc() const
     return m_rrc;
 }
 
+void
+NrUeNetDevice::SetImsi(uint64_t imsi)
+{
+    NS_LOG_FUNCTION(this << imsi);
+    m_imsi = imsi;
+    if (m_nas)
+    {
+        m_nas->SetImsi(imsi);
+    }
+    if (m_rrc)
+    {
+        m_rrc->SetImsi(imsi);
+    }
+}
+
 uint64_t
 NrUeNetDevice::GetImsi() const
 {
@@ -264,18 +314,6 @@ NrUeNetDevice::GetImsi() const
 uint16_t
 NrUeNetDevice::GetCellId() const
 {
-    // ntn-patch 10: the SERVING cell is the one the UE RRC is synchronized to.
-    // m_targetGnb is written once, by NrHelper::AttachToGnb, and nothing
-    // updates it when an X2 handover (TS 38.331 5.3.5.5.2 reconfigurationWithSync)
-    // moves the UE, so it names the attach-time cell for the rest of the run.
-    // NrUeRrc::m_cellId is the targetPhysCellId of the last reconfiguration
-    // (or the cell selected at attach), so it equals the old answer until the
-    // first handover and follows the UE afterwards. Before the RRC has a cell
-    // (0), fall back to the attach-time gNB exactly as before.
-    if (m_rrc && m_rrc->GetCellId() != 0)
-    {
-        return m_rrc->GetCellId();
-    }
     auto gnb = GetTargetGnb();
     if (gnb)
     {
@@ -285,6 +323,13 @@ NrUeNetDevice::GetCellId() const
     {
         return UINT16_MAX;
     }
+}
+
+void
+NrUeNetDevice::SetInitAssoc(Ptr<NrInitialAssociation> initAssoc)
+{
+    NS_LOG_FUNCTION(this);
+    m_nrInitAcc = initAssoc;
 }
 
 void
@@ -301,4 +346,23 @@ NrUeNetDevice::GetTargetGnb() const
     return m_targetGnb;
 }
 
+uint32_t
+NrUeNetDevice::GetBwpArfcn(uint8_t index) const
+{
+    NS_LOG_FUNCTION(this);
+    return m_ccMap.at(index)->GetArfcn(); // Ul or Dl doesn't matter, they are the same
+}
+
+uint16_t
+NrUeNetDevice::GetArfcnBwpId(uint32_t arfcn) const
+{
+    for (std::size_t i = 0; i < m_ccMap.size(); i++)
+    {
+        if (m_ccMap.at(i)->GetArfcn() == arfcn)
+        {
+            return (uint16_t)i;
+        }
+    }
+    NS_ABORT_MSG("UE should have the searched arfcn");
+}
 } // namespace ns3

@@ -7,14 +7,16 @@
 
 #include "nr-eesm-error-model.h"
 
+#include "ns3/nr-export.h"
+
 #include <vector>
 
 namespace ns3
 {
 
 /**
- * \ingroup error-models
- * \brief The NrEesmT1 struct
+ * @ingroup error-models
+ * @brief The NrEesmT1 struct
  *
  * This class provides the NR Tables to be used for MCS/CQI Table1, corresponding
  * to tables 5.1.3.1-1 and 5.2.2.1-2 in TS 38.214. It includes the beta values
@@ -26,13 +28,13 @@ namespace ns3
  *
  * Values used inside NrEesmIrT1 and NrEesmCcT1 classes
  *
- * \see NrEesmIrT1
- * \see NrEesmCcT1
+ * @see NrEesmIrT1
+ * @see NrEesmCcT1
  */
-struct NrEesmT1
+struct NR_EXPORT NrEesmT1
 {
     /**
-     * \brief NrEesmT1 constructor. Initialize the pointers
+     * @brief NrEesmT1 constructor. Initialize the pointers
      */
     NrEesmT1();
 

@@ -11,6 +11,7 @@
 
 #include "ns3/nstime.h"
 #include "ns3/traced-value.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-remote-station-manager.h"
 
 namespace ns3
@@ -19,7 +20,7 @@ namespace ns3
 struct RraaWifiRemoteStation;
 
 /// WifiRraaThresholds structure
-struct WifiRraaThresholds
+struct WIFI_EXPORT WifiRraaThresholds
 {
     double m_ori;    ///< Opportunistic Rate Increase threshold
     double m_mtl;    ///< Maximum Tolerable Loss threshold
@@ -32,8 +33,8 @@ struct WifiRraaThresholds
 typedef std::vector<std::pair<WifiRraaThresholds, WifiMode>> RraaThresholdsTable;
 
 /**
- * \brief Robust Rate Adaptation Algorithm
- * \ingroup wifi
+ * @brief Robust Rate Adaptation Algorithm
+ * @ingroup wifi
  *
  * This is an implementation of RRAA as described in
  * "Robust rate adaptation for 802.11 wireless networks"
@@ -44,12 +45,12 @@ typedef std::vector<std::pair<WifiRraaThresholds, WifiMode>> RraaThresholdsTable
  * exit if the user tries to configure this RAA with a Wi-Fi MAC
  * that supports 802.11n or higher.
  */
-class RraaWifiManager : public WifiRemoteStationManager
+class WIFI_EXPORT RraaWifiManager : public WifiRemoteStationManager
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -83,80 +84,80 @@ class RraaWifiManager : public WifiRemoteStationManager
 
     /**
      * Check for initializations.
-     * \param station The remote station.
+     * @param station The remote station.
      */
     void CheckInit(RraaWifiRemoteStation* station);
     /**
      * Return the index for the maximum transmission rate for
      * the given station.
      *
-     * \param station the remote station
+     * @param station the remote station
      *
-     * \return the index for the maximum transmission rate
+     * @return the index for the maximum transmission rate
      */
     uint8_t GetMaxRate(RraaWifiRemoteStation* station) const;
     /**
      * Check if the counter should be reset.
      *
-     * \param station the remote station
+     * @param station the remote station
      */
     void CheckTimeout(RraaWifiRemoteStation* station);
     /**
      * Find an appropriate rate for the given station, using
      * a basic algorithm.
      *
-     * \param station the remote station
+     * @param station the remote station
      */
     void RunBasicAlgorithm(RraaWifiRemoteStation* station);
     /**
      * Activate the use of RTS for the given station if the conditions are met.
      *
-     * \param station the remote station
+     * @param station the remote station
      */
     void ARts(RraaWifiRemoteStation* station);
     /**
      * Reset the counters of the given station.
      *
-     * \param station the remote station
+     * @param station the remote station
      */
     void ResetCountersBasic(RraaWifiRemoteStation* station);
     /**
      * Initialize the thresholds internal list for the given station.
      *
-     * \param station the remote station
+     * @param station the remote station
      */
     void InitThresholds(RraaWifiRemoteStation* station);
     /**
      * Get the thresholds for the given station and mode.
      *
-     * \param station the remote station
-     * \param mode the WifiMode
+     * @param station the remote station
+     * @param mode the WifiMode
      *
-     * \return the RRAA thresholds
+     * @return the RRAA thresholds
      */
     WifiRraaThresholds GetThresholds(RraaWifiRemoteStation* station, WifiMode mode) const;
     /**
      * Get the thresholds for the given station and mode index.
      *
-     * \param station the remote station
-     * \param index the mode index in the supported rates
+     * @param station the remote station
+     * @param index the mode index in the supported rates
      *
-     * \return the RRAA thresholds
+     * @return the RRAA thresholds
      */
     WifiRraaThresholds GetThresholds(RraaWifiRemoteStation* station, uint8_t index) const;
     /**
      * Get the estimated TxTime of a packet with a given mode.
      *
-     * \param mode the WifiMode
+     * @param mode the WifiMode
      *
-     * \return the estimated TX time
+     * @return the estimated TX time
      */
     Time GetCalcTxTime(WifiMode mode) const;
     /**
      * Add transmission time for the given mode to an internal list.
      *
-     * \param mode the WifiMode
-     * \param t transmission time
+     * @param mode the WifiMode
+     * @param t transmission time
      */
     void AddCalcTxTime(WifiMode mode, Time t);
     /**

@@ -8,6 +8,7 @@
 #ifndef NR_PHY_TAG_H
 #define NR_PHY_TAG_H
 
+#include "ns3/nr-export.h"
 #include "ns3/tag.h"
 
 namespace ns3
@@ -16,12 +17,12 @@ namespace ns3
 /**
  * Tag used to define PHY parameters
  */
-class NrPhyTag : public Tag
+class NR_EXPORT NrPhyTag : public Tag
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     TypeId GetInstanceTypeId() const override;
@@ -33,7 +34,7 @@ class NrPhyTag : public Tag
 
     /**
      * Create a NrPhyTag with the given RNTI and LC id
-     * \param cellId the cell ID
+     * @param cellId the cell ID
      */
     NrPhyTag(uint16_t cellId);
 
@@ -47,7 +48,7 @@ class NrPhyTag : public Tag
     /**
      * Get cell ID
      *
-     * \returns cell ID
+     * @returns cell ID
      */
     uint16_t GetCellId() const;
 

@@ -11,11 +11,13 @@
 #include "nr-handover-management-sap.h"
 #include "nr-rrc-sap.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 /**
- * \brief Handover algorithm implementation which simply does nothing.
+ * @brief Handover algorithm implementation which simply does nothing.
  *
  * Selecting this handover algorithm is equivalent to disabling automatic
  * triggering of handover. This is the default choice.
@@ -23,7 +25,7 @@ namespace ns3
  * To enable automatic handover, please select another handover algorithm, i.e.,
  * another child class of NrHandoverAlgorithm.
  */
-class NrNoOpHandoverAlgorithm : public NrHandoverAlgorithm
+class NR_EXPORT NrNoOpHandoverAlgorithm : public NrHandoverAlgorithm
 {
   public:
     /// Creates a No-op handover algorithm instance.
@@ -32,8 +34,8 @@ class NrNoOpHandoverAlgorithm : public NrHandoverAlgorithm
     ~NrNoOpHandoverAlgorithm() override;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -53,9 +55,9 @@ class NrNoOpHandoverAlgorithm : public NrHandoverAlgorithm
     void DoReportUeMeas(uint16_t rnti, NrRrcSap::MeasResults measResults) override;
 
   private:
-    /// Interface to the eNodeB RRC instance.
+    /// Interface to the gNB RRC instance.
     NrHandoverManagementSapUser* m_handoverManagementSapUser;
-    /// Receive API calls from the eNodeB RRC instance.
+    /// Receive API calls from the gNB RRC instance.
     NrHandoverManagementSapProvider* m_handoverManagementSapProvider;
 
 }; // end of class NrNoOpHandoverAlgorithm

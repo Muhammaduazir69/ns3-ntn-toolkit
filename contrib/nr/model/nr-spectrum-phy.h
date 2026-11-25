@@ -6,17 +6,19 @@
 #define NR_SPECTRUM_PHY_H
 
 #include "beam-manager.h"
+#include "nr-chunk-processor.h"
 #include "nr-control-messages.h"
 #include "nr-harq-phy.h"
 #include "nr-interference.h"
 #include "nr-phy.h"
 #include "nr-spectrum-signal-parameters.h"
 
-#include <ns3/lte-chunk-processor.h>
-#include <ns3/net-device.h>
-#include <ns3/random-variable-stream.h>
-#include <ns3/spectrum-channel.h>
-#include <ns3/traced-callback.h>
+#include "ns3/matrix-based-channel-model.h"
+#include "ns3/net-device.h"
+#include "ns3/nr-export.h"
+#include "ns3/random-variable-stream.h"
+#include "ns3/spectrum-channel.h"
+#include "ns3/traced-callback.h"
 
 #include <functional>
 
@@ -26,13 +28,13 @@ namespace ns3
 class UniformPlanarArray;
 
 /**
- * \ingroup ue-phy
- * \ingroup gnb-phy
- * \ingroup spectrum
+ * @ingroup ue-phy
+ * @ingroup gnb-phy
+ * @ingroup spectrum
  *
- * \brief Interface between the physical layer and the channel
+ * @brief Interface between the physical layer and the channel
  *
- * \section spectrum_phy_general General information
+ * @section spectrum_phy_general General information
  *
  * NrSpectrumPhy models some of the basic
  * physical layer functionalities such as transmitting CTRL or DATA,
@@ -60,55 +62,60 @@ class UniformPlanarArray;
  * information for the HARQ feedback generation, which is then forwarded
  * to NrPhy.
  *
- * \section spectrum_phy_configuration Configuration
+ * @section spectrum_phy_configuration Configuration
  *
  * The user can configure the class using the method NrHelper::SetGnbSpectrumAttribute(),
  * or NrHelper::SetUeSpectrumAttribute(), depending on the type of user
  * you want to configure, or by directly calling `SetAttribute` on the pointer.
  * The list of  attributes is reported below, in the Attributes section.
  */
-class NrSpectrumPhy : public SpectrumPhy
+class NR_EXPORT NrSpectrumPhy : public SpectrumPhy
 {
+    friend class NrSpectrumPhyHarqFlushTestCase;
+    friend class NrHarqFlushBlerTestCase;
+    friend class NrSpectrumPhyChannelMatrixTestCase;
+    friend class NrSpectrumPhyTbSinrTestCase;
+
   public:
     /**
-     * \brief Get the object TypeId
-     * \return the object TypeId
+     * @brief Get the object TypeId
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief NrSpectrumPhy constructor
+     * @brief NrSpectrumPhy constructor
      */
     NrSpectrumPhy();
 
     /**
-     * \brief ~NrSpectrumPhy
+     * @brief ~NrSpectrumPhy
      */
     ~NrSpectrumPhy() override;
 
     /**
-     * \brief Enum that defines possible states of the spectrum phy
+     * @brief Enum that defines possible states of the spectrum phy
      */
     enum State
     {
         IDLE = 0,   //!< IDLE state (no action in progress)
         TX,         //!< Transmitting state (data or ctrl)
         RX_DATA,    //!< Receiving data
-        RX_DL_CTRL, //!< receiving DL CTRL
+        RX_DL_CTRL, //!< Receiving DL CTRL
         RX_UL_CTRL, //!< Receiving UL CTRL
         RX_UL_SRS,  //!< Receiving SRS
         CCA_BUSY    //!< BUSY state (channel occupied by another entity)
     };
 
-    // callbacks typefefs and setters
+    // callbacks typedefs and setters
     /**
-     * \brief This callback method type is used to notify that DATA is received
+     * @brief This callback method type is used to notify that DATA is received
      */
     typedef Callback<void, const Ptr<Packet>&> NrPhyRxDataEndOkCallback;
     /**
-     * \brief This callback method type is used to notify that CTRL is received
+     * @brief This callback method type is used to notify that CTRL is received
      */
-    typedef std::function<void(const std::list<Ptr<NrControlMessage>>&, uint8_t)>
+    typedef std::function<void(const std::list<Ptr<NrControlMessage>>&, uint32_t)>
         NrPhyRxCtrlEndOkCallback;
 
     /**
@@ -129,13 +136,13 @@ class NrSpectrumPhy : public SpectrumPhy
     typedef Callback<void, const UlHarqInfo&> NrPhyUlHarqFeedbackCallback;
 
     /**
-     * \brief Sets the callback to be called when DATA is received successfully
-     * \param c the callback function
+     * @brief Sets the callback to be called when DATA is received successfully
+     * @param c the callback function
      */
     void SetPhyRxDataEndOkCallback(const NrPhyRxDataEndOkCallback& c);
     /**
-     * \brief Sets the callback to be called when CTRL is received successfully
-     * \param c the callback function
+     * @brief Sets the callback to be called when CTRL is received successfully
+     * @param c the callback function
      */
     void SetPhyRxCtrlEndOkCallback(const NrPhyRxCtrlEndOkCallback& c);
 
@@ -150,7 +157,7 @@ class NrSpectrumPhy : public SpectrumPhy
     /// ntn-patch 19: SSB index value meaning "the cell does not sweep SSB beams".
     static constexpr uint8_t NO_SSB_INDEX = 255;
     /**
-     * \brief ntn-patch 19: SSB index (TS 38.213 4.1) carried by the DL control
+     * @brief ntn-patch 19: SSB index (TS 38.213 4.1) carried by the DL control
      * frames this PHY transmits from now on; NO_SSB_INDEX (default) for none.
      */
     void SetTxSsbIndex(uint8_t ssbIndex)
@@ -158,7 +165,7 @@ class NrSpectrumPhy : public SpectrumPhy
         m_txSsbIndex = ssbIndex;
     }
     /**
-     * \brief ntn-patch 19: SSB index of the last PSS this PHY received,
+     * @brief ntn-patch 19: SSB index of the last PSS this PHY received,
      * valid inside the PSS callback; NO_SSB_INDEX when the cell does not sweep.
      */
     uint8_t GetLastRxSsbIndex() const
@@ -167,11 +174,11 @@ class NrSpectrumPhy : public SpectrumPhy
     }
 
     /**
-     * \brief Sets the callback to be called when DL HARQ feedback is generated
+     * @brief Sets the callback to be called when DL HARQ feedback is generated
      */
     void SetPhyDlHarqFeedbackCallback(const NrPhyDlHarqFeedbackCallback& c);
     /**
-     * \brief Sets the callback to be called when UL HARQ feedback is generated
+     * @brief Sets the callback to be called when UL HARQ feedback is generated
      */
     void SetPhyUlHarqFeedbackCallback(const NrPhyUlHarqFeedbackCallback& c);
 
@@ -183,74 +190,154 @@ class NrSpectrumPhy : public SpectrumPhy
     void SetChannel(Ptr<SpectrumChannel> c) override;
     Ptr<const SpectrumModel> GetRxSpectrumModel() const override;
     /*
-     * \brief Sets the beam manager of this spectrum phy, and that beam manager
-     * is responsible of the antena array of this spectrum phy
+     * @brief Sets the beam manager of this spectrum phy, and that beam manager
+     * is responsible for the antenna array of this spectrum phy
      */
     void SetBeamManager(Ptr<BeamManager> b);
 
+    /// @brief Adds the beam manager of corresponds spectrum phy of antenna panel, and that beam
+    /// manager is responsible of the antenna array of this spectrum phy
+    /// @param b Beam manager
+    void AddBeamManager(Ptr<BeamManager> b);
+
+    /// @brief Either initialize the bearing angles of panels in install step or update all bearing
+    /// angles based on proper method, if no parameter pass it would get first antenna bearing angle
+    /// and set other panels based on proper approach
+    void ConfigPanelsBearingAngles();
+
+    /// @brief Either initialize the bearing angles of panels in install step or update all bearing
+    /// angles based on proper method, if no parameter pass it would get first antenna bearing angle
+    /// and set other panels based on proper approach
+    /// @param firstPanelBearingAngleRad Bearing angle of first panel
+    void ConfigPanelsBearingAngles(double firstPanelBearingAngleRad);
+
+    /// @brief  initialize the bearing angles of panels in to cover 360 Degree
+    /// @param firstPanelBearingAngleRad Bearing angle of first panel
+    /// @param panelIndex Index of corresponding panel
+    /// @return Bearing angle for corresponding set for panel
+    double CircularBearingAnglesForPanels(double firstPanelBearingAngleRad,
+                                          uint8_t panelIndex) const;
+
     /*
-     * \brief Gets the beam manager of this spectrum phy.
+     * @brief Gets the beam manager of this spectrum phy.
      */
     Ptr<BeamManager> GetBeamManager();
 
     /*
-     * \brief Sets the error model of this spectrum phy, overriding the default
+     * @brief Sets the error model of this spectrum phy, overriding the default
      * that is created by the attribute NrSpectrumPhy::ErrorModelType
      *
-     * \param em The error model
+     * @param em The error model
      */
     void SetErrorModel(Ptr<NrErrorModel> em);
 
     /*
-     * \brief Gets a pointer to the error model (if instantiated)
+     * @brief Gets a pointer to the error model (if instantiated)
+     * @return Pointer to the error model
      */
     Ptr<NrErrorModel> GetErrorModel() const;
 
+    /*
+     * @brief Gets a pointer to the NrPhy instance
+     * @return Pointer to the NrPhy instance
+     */
+    Ptr<NrPhy> GetNrPhy() const;
+
+    /*
+     * @brief Get the time of the most recent start of reception
+     * @return The time value of the most recent start of reception
+     */
+    Time GetFirstRxStart() const;
+
+    /*
+     * @brief Set the time of the most recent start of reception
+     * @param startTime The time value of the most recent start of reception
+     */
+    void SetFirstRxStart(Time startTime);
+
+    /*
+     * @brief Get the duration of the most recent start of reception
+     * @return The time value of the duration of the most recent start of reception
+     */
+    Time GetFirstRxDuration() const;
+
+    /*
+     * @brief Set the duration of the most recent start of reception
+     * @param duration The time value of the duration of the most recent start of reception
+     */
+    void SetFirstRxDuration(Time duration);
+
     /**
-     * \brief Inherited from SpectrumPhy
-     * Note: Implements GetAntenna function from SpectrumPhy.
-     * \return Antenna of this NrSpectrumPhy
+     * @brief Inherited from SpectrumPhy
+     * Note: Implements GetRxAntenna function from SpectrumPhy.
+     * @return Active antenna panel of this NrSpectrumPhy
      */
     Ptr<Object> GetAntenna() const override;
 
+    /**
+     * @brief Interface enable to access all panels using proper index
+     * @return index's Antenna panel of this NrSpectrumPhy
+     */
+    Ptr<Object> GetPanelByIndex(const uint8_t index) const;
+
+    /**
+     * @brief Set the number of panels in this NrSpectrumPhy
+     */
+    void SetNumPanels(const uint8_t numPanel);
+
+    /**
+     * @brief Get the number of panels in this NrSpectrumPhy
+     * @return The number Antenna panel of this NrSpectrumPhy
+     */
+    uint8_t GetNumPanels() const;
     /*
-     * \brief Used to enable generation and triggering of DL DATA pathloss trace
+     * @brief Used to enable generation and triggering of DL DATA pathloss trace
      */
     void EnableDlDataPathlossTrace();
 
     /*
-     * \brief Used to enable generation and triggering of DL CTRL pahtloss trace
+     * @brief Used to enable generation and triggering of DL CTRL pahtloss trace
      */
     void EnableDlCtrlPathlossTrace();
 
     /**
-     * \brief Inherited from SpectrumPhy. When this function is called
+     * @brief Inherited from SpectrumPhy. When this function is called
      * this spectrum phy starts receiving a signal from its spectrum channel.
-     * \param params SpectrumSignalParameters object that will be used to process this signal
+     * @param params SpectrumSignalParameters object that will be used to process this signal
      */
     void StartRx(Ptr<SpectrumSignalParameters> params) override;
 
+    /**
+     * Set RNTI of this spectrum phy
+     * @param rnti RNTI to be set
+     */
     void SetRnti(uint16_t rnti);
+
+    /**
+     * Retrieve RNTI of this spectrum phy
+     * @return RNTI
+     */
+    uint16_t GetRnti() const;
 
     // Attributes setters
     /**
-     * \brief Set clear channel assessment (CCA) threshold
-     * \param thresholdDBm - CCA threshold in dBms
+     * @brief Set clear channel assessment (CCA) threshold
+     * @param thresholdDBm - CCA threshold in dBms
      */
     void SetCcaMode1Threshold(double thresholdDBm);
     /**
      * Returns clear channel assessment (CCA) threshold
-     * \return CCA threshold in dBms
+     * @return CCA threshold in dBms
      */
     double GetCcaMode1Threshold() const;
     /**
-     * \brief Sets whether to perform in unclicensed mode in which the channel monitoring is enabled
-     * \param unlicensedMode if true the unlicensed mode is enabled
+     * @brief Sets whether to perform in unlicensed mode in which the channel monitoring is enabled
+     * @param unlicensedMode if true the unlicensed mode is enabled
      */
     void SetUnlicensedMode(bool unlicensedMode);
     /**
-     * \brief Enables or disabled data error model
-     * \param dataErrorModelEnabled boolean saying whether the data error model should be enabled
+     * @brief Enables or disabled data error model
+     * @param dataErrorModelEnabled boolean saying whether the data error model should be enabled
      */
     void SetDataErrorModelEnabled(bool dataErrorModelEnabled);
 
@@ -267,33 +354,33 @@ class NrSpectrumPhy : public SpectrumPhy
      */
     bool IsDataErrorModelEnabled() const;
     /**
-     * \brief Sets the error model type
+     * @brief Sets the error model type
      */
     void SetErrorModelType(TypeId errorModelType);
 
     // other methods
     /**
-     * \brief Sets noise power spectral density to be used by this device
-     * \param noisePsd SpectrumValue object holding noise PSD
+     * @brief Sets noise power spectral density to be used by this device
+     * @param noisePsd SpectrumValue object holding noise PSD
      */
-    void SetNoisePowerSpectralDensity(const Ptr<const SpectrumValue>& noisePsd);
+    virtual void SetNoisePowerSpectralDensity(const Ptr<const SpectrumValue>& noisePsd);
     /**
-     * \brief Sets transmit power spectral density
-     * \param txPsd transmit power spectral density to be used for the upcoming transmissions by
+     * @brief Sets transmit power spectral density
+     * @param txPsd transmit power spectral density to be used for the upcoming transmissions by
      * this spectrum phy
      */
     void SetTxPowerSpectralDensity(const Ptr<SpectrumValue>& txPsd);
     /*
-     * \brief Returns the TX PSD
-     * \return the TX PSD
+     * @brief Returns a const pointer to the TX PSD
+     * @return the TX PSD
      */
     Ptr<const SpectrumValue> GetTxPowerSpectralDensity();
     /**
-     * \brief Starts transmission of data frames on connected spectrum channel object
-     * \param pb packet burst to be transmitted
-     * \param ctrlMsgList control message list
-     * \param dci downlink control information
-     * \param duration the duration of transmission
+     * @brief Starts transmission of data frames on connected spectrum channel object
+     * @param pb packet burst to be transmitted
+     * @param ctrlMsgList control message list
+     * @param dci downlink control information
+     * @param duration the duration of transmission
      */
     void StartTxDataFrames(const Ptr<PacketBurst>& pb,
                            const std::list<Ptr<NrControlMessage>>& ctrlMsgList,
@@ -301,111 +388,123 @@ class NrSpectrumPhy : public SpectrumPhy
                            const Time& duration);
 
     /**
-     * \brief Return true if the current Phy State is TX
+     * @brief Return true if the current Phy State is TX
      */
     bool IsTransmitting();
 
     /**
-     * \brief Starts transmission of DL CTRL
-     * \param duration the duration of this transmission
+     * @brief Starts transmission of DL CTRL
+     * @param duration the duration of this transmission
      */
     void StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ctrlMsgList,
                                 const Time& duration); // control frames from Gnb to ue
+
     /**
-     * \brief Start transmission of UL CTRL
-     * \param ctrlMsgList the list of control messages to be transmitted in UL
-     * \param duration the duration of the CTRL messages transmission
+     * Start transmission of CSI-RS
+     * @param rnti the rnti of the user towards which is directed the CSI-RS
+     * @param beamId the ID of the beam that is used to transmit this CSI-RS
+     */
+    void StartTxCsiRs(uint16_t rnti, uint16_t beamId);
+
+    /**
+     * @brief Start transmission of UL CTRL
+     * @param ctrlMsgList the list of control messages to be transmitted in UL
+     * @param duration the duration of the CTRL messages transmission
      */
     void StartTxUlControlFrames(const std::list<Ptr<NrControlMessage>>& ctrlMsgList,
                                 const Time& duration);
     /**
-     * \brief Adds the chunk processor that will process the power for the data
-     * \param p the chunk processor
+     * @brief Adds the chunk processor that will process the power for the data
+     * @param p the chunk processor
      */
     void AddDataPowerChunkProcessor(const Ptr<NrChunkProcessor>& p);
     /**
-     * \brief Adds the chunk processor that will process the interference
-     * \param p the chunk processor
+     * @brief Adds the chunk processor that will process the interference
+     * @param p the chunk processor
      */
     void AddDataSinrChunkProcessor(const Ptr<NrChunkProcessor>& p);
 
     /*
-     * \brief Adds the chunk processort that will process the interference for SRS signals at gNBs
-     * \param p the chunk processor
+     * @brief Adds the chunk processor that will process the interference for SRS signals at gNBs
+     * @param p the chunk processor
      */
     void AddSrsSinrChunkProcessor(const Ptr<NrChunkProcessor>& p);
 
     /**
-     * \brief Adds the chunk processor that will process the received power
-     * \param p the chunk processor
+     * @brief Adds the chunk processor that will process the received power
+     * @param p the chunk processor
      */
     void AddRsPowerChunkProcessor(const Ptr<NrChunkProcessor>& p);
 
     /**
-     * \brief Adds the chunk processor that will process the received power
-     * \param p the chunk processor
+     * @brief Adds the chunk processor that will process the received power
+     * @param p the chunk processor
      */
     void AddDlCtrlSinrChunkProcessor(const Ptr<NrChunkProcessor>& p);
     /**
-     * \brief SpectrumPhy that will be called when the SINR for the received
+     * @brief SpectrumPhy that will be called when the SINR for the received
      * DATA is being calculated by the interference object over DATA chunk
      * processor
-     * \param sinr the resulting SINR spectrum value
+     * @param sinr the resulting SINR spectrum value
      */
     void UpdateSinrPerceived(const SpectrumValue& sinr);
 
     /**
-     * \brief Called when DlCtrlSinr is fired
-     * \param sinr the sinr PSD
+     * @brief Called when DlCtrlSinr is fired
+     * @param sinr the sinr PSD
      */
     void ReportDlCtrlSinr(const SpectrumValue& sinr);
 
     /**
-     * \brief SpectrumPhy that will be called when the SINR for the received
+     * @brief SpectrumPhy that will be called when the SINR for the received
      * SRS at gNB is being calculated by the interference object over SRS chunk
      * processor
-     * \param srsSinr the resulting SRS SINR spectrum value
+     * @param srsSinr the resulting SRS SINR spectrum value
      */
     void UpdateSrsSinrPerceived(const SpectrumValue& srsSinr);
     /**
-     * \brief SpectrumPhy that will be called when the SNR for the received
+     * @brief SpectrumPhy that will be called when the SNR for the received
      * SRS at gNB is being calculated
-     * \param srsSnr the resulting SRS SNR
+     * @param srsSnr the resulting SRS SNR
      */
     void UpdateSrsSnrPerceived(const double srsSnr);
     /**
-     * \brief Install HARQ phy module of this spectrum phy
-     * \param harq Harq module of this spectrum phy
-     */
-    void InstallHarqPhyModule(const Ptr<NrHarqPhy>& harq);
-    /**
-     * \brief Set NrPhy of this spectrum phy in order to be able
+     * @brief Set NrPhy of this spectrum phy in order to be able
      * to obtain information such as cellId, bwpId, etc.
      */
     void InstallPhy(const Ptr<NrPhy>& phyModel);
 
     Ptr<NrPhy> GetPhy() const;
     /**
-     * \brief Sets the antenna of this NrSpectrumPhy instance,
+     * @brief Sets the antenna of this NrSpectrumPhy instance,
      * currently in NR module it is expected to be of type UniformPlannarArray
-     * \param antenna the antenna to be set to this NrSpectrumPhy instance
+     * @param antenna the antenna to be set to this NrSpectrumPhy instance
      */
     void SetAntenna(Ptr<Object> antenna);
+
     /**
-     * \brief Returns spectrum channel object to which is attached this spectrum phy instance
+     * @brief Add the antenna panel to this NrSpectrumPhy,
+     * currently in NR module it is expected to be of type UniformPlannarArray
+     * @param antenna the antenna panel to be add to this NrSpectrumPhy instance
+     */
+    void AddPanel(const Ptr<Object> antenna);
+
+    /**
+     * @brief Set the active antenna panel to this NrSpectrumPhy,
+     * @param panelIndex Index of active panel of this NrSpectrumPhy
+     */
+    void SetActivePanel(const uint8_t panelIndex);
+    /**
+     * @brief Returns spectrum channel object to which is attached this spectrum phy instance
      */
     Ptr<SpectrumChannel> GetSpectrumChannel() const;
     /**
-     * \return HARQ module of this spectrum phy
-     */
-    Ptr<NrHarqPhy> GetHarqPhyModule() const;
-    /**
-     * \return NrInterference instance of this spectrum phy
+     * @return NrInterference instance of this spectrum phy
      */
     Ptr<NrInterference> GetNrInterference() const;
     /**
-     * \brief Instruct the Spectrum Model of a incoming transmission.
-     * \param expectedTb Expected transport block
+     * @brief Instruct the Spectrum Model of a incoming transmission.
+     * @param expectedTb Expected transport block
      */
     void AddExpectedTb(ExpectedTb expectedTb);
 
@@ -414,19 +513,19 @@ class NrSpectrumPhy : public SpectrumPhy
      * used by this model.  Return the number of streams (possibly zero) that
      * have been assigned.
      *
-     * \param stream first stream index to use
-     * \return the number of stream indices assigned by this model
+     * @param stream first stream index to use
+     * @return the number of stream indices assigned by this model
      */
     int64_t AssignStreams(int64_t stream);
 
     /**
-     * \brief TracedCallback signature for RB statistics
+     * @brief TracedCallback signature for RB statistics
      *
-     * \param [in] sfnSf SfnSf
-     * \param [in] v rxPsd values
-     * \param [in] t duration of the reception
-     * \param [in] bwpId BWP ID
-     * \param [in] cellId Cell ID
+     * @param [in] sfnSf SfnSf
+     * @param [in] v rxPsd values
+     * @param [in] t duration of the reception
+     * @param [in] bwpId BWP ID
+     * @param [in] cellId Cell ID
      */
     typedef void (*RxDataTracedCallback)(const SfnSf& sfnSf,
                                          Ptr<const SpectrumValue> v,
@@ -435,45 +534,51 @@ class NrSpectrumPhy : public SpectrumPhy
                                          uint16_t cellId);
 
     void AddExpectedSrsRnti(uint16_t rnti);
-
+    /**
+     * @brief Keeps track of when DL CTRL should finish. Needed for CSI-RS and
+     * CSI-IM implementation to be able to schedule CSI-IM just at the beginning
+     * of the PDSCH.
+     * @param ctrlEndTime Expected time when DL CTRL will end
+     */
+    void AddExpectedDlCtrlEnd(Time ctrlEndTime);
     /*
-     * \brief SRS SINR callback whose input parameters are cellid, rnti, SRS SINR value
+     * @brief SRS SINR callback whose input parameters are cellid, rnti, SRS SINR value
      */
     typedef Callback<void, uint16_t, uint16_t, double> SrsSinrReportCallback;
     typedef Callback<void, uint16_t, uint16_t, double> SrsSnrReportCallback;
 
     /**
-     * \brief It adds callback to the list of callbacks that will be notified
+     * @brief It adds callback to the list of callbacks that will be notified
      * once SRS is being received
-     * \param callback callback to be added to the list of callbacks
+     * @param callback callback to be added to the list of callbacks
      */
     void AddSrsSinrReportCallback(SrsSinrReportCallback callback);
     /**
-     * \brief It adds callback to the list of callbacks that will be notified
+     * @brief It adds callback to the list of callbacks that will be notified
      * once SRS is being received
-     * \param callback callback to be added to the list of callbacks
+     * @param callback callback to be added to the list of callbacks
      */
     void AddSrsSnrReportCallback(SrsSnrReportCallback callback);
     /**
-     * \brief Set whether this spectrum PHY belongs to Gnb or UE
+     * @brief Set whether this spectrum PHY belongs to Gnb or UE
      * TODO NrHelper should be declared as friend and this function should be private
-     * \param isGnb whether the spectrum PHY belongs to Gnb or UE
+     * @param isGnb whether the spectrum PHY belongs to Gnb or UE
      */
     void SetIsGnb(bool isGnb);
     /**
-     * \return the cell id
+     * @return the cell id
      */
     uint16_t GetCellId() const;
     /**
-     * \return the bwp id
+     * @return the bwp id
      */
     uint16_t GetBwpId() const;
     /**
-     * \param [in] sfnSf SfnSf
-     * \param [in] cellId
-     * \param [in] bwpId
-     * \param [in] imsi
-     * \param [in] snr
+     * @param [in] sfnSf SfnSf
+     * @param [in] cellId
+     * @param [in] bwpId
+     * @param [in] imsi
+     * @param [in] snr
      */
     typedef void (*DataSnrTracedCallback)(const SfnSf& sfnSf,
                                           const uint16_t cellId,
@@ -481,25 +586,108 @@ class NrSpectrumPhy : public SpectrumPhy
                                           const uint64_t imsi,
                                           const double snr);
     /**
-     * \brief Report wideband perceived downlink data SNR
+     * @brief Report wideband perceived downlink data SNR
      *
-     * \param dlDataSnr the downlink data SNR
+     * @param dlDataSnr the downlink data SNR
      */
     void ReportWbDlDataSnrPerceived(const double dlDataSnr);
 
+    /**
+     * @brief Connect DATA chunk processor with the corresponding DATA interference object
+     * @param p the DATA chunk processor
+     */
     void AddDataMimoChunkProcessor(const Ptr<NrMimoChunkProcessor>& p);
 
-    /// \brief Store the SINR chunks for all received signals at end of interference calculations
-    /// \param sinr The vector of all SINR values of receive signals. A new chunk is generated for
+    /**
+     * @brief Connect CSI-RS chunk processor with the corresponding CSI-RS interference object
+     * @param p the CSI-RS chunk processor
+     */
+    void AddCsiRsMimoChunkProcessor(const Ptr<NrMimoChunkProcessor>& p);
+
+    /**
+     * @brief Connect CSI-IM chunk processor with the corresponding CSI-IM interference object
+     * @param p the CSI-IM chunk processor
+     */
+    void AddCsiImMimoChunkProcessor(const Ptr<NrMimoChunkProcessor>& p);
+
+    /// @brief Store the SINR chunks for all received signals at end of interference calculations
+    /// @param sinr The vector of all SINR values of receive signals. A new chunk is generated for
     /// each different receive signal (for example for each UL reception of a signal from a
     /// different UE) and at each time instant where the interference changes.
     void UpdateMimoSinrPerceived(const std::vector<MimoSinrChunk>& sinr);
+    /**
+     * @return true if this class is inside an gnb
+     */
+    bool IsGnb() const;
 
   protected:
     /**
-     * \brief DoDispose method inherited from Object
+     * @brief DoDispose method inherited from Object
      */
     void DoDispose() override;
+
+    /**
+     * @brief Get current state
+     * @return current state
+     */
+    State GetState() const;
+
+    /**
+     * @brief Get pointer to SpectrumChannel
+     * @return Pointer to spectrum channel
+     */
+    Ptr<SpectrumChannel> GetChannel() const;
+
+    /**
+     * @brief Get pointer to error model random variable
+     * @return Pointer to error model random variable
+     */
+    Ptr<UniformRandomVariable> GetErrorModelRv() const;
+
+    /**
+     * @brief Update the state of the spectrum phy. The states are:
+     *  IDLE, TX, RX_DATA, RX_DL_CTRL, RX_UL_CTRL, CCA_BUSY.
+     * @param newState the new state
+     * @param duration how much time the spectrum phy will be in the new state
+     */
+    void ChangeState(State newState, Time duration);
+
+    /**
+     * @brief Function that is called when the transmission has ended. It is
+     * used to update spectrum phy state.
+     */
+    void EndTx();
+
+    /**
+     * @brief Increase the counter of active transmissions
+     */
+    void IncrementActiveTransmissions();
+
+    /**
+     * @brief call RxDataTrace from subclass
+     * @param sfnSf SfnSf
+     * @param spectrumValue rxPsd values
+     * @param duration duration of the reception
+     * @param bwpId BWP ID
+     * @param cellId Cell ID
+     */
+    void NotifyRxDataTrace(const SfnSf& sfn,
+                           Ptr<const SpectrumValue> spectrumValue,
+                           const Time& duration,
+                           uint16_t bwpId,
+                           uint16_t cellId) const;
+
+    /**
+     * @brief call TxCtrlTrace from subclass
+     * @param duration Duration that the transmitter will occupy channel with control transmission
+     */
+    void NotifyTxCtrlTrace(Time duration) const;
+
+    /**
+     * @brief call TxDataTrace from subclass
+     * @param duration Duration that the transmitter will occupy channel with data transmission
+     */
+    void NotifyTxDataTrace(Time duration) const;
 
   public:
     /**
@@ -541,6 +729,23 @@ class NrSpectrumPhy : public SpectrumPhy
      */
     uint64_t GetDlCtrlDropCount() const { return m_dlCtrlDroppedHalfDuplex; }
 
+    /**
+     * NTN patch: number of uplink-control receptions a gNB dropped because it was transmitting
+     * on the carrier when they arrived (TDD half-duplex; over NTN without Timing Advance the
+     * arrival is shifted by the round trip).
+     *
+     * @return the count
+     */
+    uint64_t GetUlCtrlRxDropCount() const { return m_ulCtrlRxDroppedHalfDuplex; }
+
+    /**
+     * NTN patch: number of downlink-control receptions a UE dropped because it was transmitting
+     * when they arrived (half-duplex; over NTN the timing drifts without Timing Advance).
+     *
+     * @return the count
+     */
+    uint64_t GetDlCtrlRxDropCount() const { return m_dlCtrlRxDroppedHalfDuplex; }
+
   private:
     /// NTN patch: half-duplex uplink-control drops, see GetUlCtrlDropCount().
     uint64_t m_ulCtrlDroppedHalfDuplex{0};
@@ -550,80 +755,88 @@ class NrSpectrumPhy : public SpectrumPhy
     uint64_t m_srsDroppedHalfDuplex{0};
     /// NTN patch: downlink-control drops, see GetDlCtrlDropCount().
     uint64_t m_dlCtrlDroppedHalfDuplex{0};
+    /// NTN patch: uplink-control receptions dropped at a transmitting gNB, see GetUlCtrlRxDropCount().
+    uint64_t m_ulCtrlRxDroppedHalfDuplex{0};
+    /// NTN patch: downlink-control receptions dropped at a transmitting UE, see GetDlCtrlRxDropCount().
+    uint64_t m_dlCtrlRxDroppedHalfDuplex{0};
 
     std::vector<MimoSinrChunk>
         m_mimoSinrPerceived; //!< received SINR values during data reception for TB decoding, to
                              //!< replace m_sinrPerceived for all (MIMO and SISO) receivers
 
     /**
-     * \brief Function is called when what is being received is holding data
-     * \para params spectrum parameters that are holding information regarding data frame
+     * @brief Function is called when what is being received is holding data
+     * @para params spectrum parameters that are holding information regarding data frame
      */
     void StartRxData(const Ptr<NrSpectrumSignalParametersDataFrame>& params);
     /**
-     * \brief Function that is called when is being received DL CTRL
-     * \param params holds DL CTRL frame signal parameters structure
+     * @brief Function that is called when is being received DL CTRL
+     * @param params holds DL CTRL frame signal parameters structure
      */
     void StartRxDlCtrl(const Ptr<NrSpectrumSignalParametersDlCtrlFrame>& params);
     /**
-     * \brief Function that is called when is being received UL CTRL
-     * \param params holds UL CTRL frame signal parameters structure
+     * @brief Function that is called when is being received UL CTRL
+     * @param params holds UL CTRL frame signal parameters structure
      */
     void StartRxUlCtrl(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& params);
     /**
-     * \brief Function that is called when is being received SRS
-     * \param param should hold UL CTRL frame signal parameters containing only
+     * @brief Function that is called when is being received CSI-RS signal
+     * @param csiRsParams holds CSI-RS signal parameters
+     */
+    void StartRxCsiRs(const Ptr<NrSpectrumSignalParametersCsiRs>& csiRsParams);
+    /**
+     * @brief Function that is called when is being received SRS
+     * @param param should hold UL CTRL frame signal parameters containing only
      * one CTRL message which should be of type SRS
      */
     void StartRxSrs(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& params);
     /**
-     * \return true if this class is inside an Gnb/gnb
+     * @brief Checks if CSI-IM measurement is needed, if not, then it checks if needed to
+     * call directly the generation of CSI feedback
+     * @param csiRsParams CSI-RS parameters that will be reused for CSI-IM measurement
      */
-    bool IsGnb() const;
-    /**
-     * \brief Update the state of the spectrum phy. The states are:
-     *  IDLE, TX, RX_DATA, RX_DL_CTRL, RX_UL_CTRL, CCA_BUSY.
-     * \param newState the new state
-     * \param duration how much time the spectrum phy will be in the new state
-     */
-    void ChangeState(State newState, Time duration);
-    /**
-     * \brief Function that is called when the transmission has ended. It is
-     * used to update spectrum phy state.
-     */
-    void EndTx();
+    void CheckIfCsiImNeeded(const Ptr<NrSpectrumSignalParametersCsiRs>& csiRsParams);
 
-    /// \brief Filter the received SINR chunks for a particular DL or UL signal
-    /// \param rnti The RNTI for the expected receive signal (transmitting or receiving UE)
-    /// \param rank The number of MIMO layers of the expected signal
-    /// \return the SINR chunks in m_mimoSinrPerceived which match the rnti, or a chunk with an
+    /// @brief Filter the received SINR chunks for a particular DL or UL signal
+    /// @param rnti The RNTI for the expected receive signal (transmitting or receiving UE)
+    /// @param rank The number of MIMO layers of the expected signal
+    /// @return the SINR chunks in m_mimoSinrPerceived which match the rnti, or a chunk with an
     /// all-zero SINR matrix when no matching signal is found
     std::vector<MimoSinrChunk> GetMimoSinrForRnti(uint16_t rnti, uint8_t rank);
 
     /**
-     * \brief Function that is called when the spectrum phy finishes the reception of DATA. This
+     * @brief Function that is called when the spectrum phy finishes the reception of DATA. This
      * function processed the data being received and generated HARQ feedback.
      * It also updates spectrum phy state.
      */
     void EndRxData();
     /**
-     * \brief Function that is called when the spectrum phy finishes the reception of CTRL.
+     * @brief Schedule CsiIm period on the CSI-IM instance of the NrInterference to measure the
+     * interference.
+     */
+    void ScheduleCsiIm(Ptr<SpectrumSignalParameters> csiRsParams) const;
+    /**
+     * @return Whether this UE has scheduled DL DATA in this slot
+     */
+    bool IsUeScheduled() const;
+    /**
+     * @brief Function that is called when the spectrum phy finishes the reception of CTRL.
      * It stores CTRL messages and updates spectrum phy state.
      */
     void EndRxCtrl();
     /**
-     * \brief Function that is celled when the spectrum phy finishes the reception of SRS.
+     * @brief Function that is called when the spectrum phy finishes the reception of SRS.
      * It stores SRS message, calls the interference calculator to notify the end of the
      * reception which will trigger SRS SINR calculation, and it also updates the spectrum phy
      * state.
      */
     void EndRxSrs();
     /**
-     * \brief Check if the channel is busy. If yes, updates the spectrum phy state.
+     * @brief Check if the channel is busy. If yes, updates the spectrum phy state.
      */
     void MaybeCcaBusy();
     /**
-     * \brief Function used to schedule an event to check if state should be switched from CCA_BUSY
+     * @brief Function used to schedule an event to check if state should be switched from CCA_BUSY
      * to IDLE. This function should be used only for this transition of state machine. After
      * finishing reception (RX_DL_CTRL or RX_UL_CTRL or RX_DATA) function MaybeCcaBusy should be
      * called instead to check if to switch to IDLE or CCA_BUSY, and then new event may be created
@@ -631,21 +844,31 @@ class NrSpectrumPhy : public SpectrumPhy
      */
     void CheckIfStillBusy();
     /**
-     * \brief Checks whether the CTRL message list contains only SRS control message.
+     * @brief Checks whether the CTRL message list contains only SRS control message.
      * Only if the list has only one CTRL message and that message is SRS the function
      * will return true, otherwise it will return false.
-     * \ctrlMsgList uplink control message list
-     * \returns an indicator whether the ctrlListMessage contains only SRS message
+     * @ctrlMsgList uplink control message list
+     * @returns an indicator whether the ctrlListMessage contains only SRS message
      */
     bool IsOnlySrs(const std::list<Ptr<NrControlMessage>>& ctrlMsgList);
 
     /**
-     * \brief Checks whether transport blocks were correctly received or were corrupted.
+     * @brief Function that is called when the rx signal does not contain an expected channel
+     * matrix. Currently, this function is only used for compatibility with the current API,
+     * as the spectrum channel is not actually used in the case of a single stream.
+     * @param params the signal parameters which contains the spectrum channel matrix
+     * @returns the channel matrix
+     */
+    Ptr<MatrixBasedChannelModel::Complex3DVector> CreateSpectrumChannelMatrix(
+        const Ptr<SpectrumSignalParameters> params) const;
+
+    /**
+     * @brief Checks whether transport blocks were correctly received or were corrupted.
      */
     void CheckTransportBlockCorruptionStatus();
 
     /**
-     * \brief Process received packets bursts
+     * @brief Process received packets bursts
      *
      * Packets are received in case the transport block is not corrupted, being forwarded
      * to the NrPhy. Traces are collected. Harq feedback is then sent.
@@ -653,62 +876,23 @@ class NrSpectrumPhy : public SpectrumPhy
     void ProcessReceivedPacketBurst();
 
     /**
-     * \brief Send uplink HARQ feedback
-     * \param rnti UE RNTI
-     * \param tbInfo TransportBlockInfo of corresponding packet burst
+     * @brief Send uplink HARQ feedback
+     * @param rnti UE RNTI
+     * @param tbInfo TransportBlockInfo of corresponding packet burst
      */
     void SendUlHarqFeedback(uint16_t rnti, TransportBlockInfo& tbInfo);
 
     /**
-     * \brief Send downlink HARQ feedback
-     * \param rnti UE RNTI
-     * \param tbInfo TransportBlockInfo of corresponding packet burst
-     * \returns DlHarqInfo structure for bookkeeping
+     * @brief Send downlink HARQ feedback
+     * @param rnti UE RNTI
+     * @param tbInfo TransportBlockInfo of corresponding packet burst
+     * @returns DlHarqInfo structure for bookkeeping
      */
     DlHarqInfo SendDlHarqFeedback(uint16_t rnti, TransportBlockInfo& tbInfo);
 
     // attributes
     TypeId m_errorModelType{
         Object::GetTypeId()}; //!< Error model type by default is NrLteMiErrorModel
-    /// TS 38.321 5.3.2.2 soft-buffer flush on a new DL transmission (attribute).
-    bool m_flushDlSoftBufferOnNewData{true};
-    /// Stale DL soft buffers flushed by a new transmission.
-    uint64_t m_dlSoftBufferFlushes{0};
-
-  public:
-    /// \return stale DL HARQ soft buffers flushed by a new transmission (rv 0).
-    uint64_t GetDlSoftBufferFlushCount() const
-    {
-        return m_dlSoftBufferFlushes;
-    }
-
-    /**
-     * ntn-patch 20: abandon the DL data reception in progress (UE only). Called
-     * by NrUePhy when the MAC entity is reset for a reconfigurationWithSync
-     * (TS 38.331 5.3.5.5.2, TS 38.321 5.12): the PDSCH being received was
-     * scheduled by the source cell, so at its end it is not delivered to the
-     * MAC, no HARQ-ACK is sent for it and no CSI is derived from it. No-op on a
-     * gNB or when no DL data is being received.
-     */
-    void AbortDlDataRx();
-    /// \return true while an aborted DL data reception is still on the air.
-    bool IsDlDataRxAborted() const
-    {
-        return m_dlDataRxAborted;
-    }
-    /// \return DL data receptions abandoned by AbortDlDataRx().
-    uint64_t GetDlDataRxAbortedCount() const
-    {
-        return m_dlDataRxAbortedCount;
-    }
-
-  private:
-    bool m_dlDataRxAborted{false};       //!< current DL data reception is from the old cell
-    uint64_t m_dlDataRxAbortedCount{0}; //!< receptions abandoned by AbortDlDataRx()
-
-  public:
-
-  private:
     bool m_dataErrorModelEnabled{
         true}; //!< whether the phy error model for DATA is enabled, by default is enabled
     double m_ccaMode1ThresholdW{0}; //!< Clear channel assessment (CCA) threshold in Watts,
@@ -723,17 +907,17 @@ class NrSpectrumPhy : public SpectrumPhy
         nullptr}; //!< channel is needed to be able to connect listener spectrum phy (AddRx) or to
                   //!< start transmission StartTx
     Ptr<const SpectrumModel> m_rxSpectrumModel{
-        nullptr}; //!< the spectrum model of this spectrum phy
-    Ptr<BeamManager> m_beamManager{
-        nullptr}; //!< the beam manager corresponding to the antenna of this spectrum phy
+        nullptr};                                 //!< the spectrum model of this spectrum phy
+    std::vector<Ptr<BeamManager>> m_beamManagers; //!< the beam manager container corresponding to
+                                                  //!< the antenna of this spectrum phy
     Ptr<MobilityModel> m_mobility{
         nullptr}; //!< the mobility model of the node to which belongs this spectrum phy
     Ptr<NetDevice> m_device{nullptr}; //!< the device to which belongs this spectrum phy
     Ptr<NrPhy> m_phy{nullptr}; //!< a pointer to phy instance to which belongs this spectrum phy
     Ptr<NrErrorModel> m_errorModel{nullptr}; //!< a pointer to the error model instance
-    Ptr<Object> m_antenna{nullptr}; //!< antenna object of this NrSpectrumPhy, currently supported
-                                    //!< UniformPlannarArray type of antenna
-    Ptr<NrHarqPhy> m_harqPhyModule{nullptr}; //!< the HARQ module of this spectrum phy instance
+    std::vector<Ptr<Object>>
+        m_antennaPanels; //!< antenna panels object of this NrSpectrumPhy, currently
+                         //!< supported UniformPlannarArray type of antenna
     Ptr<NrInterference> m_interferenceData{nullptr}; //!< the interference object used to calculate
                                                      //!< the interference for this spectrum phy
     Ptr<NrInterference> m_interferenceCtrl{nullptr}; //!< the interference object used to calculate
@@ -741,8 +925,15 @@ class NrSpectrumPhy : public SpectrumPhy
     Ptr<NrInterference> m_interferenceSrs{
         nullptr}; //!< the interference object used to calculate the interference for this spectrum
                   //!< phy, exists only at gNB phy
+    Ptr<NrInterference> m_interferenceCsiRs{
+        nullptr}; //!< the interference object used to obtain the CSI-RS measurements
+    Ptr<NrInterference> m_interferenceCsiIm{
+        nullptr}; //!< the interference object used to obtain the CSI-IM measurements
+
     Ptr<SpectrumValue> m_txPsd{nullptr};          //!< tx power spectral density
     Ptr<UniformRandomVariable> m_random{nullptr}; //!< the random variable used for TB decoding
+
+    NrHarqPhy m_harqPhyModule; //!< the HARQ module of this spectrum phy instance
 
     std::unordered_map<uint16_t, TransportBlockInfo>
         m_transportBlocks; //!< Transport block map per RNTI of TBs which are expected to be
@@ -766,6 +957,7 @@ class NrSpectrumPhy : public SpectrumPhy
     std::list<SrsSinrReportCallback> m_srsSinrReportCallback; //!< list of SRS SINR callbacks
     std::list<SrsSnrReportCallback> m_srsSnrReportCallback;   //!< list of SRS SNR callbacks
     uint16_t m_currentSrsRnti{0};
+    Time m_ctrlEndTime;           //!< Needed to schedule the interference measurements CSI-IM
     EventId m_checkIfIsIdleEvent; //!< Event used to check if state should be switched from CCA_BUSY
                                   //!< to IDLE.
     Time m_busyTimeEnds{
@@ -785,7 +977,6 @@ class NrSpectrumPhy : public SpectrumPhy
     NrPhyUlHarqFeedbackCallback
         m_phyUlHarqFeedbackCallback; //!< callback that is notified when the UL HARQ feedback is
                                      //!< being generated
-
     // traces
     TracedCallback<Time>
         m_channelOccupied; //!< trace callback that is notifying of total time that this spectrum
@@ -810,7 +1001,7 @@ class NrSpectrumPhy : public SpectrumPhy
         m_dlDataSnrTrace; //!< DL data SNR trace source
 
     /*
-     * \brief Trace source that reports the following: Cell ID, Bwp ID, UE node ID, DL
+     * @brief Trace source that reports the following: Cell ID, Bwp ID, UE node ID, DL
      * CTRL pathloss
      */
     typedef TracedCallback<uint16_t, uint8_t, uint32_t, double> DlPathlossTrace;
@@ -818,14 +1009,25 @@ class NrSpectrumPhy : public SpectrumPhy
     bool m_enableDlCtrlPathlossTrace =
         false; //!< By default this trace is disabled to not slow done simulations
     /*
-     * \brief Trace source that reports the following: Cell ID, Bwp ID, UE node ID, DL
-     * CTRL pathloss, CQI that corresponds to the current SINR
+     * @brief Trace source that reports the following: Cell ID, Bwp ID, UE node ID, DL
+     * CTRL pathloss, CQI that corresponds to the current SINR considering single port(rank 1).
+     * This CQI value is added to the data pathloss trace to allow results filtering for the
+     * calibration purposes, to compensate for the lack of RSSI based initial access and handover
+     * features at the time this trace was added to 5G-LENA. Once these both features are part of
+     * 5G-LENA, the CQI value should be removed from this trace. Also, notice that for MIMO
+     * simulations this CQI value is based on the approximation of SINR, such as if it was used
+     * a single port (rank 1), so this CQI value does not correspond to the CQI value that will
+     * later be determined by PM search algorithm.
      */
     typedef TracedCallback<uint16_t, uint8_t, uint32_t, double, uint8_t> DlDataPathlossTrace;
     DlDataPathlossTrace m_dlDataPathlossTrace; //!< DL DATA pathloss trace
     bool m_enableDlDataPathlossTrace =
-        false; //!< By default this trace is disabled to not slow done simulations
+        false;                   //!< By default this trace is disabled to not slow done simulations
+    double m_dlDataPathloss = 0; // DL data pathloss calculated in StartRx, and used in trace in
+                                 // EndRxData, i.e., when ProcessReceivedPacketBurst is called
     bool m_isGnb = false;
+    uint8_t m_numPanels{1};        //!< Number of panels in this spectrum
+    uint8_t m_activePanelIndex{0}; //!< Active panel's index
 };
 
 } // namespace ns3

@@ -150,10 +150,9 @@ into an easy to use model for your convenience.
 
 A First ns-3 Script
 *******************
-If you downloaded the system as was suggested above, you will have a release
-of |ns3| in a directory called ``workspace`` under your home
-directory.  Change into that release directory, and you should find a
-directory structure something like the following:
+Change into the *ns-3* or *ns-3.<version>* directory that you downloaded by one of
+the various methods described in the getting started chapter, and you should find
+a directory structure something like the following:
 
 .. sourcecode:: bash
 
@@ -204,14 +203,12 @@ is not the most efficient approach but it certainly makes writing scripts much
 easier.
 
 Each of the |ns3| include files is placed in a directory called
-``ns3`` (under the build directory) during the build process to help avoid
+``build/include/ns3`` during the build process to help avoid
 include file name collisions.  The ``ns3/core-module.h`` file corresponds
 to the ns-3 module you will find in the directory ``src/core`` in your
 downloaded release distribution.  If you list this directory you will find a
 large number of header files.  When you do a build, ns3 will place public
-header files in an ``ns3`` directory under the appropriate
-``build/debug`` or ``build/optimized`` directory depending on your
-configuration.  CMake will also automatically generate a module include file to
+header files in an ``build/include/ns3`` directory.  CMake will also automatically generate a module include file to
 load all of the public header files.
 
 Since you are, of course, following this tutorial religiously, you will
@@ -554,8 +551,8 @@ created.
     UdpEchoServerHelper echoServer(9);
 
     ApplicationContainer serverApps = echoServer.Install(nodes.Get(1));
-    serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(10.0));
+    serverApps.Start(Seconds(1));
+    serverApps.Stop(Seconds(10));
 
 The first line of code in the above snippet declares the
 ``UdpEchoServerHelper``.  As usual, this isn't the application itself, it
@@ -600,8 +597,8 @@ converted for you.  The two lines,
 
 ::
 
-    serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(10.0));
+    serverApps.Start(Seconds(1));
+    serverApps.Stop(Seconds(10));
 
 will cause the echo server application to ``Start`` (enable itself) at one
 second into the simulation and to ``Stop`` (disable itself) at ten seconds
@@ -620,12 +617,12 @@ that is managed by an ``UdpEchoClientHelper``.
 
     UdpEchoClientHelper echoClient(interfaces.GetAddress(1), 9);
     echoClient.SetAttribute("MaxPackets", UintegerValue(1));
-    echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
+    echoClient.SetAttribute("Interval", TimeValue(Seconds(1)));
     echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 
     ApplicationContainer clientApps = echoClient.Install(nodes.Get(0));
-    clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(10.0));
+    clientApps.Start(Seconds(2));
+    clientApps.Stop(Seconds(10));
 
 For the echo client, however, we need to set five different ``Attributes``.
 The first two ``Attributes`` are set during construction of the
@@ -668,11 +665,11 @@ When we previously called the methods,
 
 ::
 
-    serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(10.0));
+    serverApps.Start(Seconds(1));
+    serverApps.Stop(Seconds(10));
     ...
-    clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(10.0));
+    clientApps.Start(Seconds(2));
+    clientApps.Stop(Seconds(10));
 
 we actually scheduled events in the simulator at 1.0 seconds, 2.0 seconds and
 two events at 10.0 seconds.  When ``Simulator::Run`` is called, the system
@@ -758,7 +755,7 @@ in the first example program will schedule an explicit stop at 11 seconds:
 
 ::
 
-  +  Simulator::Stop(Seconds(11.0));
+  +  Simulator::Stop(Seconds(11));
      Simulator::Run();
      Simulator::Destroy();
      return 0;

@@ -12,15 +12,13 @@
 #include "ns3/simulator.h"
 #include "ns3/wifi-tx-vector.h"
 
-#define Min(a, b) ((a < b) ? a : b)
-
 namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("AmrrWifiManager");
 
 /**
- * \brief hold per-remote-station state for AMRR Wifi manager.
+ * @brief hold per-remote-station state for AMRR Wifi manager.
  *
  * This struct extends from WifiRemoteStation struct to hold additional
  * information required by the AMRR Wifi manager
@@ -50,7 +48,7 @@ AmrrWifiManager::GetTypeId()
             .AddConstructor<AmrrWifiManager>()
             .AddAttribute("UpdatePeriod",
                           "The interval between decisions about rate control changes",
-                          TimeValue(Seconds(1.0)),
+                          TimeValue(Seconds(1)),
                           MakeTimeAccessor(&AmrrWifiManager::m_updatePeriod),
                           MakeTimeChecker())
             .AddAttribute(
@@ -365,9 +363,9 @@ AmrrWifiManager::DoGetDataTxVector(WifiRemoteStation* st, MHz_u allowedWidth)
         }
     }
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     WifiMode mode = GetSupported(station, rateIndex);
     uint64_t rate = mode.GetDataRate(channelWidth);
@@ -394,9 +392,9 @@ AmrrWifiManager::DoGetRtsTxVector(WifiRemoteStation* st)
     NS_LOG_FUNCTION(this << st);
     auto station = static_cast<AmrrWifiRemoteStation*>(st);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     UpdateMode(station);
     WifiMode mode;

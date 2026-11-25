@@ -65,16 +65,6 @@ Txop::GetTypeId()
                                           "AC_BEACON",
                                           AC_UNDEF,
                                           "AC_UNDEF"))
-            .AddAttribute("MinCw",
-                          "The minimum value of the contention window (just for the first link, "
-                          "in case of 11be multi-link devices).",
-                          TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
-                          UintegerValue(15),
-                          MakeUintegerAccessor((void(Txop::*)(uint32_t)) & Txop::SetMinCw,
-                                               (uint32_t(Txop::*)() const) & Txop::GetMinCw),
-                          MakeUintegerChecker<uint32_t>(),
-                          TypeId::OBSOLETE,
-                          "Use MinCws attribute instead of MinCw")
             .AddAttribute(
                 "MinCws",
                 "The minimum values of the contention window for all the links (sorted in "
@@ -85,16 +75,6 @@ Txop::GetTypeId()
                 AttributeContainerValue<UintegerValue>(),
                 MakeAttributeContainerAccessor<UintegerValue>(&Txop::SetMinCws, &Txop::GetMinCws),
                 MakeAttributeContainerChecker<UintegerValue>(MakeUintegerChecker<uint32_t>()))
-            .AddAttribute("MaxCw",
-                          "The maximum value of the contention window (just for the first link, "
-                          "in case of 11be multi-link devices).",
-                          TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
-                          UintegerValue(1023),
-                          MakeUintegerAccessor((void(Txop::*)(uint32_t)) & Txop::SetMaxCw,
-                                               (uint32_t(Txop::*)() const) & Txop::GetMaxCw),
-                          MakeUintegerChecker<uint32_t>(),
-                          TypeId::OBSOLETE,
-                          "Use MaxCws attribute instead of MaxCw")
             .AddAttribute(
                 "MaxCws",
                 "The maximum values of the contention window for all the links (sorted in "
@@ -106,17 +86,6 @@ Txop::GetTypeId()
                 MakeAttributeContainerAccessor<UintegerValue>(&Txop::SetMaxCws, &Txop::GetMaxCws),
                 MakeAttributeContainerChecker<UintegerValue>(MakeUintegerChecker<uint32_t>()))
             .AddAttribute(
-                "Aifsn",
-                "The AIFSN: the default value conforms to non-QOS (just for the first link, "
-                "in case of 11be multi-link devices).",
-                TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
-                UintegerValue(2),
-                MakeUintegerAccessor((void(Txop::*)(uint8_t)) & Txop::SetAifsn,
-                                     (uint8_t(Txop::*)() const) & Txop::GetAifsn),
-                MakeUintegerChecker<uint8_t>(),
-                TypeId::OBSOLETE,
-                "Use Aifsns attribute instead of Aifsn")
-            .AddAttribute(
                 "Aifsns",
                 "The values of AIFSN for all the links (sorted in increasing order "
                 "of link ID). An empty vector is ignored and the default value as per "
@@ -126,16 +95,6 @@ Txop::GetTypeId()
                 AttributeContainerValue<UintegerValue>(),
                 MakeAttributeContainerAccessor<UintegerValue>(&Txop::SetAifsns, &Txop::GetAifsns),
                 MakeAttributeContainerChecker<UintegerValue>(MakeUintegerChecker<uint8_t>()))
-            .AddAttribute("TxopLimit",
-                          "The TXOP limit: the default value conforms to non-QoS "
-                          "(just for the first link, in case of 11be multi-link devices).",
-                          TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
-                          TimeValue(MilliSeconds(0)),
-                          MakeTimeAccessor((void(Txop::*)(Time)) & Txop::SetTxopLimit,
-                                           (Time(Txop::*)() const) & Txop::GetTxopLimit),
-                          MakeTimeChecker(),
-                          TypeId::OBSOLETE,
-                          "Use TxopLimits attribute instead of TxopLimit")
             .AddAttribute(
                 "TxopLimits",
                 "The values of TXOP limit for all the links (sorted in increasing order "
@@ -358,6 +317,12 @@ Txop::GetCw(uint8_t linkId) const
     return GetLink(linkId).cw;
 }
 
+std::size_t
+Txop::GetStaRetryCount(uint8_t linkId) const
+{
+    return GetLink(linkId).staRetryCount;
+}
+
 void
 Txop::ResetCw(uint8_t linkId)
 {
@@ -365,6 +330,7 @@ Txop::ResetCw(uint8_t linkId)
     auto& link = GetLink(linkId);
     link.cw = GetMinCw(linkId);
     m_cwTrace(link.cw, linkId);
+    link.staRetryCount = 0;
 }
 
 void
@@ -372,10 +338,26 @@ Txop::UpdateFailedCw(uint8_t linkId)
 {
     NS_LOG_FUNCTION(this << linkId);
     auto& link = GetLink(linkId);
-    // see 802.11-2012, section 9.19.2.5
-    link.cw = std::min(2 * (link.cw + 1) - 1, GetMaxCw(linkId));
-    // if the MU EDCA timer is running, CW cannot be less than MU CW min
-    link.cw = std::max(link.cw, GetMinCw(linkId));
+
+    if (link.staRetryCount < m_mac->GetFrameRetryLimit())
+    {
+        // If QSRC[AC] is less than dot11ShortRetryLimit,
+        // - QSRC[AC] shall be incremented by 1.
+        // - CW[AC] shall be set to the lesser of CWmax[AC] and 2^QSRC[AC] × (CWmin[AC] + 1) – 1.
+        // (Section 10.23.2.2 of 802.11-2020)
+        ++link.staRetryCount;
+        link.cw =
+            std::min(GetMaxCw(linkId), (1 << link.staRetryCount) * (GetMinCw(linkId) + 1) - 1);
+    }
+    else
+    {
+        //  Else
+        // - QSRC[AC] shall be set to 0.
+        // - CW[AC] shall be set to CWmin[AC].
+        link.staRetryCount = 0;
+        link.cw = GetMinCw(linkId);
+    }
+
     m_cwTrace(link.cw, linkId);
 }
 
@@ -689,7 +671,7 @@ Txop::StartAccessAfterEvent(uint8_t linkId, bool hadFramesToTransmit, bool check
         return;
     }
 
-    if (GetLink(linkId).access != NOT_REQUESTED)
+    if (GetLink(linkId).access != WifiChannelAccessStatus::NOT_REQUESTED)
     {
         NS_LOG_DEBUG("Channel access already requested or granted on link " << +linkId);
         return;
@@ -708,7 +690,7 @@ Txop::StartAccessAfterEvent(uint8_t linkId, bool hadFramesToTransmit, bool check
         GenerateBackoff(linkId);
     }
 
-    m_mac->GetChannelAccessManager(linkId)->RequestAccess(this);
+    RequestAccess(linkId);
 }
 
 void
@@ -722,7 +704,7 @@ Txop::DoInitialize()
     }
 }
 
-Txop::ChannelAccessStatus
+WifiChannelAccessStatus
 Txop::GetAccessStatus(uint8_t linkId) const
 {
     return GetLink(linkId).access;
@@ -732,33 +714,50 @@ void
 Txop::NotifyAccessRequested(uint8_t linkId)
 {
     NS_LOG_FUNCTION(this << linkId);
-    GetLink(linkId).access = REQUESTED;
+    GetLink(linkId).access = WifiChannelAccessStatus::REQUESTED;
 }
 
 void
 Txop::NotifyChannelAccessed(uint8_t linkId, Time txopDuration)
 {
     NS_LOG_FUNCTION(this << linkId << txopDuration);
-    GetLink(linkId).access = GRANTED;
+    GetLink(linkId).access = WifiChannelAccessStatus::GRANTED;
 }
 
 void
 Txop::NotifyChannelReleased(uint8_t linkId)
 {
     NS_LOG_FUNCTION(this << linkId);
-    GetLink(linkId).access = NOT_REQUESTED;
+    GetLink(linkId).access = WifiChannelAccessStatus::NOT_REQUESTED;
     GenerateBackoff(linkId);
     if (HasFramesToTransmit(linkId))
     {
-        Simulator::ScheduleNow(&Txop::RequestAccess, this, linkId);
+        // if the channel released notification (below) leads the power save manager to put the
+        // PHY in sleep state, do not request channel access (which would wake up the PHY)
+        Simulator::ScheduleNow([=, this]() {
+            if (auto phy = m_mac->GetWifiPhy(linkId); phy && !phy->IsStateSleep())
+            {
+                NS_LOG_DEBUG("Request channel access again after releasing the channel");
+                RequestAccess(linkId);
+            }
+        });
     }
+    m_mac->NotifyChannelReleased(this, linkId);
 }
 
 void
 Txop::RequestAccess(uint8_t linkId)
 {
     NS_LOG_FUNCTION(this << linkId);
-    if (GetLink(linkId).access == NOT_REQUESTED)
+    if (GetLink(linkId).access == WifiChannelAccessStatus::NOT_REQUESTED)
+    {
+        m_mac->NotifyRequestAccess(this, linkId);
+    }
+    // if the PHY is in sleep state, the notification of access requested may lead the power save
+    // manager to wake up the STA, which may cause a channel access request. Hence, we have to
+    // check again whether the channel access has not been already requested before calling
+    // ChannelAccessManager::RequestAccess().
+    if (GetLink(linkId).access == WifiChannelAccessStatus::NOT_REQUESTED)
     {
         m_mac->GetChannelAccessManager(linkId)->RequestAccess(this);
     }
@@ -780,10 +779,9 @@ Txop::NotifySleep(uint8_t linkId)
 }
 
 void
-Txop::NotifyOff()
+Txop::NotifyOff(uint8_t linkId)
 {
-    NS_LOG_FUNCTION(this);
-    m_queue->Flush();
+    NS_LOG_FUNCTION(this << linkId);
 }
 
 void

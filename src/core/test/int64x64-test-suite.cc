@@ -37,18 +37,18 @@ namespace test
 {
 
 /**
- * \file
- * \ingroup int64x64-tests
+ * @file
+ * @ingroup int64x64-tests
  * int64x46 test suite
  */
 
 /**
- * \ingroup core-tests
- * \defgroup int64x64-tests int64x64 tests
+ * @ingroup core-tests
+ * @defgroup int64x64-tests int64x64 tests
  */
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Pretty printer for test cases.
  */
@@ -58,8 +58,8 @@ class Printer
     /**
      * Construct from high and low words of Q64.64 representation.
      *
-     * \param [in] high The integer portion.
-     * \param [in] low The fractional portion.
+     * @param [in] high The integer portion.
+     * @param [in] low The fractional portion.
      */
     Printer(const int64_t high, const uint64_t low)
         : m_haveInt(false),
@@ -72,7 +72,7 @@ class Printer
     /**
      * Construct from an \c int64x64_t Q64.64 value.
      *
-     * \param [in] value The value.
+     * @param [in] value The value.
      */
     Printer(const int64x64_t value)
         : m_haveInt(true),
@@ -86,9 +86,9 @@ class Printer
     /**
      * Output streamer, the main reason for this class.
      *
-     * \param [in] os The stream.
-     * \param [in] p The value to print.
-     * \returns The stream.
+     * @param [in] os The stream.
+     * @param [in] p The value to print.
+     * @returns The stream.
      */
     friend std::ostream& operator<<(std::ostream& os, const Printer& p);
 
@@ -112,7 +112,7 @@ operator<<(std::ostream& os, const Printer& p)
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: manipulate the high and low part of every number.
  */
@@ -123,8 +123,8 @@ class Int64x64HiLoTestCase : public TestCase
     void DoRun() override;
     /**
      * Check the high and low parts for correctness.
-     * \param hi The high part of the int64x64_t.
-     * \param lo The low part of the int64x64_t.
+     * @param hi The high part of the int64x64_t.
+     * @param lo The low part of the int64x64_t.
      */
     void Check(const int64_t hi, const uint64_t lo);
 };
@@ -188,7 +188,7 @@ Int64x64HiLoTestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: check GetInt and Round.
  */
@@ -199,9 +199,9 @@ class Int64x64IntRoundTestCase : public TestCase
     void DoRun() override;
     /**
      * Check the int64x64 value for correctness.
-     * \param value The int64x64_t value.
-     * \param expectInt The expected integer value.
-     * \param expectRnd The expected rounding value.
+     * @param value The int64x64_t value.
+     * @param expectInt The expected integer value.
+     * @param expectRnd The expected rounding value.
      */
     void Check(const int64x64_t value, const int64_t expectInt, const int64_t expectRnd);
 };
@@ -253,7 +253,7 @@ Int64x64IntRoundTestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: parse int64x64_t numbers as strings.
  */
@@ -264,10 +264,10 @@ class Int64x64InputTestCase : public TestCase
     void DoRun() override;
     /**
      * Check the iont64x64 for correctness.
-     * \param str String representation of a number.
-     * \param hi The expected high part of the int64x64_t.
-     * \param lo The expected low part of the int64x64_t.
-     * \param tolerance The allowed tolerance.
+     * @param str String representation of a number.
+     * @param hi The expected high part of the int64x64_t.
+     * @param lo The expected low part of the int64x64_t.
+     * @param tolerance The allowed tolerance.
      */
     void Check(const std::string& str,
                const int64_t hi,
@@ -335,11 +335,14 @@ Int64x64InputTestCase::DoRun()
     Check("-1.0", -1, 0, tolerance);
     Check("-1.0000", -1, 0, tolerance);
     Check(" 1.000000000000000000054", 1, 1, tolerance);
-    Check("-1.000000000000000000054", (int64_t)-2, (uint64_t)-1, tolerance);
+    Check("-1.000000000000000000054",
+          static_cast<int64_t>(-2),
+          std::numeric_limits<uint64_t>::max(),
+          tolerance);
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: roundtrip int64x64_t numbers as strings.
  *
@@ -352,8 +355,8 @@ class Int64x64InputOutputTestCase : public TestCase
     void DoRun() override;
     /**
      * Check the iont64x64 for correctness.
-     * \param str String representation of a number.
-     * \param tolerance The allowed tolerance.
+     * @param str String representation of a number.
+     * @param tolerance The allowed tolerance.
      */
     void Check(const std::string& str, const int64_t tolerance = 0);
 };
@@ -426,7 +429,7 @@ Int64x64InputOutputTestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: basic arithmetic operations.
  */
@@ -437,10 +440,10 @@ class Int64x64ArithmeticTestCase : public TestCase
     void DoRun() override;
     /**
      * Check the int64x64 for correctness.
-     * \param test The test number.
-     * \param value The actual value.
-     * \param expect The expected value.
-     * \param tolerance The allowed tolerance.
+     * @param test The test number.
+     * @param value The actual value.
+     * @param expect The expected value.
+     * @param tolerance The allowed tolerance.
      */
     void Check(const int test,
                const int64x64_t value,
@@ -596,7 +599,7 @@ Int64x64ArithmeticTestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test case for bug 455.
  *
@@ -609,9 +612,9 @@ class Int64x64Bug455TestCase : public TestCase
     void DoRun() override;
     /**
      * Check the int64x64 for correctness.
-     * \param result The actual value.
-     * \param expect The expected value.
-     * \param msg The error message to print.
+     * @param result The actual value.
+     * @param expect The expected value.
+     * @param msg The error message to print.
      */
     void Check(const double result, const double expect, const std::string& msg);
 };
@@ -660,7 +663,7 @@ Int64x64Bug455TestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test case for bug 455.
  *
@@ -673,9 +676,9 @@ class Int64x64Bug863TestCase : public TestCase
     void DoRun() override;
     /**
      * Check the int64x64 for correctness.
-     * \param result The actual value.
-     * \param expect The expected value.
-     * \param msg The error message to print.
+     * @param result The actual value.
+     * @param expect The expected value.
+     * @param msg The error message to print.
      */
     void Check(const double result, const double expect, const std::string& msg);
 };
@@ -726,7 +729,7 @@ Int64x64Bug863TestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test case for bug 455.
  *
@@ -739,9 +742,9 @@ class Int64x64Bug1786TestCase : public TestCase
     void DoRun() override;
     /**
      * Check the int64x64 for correctness.
-     * \param low The actual low value.
-     * \param value The expected low part printed value.
-     * \param tolerance The allowed tolerance.
+     * @param low The actual low value.
+     * @param value The expected low part printed value.
+     * @param tolerance The allowed tolerance.
      */
     void Check(const uint64_t low, const std::string& value, const int64_t tolerance = 0);
 };
@@ -805,72 +808,72 @@ Int64x64Bug1786TestCase::DoRun()
 
     // NOLINTBEGIN(misc-redundant-expression)
     // clang-format off
-  Check(                 1ULL, "+0.0000000000000000000542");
-  Check(                 2ULL, "+0.0000000000000000001084");
-  Check(                 3ULL, "+0.0000000000000000001626");
-  Check(                 4ULL, "+0.0000000000000000002168");
-  Check(                 5ULL, "+0.0000000000000000002710");
-  Check(                 6ULL, "+0.0000000000000000003253");
-  Check(                 7ULL, "+0.0000000000000000003795");
-  Check(                 8ULL, "+0.0000000000000000004337");
-  Check(                 9ULL, "+0.0000000000000000004879");
-  Check(               0xAULL, "+0.0000000000000000005421");
-  Check(               0xFULL, "+0.0000000000000000008132");
-  Check(              0xF0ULL, "+0.0000000000000000130104");
-  Check(             0xF00ULL, "+0.0000000000000002081668");
-  Check(            0xF000ULL, "+0.0000000000000033306691");
-  Check(           0xF0000ULL, "+0.0000000000000532907052");
-  Check(          0xF00000ULL, "+0.0000000000008526512829");
-  Check(         0xF000000ULL, "+0.0000000000136424205266");
-  Check(        0xF0000000ULL, "+0.0000000002182787284255");
-  Check(       0xF00000000ULL, "+0.0000000034924596548080");
-  Check(      0xF000000000ULL, "+0.0000000558793544769287");
-  Check(     0xF0000000000ULL, "+0.0000008940696716308594");
-  Check(    0xF00000000000ULL, "+0.0000143051147460937500");
-  Check(   0xF000000000000ULL, "+0.0002288818359375000000");
-  Check(  0xF0000000000000ULL, "+0.0036621093750000000000");
-  Check( 0xF00000000000000ULL, "+0.0585937500000000000000");
-  std::cout << std::endl;
-  Check(0x7FFFFFFFFFFFFFFDULL, "+0.4999999999999999998374", tolerance);
-  Check(0x7FFFFFFFFFFFFFFEULL, "+0.4999999999999999998916", tolerance);
-  Check(0x7FFFFFFFFFFFFFFFULL, "+0.4999999999999999999458", tolerance);
-  Check(0x8000000000000000ULL, "+0.5000000000000000000000");
-  Check(0x8000000000000001ULL, "+0.5000000000000000000542", tolerance);
-  Check(0x8000000000000002ULL, "+0.5000000000000000001084", tolerance);
-  Check(0x8000000000000003ULL, "+0.5000000000000000001626", tolerance);
-  std::cout << std::endl;
-  Check(0xF000000000000000ULL, "+0.9375000000000000000000");
-  Check(0xFF00000000000000ULL, "+0.9960937500000000000000");
-  Check(0xFFF0000000000000ULL, "+0.9997558593750000000000");
-  Check(0xFFFF000000000000ULL, "+0.9999847412109375000000");
-  Check(0xFFFFF00000000000ULL, "+0.9999990463256835937500");
-  Check(0xFFFFFF0000000000ULL, "+0.9999999403953552246094");
-  Check(0xFFFFFFF000000000ULL, "+0.9999999962747097015381");
-  Check(0xFFFFFFFF00000000ULL, "+0.9999999997671693563461");
-  Check(0xFFFFFFFFF0000000ULL, "+0.9999999999854480847716");
-  Check(0xFFFFFFFFFF000000ULL, "+0.9999999999990905052982");
-  Check(0xFFFFFFFFFFF00000ULL, "+0.9999999999999431565811");
-  Check(0xFFFFFFFFFFFF0000ULL, "+0.9999999999999964472863");
-  Check(0xFFFFFFFFFFFFF000ULL, "+0.9999999999999997779554");
-  Check(0xFFFFFFFFFFFFFF00ULL, "+0.9999999999999999861222");
-  Check(0xFFFFFFFFFFFFFFF0ULL, "+0.9999999999999999991326");
-  Check(0xFFFFFFFFFFFFFFF5ULL, "+0.9999999999999999994037", tolerance);
-  Check(0xFFFFFFFFFFFFFFF6ULL, "+0.9999999999999999994579", tolerance);
-  Check(0xFFFFFFFFFFFFFFF7ULL, "+0.9999999999999999995121", tolerance);
-  Check(0xFFFFFFFFFFFFFFF8ULL, "+0.9999999999999999995663", tolerance);
-  Check(0xFFFFFFFFFFFFFFF9ULL, "+0.9999999999999999996205", tolerance);
-  Check(0xFFFFFFFFFFFFFFFAULL, "+0.9999999999999999996747", tolerance);
-  Check(0xFFFFFFFFFFFFFFFBULL, "+0.9999999999999999997289", tolerance);
-  Check(0xFFFFFFFFFFFFFFFCULL, "+0.9999999999999999997832", tolerance);
-  Check(0xFFFFFFFFFFFFFFFDULL, "+0.9999999999999999998374", tolerance);
-  Check(0xFFFFFFFFFFFFFFFEULL, "+0.9999999999999999998916", tolerance);
-  Check(0xFFFFFFFFFFFFFFFFULL, "+0.9999999999999999999458", tolerance);
+    Check(                 1ULL, "+0.0000000000000000000542");
+    Check(                 2ULL, "+0.0000000000000000001084");
+    Check(                 3ULL, "+0.0000000000000000001626");
+    Check(                 4ULL, "+0.0000000000000000002168");
+    Check(                 5ULL, "+0.0000000000000000002710");
+    Check(                 6ULL, "+0.0000000000000000003253");
+    Check(                 7ULL, "+0.0000000000000000003795");
+    Check(                 8ULL, "+0.0000000000000000004337");
+    Check(                 9ULL, "+0.0000000000000000004879");
+    Check(               0xAULL, "+0.0000000000000000005421");
+    Check(               0xFULL, "+0.0000000000000000008132");
+    Check(              0xF0ULL, "+0.0000000000000000130104");
+    Check(             0xF00ULL, "+0.0000000000000002081668");
+    Check(            0xF000ULL, "+0.0000000000000033306691");
+    Check(           0xF0000ULL, "+0.0000000000000532907052");
+    Check(          0xF00000ULL, "+0.0000000000008526512829");
+    Check(         0xF000000ULL, "+0.0000000000136424205266");
+    Check(        0xF0000000ULL, "+0.0000000002182787284255");
+    Check(       0xF00000000ULL, "+0.0000000034924596548080");
+    Check(      0xF000000000ULL, "+0.0000000558793544769287");
+    Check(     0xF0000000000ULL, "+0.0000008940696716308594");
+    Check(    0xF00000000000ULL, "+0.0000143051147460937500");
+    Check(   0xF000000000000ULL, "+0.0002288818359375000000");
+    Check(  0xF0000000000000ULL, "+0.0036621093750000000000");
+    Check( 0xF00000000000000ULL, "+0.0585937500000000000000");
+    std::cout << std::endl;
+    Check(0x7FFFFFFFFFFFFFFDULL, "+0.4999999999999999998374", tolerance);
+    Check(0x7FFFFFFFFFFFFFFEULL, "+0.4999999999999999998916", tolerance);
+    Check(0x7FFFFFFFFFFFFFFFULL, "+0.4999999999999999999458", tolerance);
+    Check(0x8000000000000000ULL, "+0.5000000000000000000000");
+    Check(0x8000000000000001ULL, "+0.5000000000000000000542", tolerance);
+    Check(0x8000000000000002ULL, "+0.5000000000000000001084", tolerance);
+    Check(0x8000000000000003ULL, "+0.5000000000000000001626", tolerance);
+    std::cout << std::endl;
+    Check(0xF000000000000000ULL, "+0.9375000000000000000000");
+    Check(0xFF00000000000000ULL, "+0.9960937500000000000000");
+    Check(0xFFF0000000000000ULL, "+0.9997558593750000000000");
+    Check(0xFFFF000000000000ULL, "+0.9999847412109375000000");
+    Check(0xFFFFF00000000000ULL, "+0.9999990463256835937500");
+    Check(0xFFFFFF0000000000ULL, "+0.9999999403953552246094");
+    Check(0xFFFFFFF000000000ULL, "+0.9999999962747097015381");
+    Check(0xFFFFFFFF00000000ULL, "+0.9999999997671693563461");
+    Check(0xFFFFFFFFF0000000ULL, "+0.9999999999854480847716");
+    Check(0xFFFFFFFFFF000000ULL, "+0.9999999999990905052982");
+    Check(0xFFFFFFFFFFF00000ULL, "+0.9999999999999431565811");
+    Check(0xFFFFFFFFFFFF0000ULL, "+0.9999999999999964472863");
+    Check(0xFFFFFFFFFFFFF000ULL, "+0.9999999999999997779554");
+    Check(0xFFFFFFFFFFFFFF00ULL, "+0.9999999999999999861222");
+    Check(0xFFFFFFFFFFFFFFF0ULL, "+0.9999999999999999991326");
+    Check(0xFFFFFFFFFFFFFFF5ULL, "+0.9999999999999999994037", tolerance);
+    Check(0xFFFFFFFFFFFFFFF6ULL, "+0.9999999999999999994579", tolerance);
+    Check(0xFFFFFFFFFFFFFFF7ULL, "+0.9999999999999999995121", tolerance);
+    Check(0xFFFFFFFFFFFFFFF8ULL, "+0.9999999999999999995663", tolerance);
+    Check(0xFFFFFFFFFFFFFFF9ULL, "+0.9999999999999999996205", tolerance);
+    Check(0xFFFFFFFFFFFFFFFAULL, "+0.9999999999999999996747", tolerance);
+    Check(0xFFFFFFFFFFFFFFFBULL, "+0.9999999999999999997289", tolerance);
+    Check(0xFFFFFFFFFFFFFFFCULL, "+0.9999999999999999997832", tolerance);
+    Check(0xFFFFFFFFFFFFFFFDULL, "+0.9999999999999999998374", tolerance);
+    Check(0xFFFFFFFFFFFFFFFEULL, "+0.9999999999999999998916", tolerance);
+    Check(0xFFFFFFFFFFFFFFFFULL, "+0.9999999999999999999458", tolerance);
     // clang-format on
     // NOLINTEND(misc-redundant-expression)
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: basic compare operations.
  */
@@ -882,9 +885,9 @@ class Int64x64CompareTestCase : public TestCase
 
     /**
      * Check the int64x64 for correctness.
-     * \param result The actual value.
-     * \param expect The expected value.
-     * \param msg The error message to print.
+     * @param result The actual value.
+     * @param expect The expected value.
+     * @param msg The error message to print.
      */
     void Check(const bool result, const bool expect, const std::string& msg);
 };
@@ -985,7 +988,7 @@ Int64x64CompareTestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: Invert and MulByInvert.
  */
@@ -996,16 +999,16 @@ class Int64x64InvertTestCase : public TestCase
     void DoRun() override;
     /**
      * Check the int64x64 for correctness.
-     * \param factor The factor used to invert the number.
+     * @param factor The factor used to invert the number.
      */
     void Check(const int64_t factor);
     /**
      * Check the int64x64 for correctness.
-     * \param factor The factor used to invert the number.
-     * \param result The value.
-     * \param expect The expected value.
-     * \param msg The error message to print.
-     * \param tolerance The allowed tolerance.
+     * @param factor The factor used to invert the number.
+     * @param result The value.
+     * @param expect The expected value.
+     * @param msg The error message to print.
+     * @param tolerance The allowed tolerance.
      */
     void CheckCase(const uint64_t factor,
                    const int64x64_t result,
@@ -1107,7 +1110,7 @@ Int64x64InvertTestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: construct from floating point.
  */
@@ -1119,15 +1122,15 @@ class Int64x64DoubleTestCase : public TestCase
 
     /**
      * Check the int64x64 for correctness.
-     * \param intPart The expected integer part value of the int64x64.
+     * @param intPart The expected integer part value of the int64x64.
      */
     void Check(const int64_t intPart);
     /**
      * Check the int64x64 for correctness.
-     * \param dec The integer part of the value to test.
-     * \param frac The fractional part of the value to test.x
-     * \param intPart The expected integer part value of the int64x64.
-     * \param lo The expected low part value of the int64x64.
+     * @param dec The integer part of the value to test.
+     * @param frac The fractional part of the value to test.x
+     * @param intPart The expected integer part value of the int64x64.
+     * @param lo The expected low part value of the int64x64.
      */
     void Check(const long double dec,
                const long double frac,
@@ -1152,6 +1155,7 @@ class Int64x64DoubleTestCase : public TestCase
      *
      * This will lie in the closed interval [0, 64]
      */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     static constexpr int MISS_MANT_DIG = std::max(0, 64 - LDBL_MANT_DIG);
 
     /**
@@ -1500,7 +1504,7 @@ Int64x64DoubleTestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
+ * @ingroup int64x64-tests
  *
  * Test: print the implementation
  */
@@ -1540,8 +1544,8 @@ Int64x64ImplTestCase::DoRun()
     std::cout << std::endl;
 
 #if defined(INT64X64_USE_CAIRO) && !defined(PYTHON_SCAN)
-    std::cout << "cairo_impl64:  " << cairo_impl64 << std::endl;
-    std::cout << "cairo_impl128: " << cairo_impl128 << std::endl;
+    std::cout << "cairo_impl64:  " << cairo_impl64() << std::endl;
+    std::cout << "cairo_impl128: " << cairo_impl128() << std::endl;
 #endif
 
     if (RUNNING_WITH_LIMITED_PRECISION != 0)
@@ -1551,8 +1555,8 @@ Int64x64ImplTestCase::DoRun()
 }
 
 /**
- * \ingroup int64x64-tests
- * \internal
+ * @ingroup int64x64-tests
+ * @internal
  *
  * The int64x64 Test Suite.
  *
@@ -1564,12 +1568,12 @@ Int64x64ImplTestCase::DoRun()
  * test comparisons.  If you need to increase the tolerance,
  * please append the system and compiler version.  For example:
  *
- * \code
+ * @code
  *   // Darwin 12.5.0 (Mac 10.8.5) g++ 4.2.1
  *   tolerance = 1;
  *   // System Foo gcc 3.9
  *   tolerance = 3;
- * \endcode
+ * @endcode
  */
 class Int64x64TestSuite : public TestSuite
 {

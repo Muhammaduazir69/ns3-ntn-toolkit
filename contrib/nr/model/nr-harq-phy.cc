@@ -4,8 +4,8 @@
 
 #include "nr-harq-phy.h"
 
-#include <ns3/assert.h>
-#include <ns3/log.h>
+#include "ns3/assert.h"
+#include "ns3/log.h"
 
 NS_LOG_COMPONENT_DEFINE("NrHarqPhy");
 
@@ -68,9 +68,7 @@ NrHarqPhy::ResetUlHarqProcessStatus(uint16_t rnti, uint8_t id)
 NrHarqPhy::HistoryMap::iterator
 NrHarqPhy::GetHistoryMapOf(NrHarqPhy::HistoryMap* map, uint16_t rnti) const
 {
-    NS_LOG_FUNCTION(this);
-
-    NrHarqPhy::HistoryMap::iterator it = map->find(rnti);
+    auto it = map->find(rnti);
     if (it == map->end())
     {
         auto ret = map->insert(std::make_pair(rnti, ProcIdHistoryMap()));
@@ -85,9 +83,7 @@ NrHarqPhy::GetHistoryMapOf(NrHarqPhy::HistoryMap* map, uint16_t rnti) const
 NrHarqPhy::ProcIdHistoryMap::iterator
 NrHarqPhy::GetProcIdHistoryMapOf(NrHarqPhy::ProcIdHistoryMap* map, uint16_t procId) const
 {
-    NS_LOG_FUNCTION(this);
-
-    NrHarqPhy::ProcIdHistoryMap::iterator it = map->find(procId);
+    auto it = map->find(procId);
     if (it == map->end())
     {
         auto ret = map->insert(std::make_pair(procId, NrErrorModel::NrErrorModelHistory()));
@@ -106,7 +102,7 @@ NrHarqPhy::ResetHarqProcessStatus(NrHarqPhy::HistoryMap* map,
 {
     NS_LOG_FUNCTION(this);
 
-    NrHarqPhy::HistoryMap::iterator historyMap = GetHistoryMapOf(map, rnti);
+    auto historyMap = GetHistoryMapOf(map, rnti);
 
     ProcIdHistoryMap* procIdMap = &(historyMap->second);
 
@@ -121,7 +117,7 @@ NrHarqPhy::UpdateHarqProcessStatus(NrHarqPhy::HistoryMap* map,
 {
     NS_LOG_FUNCTION(this);
 
-    NrHarqPhy::HistoryMap::iterator historyMap = GetHistoryMapOf(map, rnti);
+    auto historyMap = GetHistoryMapOf(map, rnti);
 
     ProcIdHistoryMap* procIdMap = &(historyMap->second);
 
@@ -131,9 +127,7 @@ NrHarqPhy::UpdateHarqProcessStatus(NrHarqPhy::HistoryMap* map,
 const NrErrorModel::NrErrorModelHistory&
 NrHarqPhy::GetHarqProcessInfo(NrHarqPhy::HistoryMap* map, uint16_t rnti, uint8_t harqProcId) const
 {
-    NS_LOG_FUNCTION(this);
-
-    NrHarqPhy::HistoryMap::iterator historyMap = GetHistoryMapOf(map, rnti);
+    auto historyMap = GetHistoryMapOf(map, rnti);
 
     ProcIdHistoryMap* procIdMap = &(historyMap->second);
 

@@ -56,7 +56,9 @@ NtnSpectrumSeamModel::DoCalcRxPowerSpectralDensity(
     Ptr<const MobilityModel> a,
     Ptr<const MobilityModel> b,
     Ptr<const PhasedArrayModel> aPhasedArrayModel,
-    Ptr<const PhasedArrayModel> bPhasedArrayModel) const
+    Ptr<const PhasedArrayModel> bPhasedArrayModel,
+        const PhasedArrayModel::ComplexVector& aBeamformingVector,
+        const PhasedArrayModel::ComplexVector& bBeamformingVector) const
 {
     // ---- 1. the real 3GPP spatial channel first ---------------------------
     // Array gain, small-scale fading and the MIMO spectrumChannelMatrix all
@@ -64,8 +66,13 @@ NtnSpectrumSeamModel::DoCalcRxPowerSpectralDensity(
     Ptr<SpectrumSignalParameters> rxParams;
     if (m_inner)
     {
-        rxParams = m_inner->CalcRxPowerSpectralDensity(params, a, b, aPhasedArrayModel,
-                                                       bPhasedArrayModel);
+        rxParams = m_inner->CalcRxPowerSpectralDensity(params,
+                                                       a,
+                                                       b,
+                                                       aPhasedArrayModel,
+                                                       bPhasedArrayModel,
+                                                       aBeamformingVector,
+                                                       bBeamformingVector);
     }
     else
     {

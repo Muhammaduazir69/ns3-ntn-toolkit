@@ -7,10 +7,11 @@
 #ifndef NR_INTERFERENCE_BASE_H
 #define NR_INTERFERENCE_BASE_H
 
-#include <ns3/nstime.h>
-#include <ns3/object.h>
-#include <ns3/packet.h>
-#include <ns3/spectrum-value.h>
+#include "ns3/nr-export.h"
+#include "ns3/nstime.h"
+#include "ns3/object.h"
+#include "ns3/packet.h"
+#include "ns3/spectrum-value.h"
 
 #include <list>
 
@@ -24,21 +25,21 @@ class NrChunkProcessor;
  * incoming signals are added to the total interference.
  *
  */
-class NrInterferenceBase : public Object
+class NR_EXPORT NrInterferenceBase : public Object
 {
   public:
     NrInterferenceBase();
     ~NrInterferenceBase() override;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     void DoDispose() override;
 
     /**
-     * \brief Add a NrChunkProcessor that will use the time-vs-frequency SINR
+     * @brief Add a NrChunkProcessor that will use the time-vs-frequency SINR
      * calculated by this NrInterferenceBase instance. Note that all the
      * added NrChunkProcessors will work in parallel.
      *
@@ -47,7 +48,7 @@ class NrInterferenceBase : public Object
     virtual void AddSinrChunkProcessor(Ptr<NrChunkProcessor> p);
 
     /**
-     * \brief Add a NrChunkProcessor that will use the time-vs-frequency
+     * @brief Add a NrChunkProcessor that will use the time-vs-frequency
      * interference calculated by this NrInterferenceBase instance. Note
      * that all the added NrChunkProcessors will work in parallel.
      *
@@ -65,11 +66,16 @@ class NrInterferenceBase : public Object
     virtual void AddRsPowerChunkProcessor(Ptr<NrChunkProcessor> p);
 
     /**
-     * \brief Notify that the PHY is starting a RX attempt
+     * @brief Notify that the PHY is starting a RX attempt
      *
      * @param rxPsd the power spectral density of the signal being RX
+     * @return true if the signal was accepted as (part of) the desired
+     *         signal, false if it was rejected because it overlaps in
+     *         frequency with the signal already being received; a rejected
+     *         signal remains in the all-signals set and is therefore
+     *         accounted as interference
      */
-    virtual void StartRx(Ptr<const SpectrumValue> rxPsd);
+    virtual bool StartRx(Ptr<const SpectrumValue> rxPsd);
 
     /**
      * notify that the RX attempt has ended. The receiving PHY must call
@@ -114,6 +120,17 @@ class NrInterferenceBase : public Object
      */
     virtual void DoSubtractSignal(Ptr<const SpectrumValue> spd, uint32_t signalId);
 
+    /**
+     * Recompute m_allSignals constructively from the list of live signals.
+     *
+     * The running sum kept in m_allSignals is not exact in floating point:
+     * a saturating signal absorbs co-resident smaller signals when added, and
+     * subtracting an infinite signal yields NaN. Rebuilding from the tracked
+     * per-signal list (the same pattern used by the MIMO covariance path)
+     * removes any such residue left by expired signals.
+     */
+    void RebuildAllSignals();
+
     bool m_receiving{false}; ///< are we receiving?
 
     Ptr<SpectrumValue> m_rxSignal{nullptr}; /**< stores the power spectral density of
@@ -128,6 +145,13 @@ class NrInterferenceBase : public Object
                    */
 
     Ptr<const SpectrumValue> m_noise{nullptr}; ///< the noise value
+
+    /**
+     * The live (not yet expired) signals backing m_allSignals; used to
+     * recompute the sum constructively so that floating-point residue of
+     * expired signals cannot persist.
+     */
+    std::list<Ptr<const SpectrumValue>> m_allSignalsList;
 
     Time m_lastChangeTime{Seconds(0)}; /**< the time of the last change in
                                         * m_TotalPower

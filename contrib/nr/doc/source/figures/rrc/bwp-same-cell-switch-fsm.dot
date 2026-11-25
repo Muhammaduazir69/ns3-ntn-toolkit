@@ -1,0 +1,19 @@
+digraph NrBwpSameCellSwitch {
+
+    rankdir=LR;
+    node [shape="box", style="filled", fillcolor="lightblue", fontname="Helvetica", fontsize=10];
+    edge [fontname="Helvetica", fontsize=9];
+
+    meas  [shape="ellipse", fillcolor="white", label="UE measurement update\n(per-ARFCN RSRP)"]
+    eval  [label="EvaluateSameCellBwpSwitch\n(CONNECTED_NORMALLY,\nserving cell spans >= 2 carriers)"]
+    guard [label="same-cell guard:\ntarget ARFCN in\nm_cellIdToArfcn[serving cell]?"]
+    noop  [shape="ellipse", fillcolor="gray92", label="no switch"]
+    sw    [shape="ellipse", fillcolor="palegreen", label="SwitchPrimaryBwpSameCell\n+ notify gNB"]
+
+    meas -> eval
+    eval -> noop [label="best other-carrier RSRP\n< serving + 3 dB (hysteresis)"]
+    eval -> guard [color="darkgreen", fontcolor="darkgreen",
+                   label="best other-carrier RSRP\n>= serving + 3 dB"]
+    guard -> noop [color="red", fontcolor="red", label="no (would be\nhandover / DC)"]
+    guard -> sw [color="darkgreen", fontcolor="darkgreen", label="yes (intra-cell)"]
+}

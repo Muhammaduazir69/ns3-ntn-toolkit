@@ -22,6 +22,8 @@
 #include "ns3/oran-ntn-real-stack-binding.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/test.h"
+
+#include <algorithm>
 #include "ns3/walker-constellation.h"
 
 #include <array>
@@ -237,7 +239,9 @@ RunRig(const RigOptions& opt)
                 }
                 acc->given.push_back(given);
                 acc->total = total;
-                out.rbgPerSlot = total;
+                // 5G-LENA v5.2: a slot's data RBGs exclude those its HARQ retransmissions hold,
+                // so the slot grid is the largest total seen (any slot without a retransmission).
+                out.rbgPerSlot = std::max(out.rbgPerSlot, total);
             });
         sched->TraceConnectWithoutContext(
             "SliceAllocation",

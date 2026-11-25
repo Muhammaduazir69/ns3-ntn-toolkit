@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2009 CTTC
  *
@@ -9,8 +8,8 @@
 
 #include "spectrum-value.h"
 
-#include <ns3/log.h>
-#include <ns3/math.h>
+#include "ns3/log.h"
+#include "ns3/math.h"
 
 namespace ns3
 {
@@ -30,13 +29,13 @@ SpectrumValue::SpectrumValue(Ptr<const SpectrumModel> sof)
 double&
 SpectrumValue::operator[](size_t index)
 {
-    return m_values.at(index);
+    return m_values[index];
 }
 
 const double&
 SpectrumValue::operator[](size_t index) const
 {
-    return m_values.at(index);
+    return m_values[index];
 }
 
 SpectrumModelUid_t
@@ -374,10 +373,10 @@ SpectrumValue::Copy() const
 }
 
 /**
- * \brief Output stream operator
- * \param os output stream
- * \param pvf the SpectrumValue to print
- * \return an output stream
+ * @brief Output stream operator
+ * @param os output stream
+ * @param pvf the SpectrumValue to print
+ * @return an output stream
  */
 std::ostream&
 operator<<(std::ostream& os, const SpectrumValue& pvf)

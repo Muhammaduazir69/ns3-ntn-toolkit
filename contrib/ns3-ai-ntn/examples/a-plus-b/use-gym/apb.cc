@@ -17,6 +17,7 @@
  * Author:  Muyuan Shen <muyuan_shen@hust.edu.cn>
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/ns3-ai-ntn-module.h>
 #include <ns3/core-module.h>
 
@@ -25,6 +26,12 @@
 #include <random>
 
 #define NUM_ENV 10000
+
+// Interface test: this example exercises only the ns3-ai C++/Python bridge
+// (the Gym-style OpenGymEnv interface).
+// It has no network, channel or NTN node on purpose: the C++ side draws two random
+// integers, the Python agent returns their sum, and the C++ side prints both.
+// No physics is modeled, so the dataset record carries only the run metadata.
 
 namespace ns3
 {
@@ -169,5 +176,7 @@ main(int argc, char* argv[])
 
     apb->NotifySimulationEnd();
 
+    // ntn-dataset@1: standard manifest + sim_health (Gym loop over the simulator)
+    ns3::ntnobs::WriteDatasetRecord(".", "ns3ai_apb_gym", "measured", argc, argv);
     return 0;
 }

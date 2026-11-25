@@ -7,57 +7,64 @@
 
 #include "nr-mimo-matrices.h"
 
-#include <ns3/nstime.h>
-#include <ns3/object.h>
-#include <ns3/ptr.h>
-#include <ns3/spectrum-value.h>
+#include "ns3/nr-export.h"
+#include "ns3/nstime.h"
+#include "ns3/object.h"
+#include "ns3/ptr.h"
+#include "ns3/spectrum-value.h"
 
 namespace ns3
 {
 
-/// \brief MIMO SINR used to compute the TBLER of a data transmission
-struct MimoSinrChunk
+/// @brief MIMO SINR used to compute the TBLER of a data transmission
+struct NR_EXPORT MimoSinrChunk
 {
     NrSinrMatrix mimoSinr; ///< The MIMO SINR values, dimensions rank * nRBs
     uint16_t rnti{0};      ///< RNTI, required in OFDMA UL to filter received signals by UEs
-    Time dur;              ///< Duration of the signal
+    /// Cell that this signal belongs to. RNTIs are allocated per cell and are reused across
+    /// cells, so the RNTI alone does not identify a signal: after a handover a chunk measured
+    /// against the previous cell can carry the same RNTI as a transport block expected from
+    /// the new one, and averaging them together mixes unrelated signals (and ranks).
+    uint16_t cellId{0};
+    Time dur; ///< Duration of the signal
 };
 
-/// \brief MIMO signal information used to compute CQI feedback including rank and precoding matrix
-struct MimoSignalChunk
+/// @brief MIMO signal information used to compute CQI feedback including rank and precoding matrix
+struct NR_EXPORT MimoSignalChunk
 {
     ComplexMatrixArray chanSpct; ///< Frequency-domain channel matrix
     NrCovMat interfNoiseCov;     ///< Interference-and-noise-covariance matrix
     uint16_t rnti{0};            ///< RNTI, required in OFDMA UL to filter received signals by UEs
+    uint16_t cellId{0};          ///< Cell that this signal belongs to, see MimoSinrChunk::cellId
     Time dur;                    ///< Duration of the signal
 };
 
 using MimoSinrChunksCb = Callback<void, const std::vector<MimoSinrChunk>&>;
 using MimoSignalChunksCb = Callback<void, const std::vector<MimoSignalChunk>&>;
 
-class NrMimoChunkProcessor : public SimpleRefCount<NrMimoChunkProcessor>
+class NR_EXPORT NrMimoChunkProcessor : public SimpleRefCount<NrMimoChunkProcessor>
 {
   public:
-    /// \brief Add a callback for processing received SINR values
-    /// \param cb the callback function
+    /// @brief Add a callback for processing received SINR values
+    /// @param cb the callback function
     void AddCallback(MimoSinrChunksCb cb);
 
-    /// \brief Add a callback for processing the MIMO signal parameters
-    /// \param cb the callback function
+    /// @brief Add a callback for processing the MIMO signal parameters
+    /// @param cb the callback function
     void AddCallback(MimoSignalChunksCb cb);
 
-    /// \brief Start processing a transmission, clear internal variables
+    /// @brief Start processing a transmission, clear internal variables
     void Start();
 
-    /// \brief Store the current MIMO SINR and duration
-    /// \param mimoSinr the MIMO SINR information
+    /// @brief Store the current MIMO SINR and duration
+    /// @param mimoSinr the MIMO SINR information
     void EvaluateChunk(const MimoSinrChunk& mimoSinr);
 
-    /// \brief Store the current MIMO signal parameters
-    /// \param mimoSignal the signal parameters including channel and interference covariance matrix
+    /// @brief Store the current MIMO signal parameters
+    /// @param mimoSignal the signal parameters including channel and interference covariance matrix
     void EvaluateChunk(const MimoSignalChunk& mimoSignal);
 
-    /// \brief Finish calculation and inform interested objects about calculated values
+    /// @brief Finish calculation and inform interested objects about calculated values
     void End();
 
   private:

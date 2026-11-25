@@ -4,7 +4,12 @@
 
 #include "nr-fh-control.h"
 
-#include <ns3/core-module.h>
+#include "nr-mac-scheduler-ue-info.h"
+
+#include "ns3/boolean.h"
+#include "ns3/enum.h"
+#include "ns3/object.h"
+#include "ns3/uinteger.h"
 
 namespace ns3
 {
@@ -59,12 +64,30 @@ NrFhControl::GetTypeId()
                           "of a cell.",
                           UintegerValue(1000),
                           MakeUintegerAccessor(&NrFhControl::SetCellFhCapacity),
-                          MakeUintegerChecker<uint32_t>(0, 150000))
+                          MakeUintegerChecker<uint64_t>(0, 1000000))
             .AddAttribute("OverheadDyn",
                           "The overhead for dynamic adaptation (in bits)",
                           UintegerValue(32),
                           MakeUintegerAccessor(&NrFhControl::SetOverheadDyn),
                           MakeUintegerChecker<uint8_t>(0, 100))
+            .AddAttribute("EnableDynamicModComp",
+                          "Enable dynamic modulation compression for split 7.2",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&NrFhControl::SetEnableModComp),
+                          MakeBooleanChecker())
+            .AddAttribute("FunctionalSplit",
+                          "Select the functional split applied in the gNB",
+                          EnumValue(NrFhControl::FS_7_2),
+                          MakeEnumAccessor<FunctionalSplit>(&NrFhControl::SetFunctionalSplit,
+                                                            &NrFhControl::GetFunctionalSplit),
+                          MakeEnumChecker(NrFhControl::FS_6,
+                                          "FS_6",
+                                          NrFhControl::FS_7_3,
+                                          "FS_7_3",
+                                          NrFhControl::FS_7_2,
+                                          "FS_7_2",
+                                          NrFhControl::FS_7_1,
+                                          "FS_7_1"))
             .AddTraceSource(
                 "RequiredFhDlThroughput",
                 "Report required fronthaul throughput in DL per BWP (Sfnfn, bwpId, reqFhThr)",
@@ -98,7 +121,7 @@ void
 NrFhControl::SetNrFhPhySapUser(uint16_t bwpId, NrFhPhySapUser* s)
 {
     NS_LOG_FUNCTION(this << s);
-    std::map<uint16_t, NrFhPhySapUser*>::iterator it = m_fhPhySapUser.find(bwpId);
+    auto it = m_fhPhySapUser.find(bwpId);
 
     if (it != m_fhPhySapUser.end())
     {
@@ -123,7 +146,7 @@ NrFhControl::SetNrFhSchedSapUser(uint16_t bwpId, NrFhSchedSapUser* s)
 {
     NS_LOG_FUNCTION(this << s);
 
-    std::map<uint16_t, NrFhSchedSapUser*>::iterator it = m_fhSchedSapUser.find(bwpId);
+    auto it = m_fhSchedSapUser.find(bwpId);
 
     if (it != m_fhSchedSapUser.end())
     {
@@ -164,7 +187,7 @@ NrFhControl::DoGetFhControlMethod() const
 }
 
 void
-NrFhControl::SetCellFhCapacity(uint32_t capacity)
+NrFhControl::SetCellFhCapacity(uint64_t capacity)
 {
     NS_LOG_FUNCTION(this);
     m_fhCapacity = capacity;
@@ -178,8 +201,31 @@ NrFhControl::SetOverheadDyn(uint8_t overhead)
 }
 
 void
+NrFhControl::SetEnableModComp(bool v)
+{
+    NS_LOG_FUNCTION(this);
+    m_enableModComp = v;
+}
+
+void
+NrFhControl::SetFunctionalSplit(FunctionalSplit fs)
+{
+    NS_LOG_FUNCTION(this);
+    NS_LOG_DEBUG("Set the selected functional split: " << fs);
+    m_funcSplit = fs;
+}
+
+NrFhControl::FunctionalSplit
+NrFhControl::GetFunctionalSplit() const
+{
+    NS_LOG_FUNCTION(this);
+    return m_funcSplit;
+}
+
+void
 NrFhControl::SetErrorModelType(std::string errorModelType)
 {
+    NS_LOG_FUNCTION(this);
     m_errorModelType = errorModelType;
 
     if (m_errorModelType == "ns3::NrEesmIrT1" || m_errorModelType == "ns3::NrEesmCcT1")
@@ -293,15 +339,20 @@ NrFhControl::DoUpdateActiveUesMap(
         NS_LOG_INFO("Cell: " << m_physicalCellId << " We got called for Update for bwpId: " << bwpId
                              << " RNTI: " << rnti);
 
+        uint16_t antennaPorts = m_fhPhySapUser.at(bwpId)->GetNumAntennaPorts();
+
         // Create/Update FH DL Throughput per BWP
-        uint64_t fhDlThr = GetFhThr(bwpId,
-                                    static_cast<uint32_t>(alloc.m_dci->m_mcs),
-                                    static_cast<uint32_t>(alloc.m_dci->m_numSym) * numRbs,
-                                    alloc.m_dci->m_rank);
+        FhThrParams fhThrparams = {bwpId,
+                                   static_cast<uint32_t>(alloc.m_dci->m_mcs),
+                                   static_cast<uint32_t>(alloc.m_dci->m_numSym) * numRbs,
+                                   alloc.m_dci->m_rank,
+                                   alloc.m_dci->m_numSym,
+                                   antennaPorts};
+        uint64_t fhDlThr = GetFhThr(fhThrparams);
         if (m_reqFhDlThrTracedValuePerBwp.find(bwpId) == m_reqFhDlThrTracedValuePerBwp.end())
         {
-            NS_LOG_DEBUG("Create pair for m_reqFhDlThrTracedValuePerBwp.at("
-                         << bwpId << "): " << m_reqFhDlThrTracedValuePerBwp.at(bwpId));
+            NS_LOG_DEBUG("Create pair for m_reqFhDlThrTracedValuePerBwp.at(" << bwpId
+                                                                             << "): " << fhDlThr);
         }
         m_reqFhDlThrTracedValuePerBwp[bwpId] += fhDlThr;
         NS_LOG_DEBUG("Update m_reqFhDlThrTracedValuePerBwp.at("
@@ -310,8 +361,8 @@ NrFhControl::DoUpdateActiveUesMap(
         // Create/Update used RBs of the air of a specific bwpId (AI Trace)
         if (m_rbsAirTracedValue.find(bwpId) == m_rbsAirTracedValue.end()) // bwp not in the map
         {
-            NS_LOG_DEBUG("Create pair for m_rbsAirTracedValue.at("
-                         << bwpId << "): " << m_rbsAirTracedValue.at(bwpId) << " RBs");
+            NS_LOG_DEBUG("Create pair for m_rbsAirTracedValue.at(" << bwpId << "): " << numRbs
+                                                                   << " RBs");
         }
         m_rbsAirTracedValue[bwpId] += numRbs;
         NS_LOG_DEBUG("Update m_rbsAirTracedValue.at(" << bwpId << ")" << m_rbsAirTracedValue[bwpId]
@@ -320,7 +371,8 @@ NrFhControl::DoUpdateActiveUesMap(
         if (alloc.m_dci->m_ndi == 0) // retx
         {
             NS_LOG_DEBUG("Retransmission, update only m_activeHarqUesPerBwp");
-            if (m_activeHarqUesPerBwp.find(rnti) != m_activeHarqUesPerBwp.end())
+            auto harqIt = m_activeHarqUesPerBwp.find(bwpId);
+            if (harqIt != m_activeHarqUesPerBwp.end() && harqIt->second.contains(rnti))
             {
                 m_activeHarqUesPerBwp.at(bwpId).erase(rnti);
                 NS_LOG_DEBUG("Update m_activeHarqBwps map for bwpId: "
@@ -381,7 +433,9 @@ NrFhControl::DoUpdateActiveUesMap(
 uint16_t
 NrFhControl::GetNumberActiveUes(uint16_t bwpId) const
 {
-    return m_activeUesPerBwp.at(bwpId).size();
+    // A BWP with only HARQ UEs has no entry in m_activeUesPerBwp
+    auto it = m_activeUesPerBwp.find(bwpId);
+    return it == m_activeUesPerBwp.end() ? 0 : it->second.size();
 }
 
 uint16_t
@@ -403,7 +457,11 @@ NrFhControl::GetNumberActiveBwps() const
 }
 
 bool
-NrFhControl::DoGetDoesAllocationFit(uint16_t bwpId, uint32_t mcs, uint32_t nRegs, uint8_t dlRank)
+NrFhControl::DoGetDoesAllocationFit(uint16_t bwpId,
+                                    uint32_t mcs,
+                                    uint32_t nRegs,
+                                    uint8_t dlRank,
+                                    uint8_t numSym)
 {
     NS_LOG_INFO("NrFhControl::DoGetDoesAllocationFit for cell: " << m_physicalCellId << " bwpId: "
                                                                  << bwpId << " mcs: " << mcs
@@ -418,15 +476,21 @@ NrFhControl::DoGetDoesAllocationFit(uint16_t bwpId, uint32_t mcs, uint32_t nRegs
     {
         numOfActiveBwps++;
     }
-    uint64_t thr = GetFhThr(
+
+    uint16_t antennaPorts = m_fhPhySapUser.at(bwpId)->GetNumAntennaPorts();
+
+    FhThrParams fhThrparams = {
         bwpId,
         mcs,
         nRegs * static_cast<uint32_t>(m_fhSchedSapUser.at(bwpId)->GetNumRbPerRbgFromSched()),
-        dlRank);
+        dlRank,
+        numSym,
+        antennaPorts};
+    uint64_t thr = GetFhThr(fhThrparams);
 
     if (m_allocThrPerBwp.find(bwpId) == m_allocThrPerBwp.end()) // bwpId not in the map
     {
-        if (thr < (m_fhCapacity / static_cast<uint32_t>(numOfActiveBwps) * 1e6))
+        if (thr < (m_fhCapacity / static_cast<uint64_t>(numOfActiveBwps) * 1e6))
         {
             m_allocThrPerBwp.insert(std::make_pair(bwpId, thr));
             NS_LOG_DEBUG("BWP not in the map, Allocation can be included. BWP Thr: "
@@ -437,7 +501,7 @@ NrFhControl::DoGetDoesAllocationFit(uint16_t bwpId, uint32_t mcs, uint32_t nRegs
         return false;
     } // bwp in the map & we can store the allocation
     if ((m_allocThrPerBwp[bwpId] + thr) <
-        (m_fhCapacity / static_cast<uint32_t>(numOfActiveBwps) * 1e6))
+        (m_fhCapacity / static_cast<uint64_t>(numOfActiveBwps) * 1e6))
     {
         m_allocThrPerBwp[bwpId] += thr;
         NS_LOG_DEBUG(
@@ -451,10 +515,13 @@ NrFhControl::DoGetDoesAllocationFit(uint16_t bwpId, uint32_t mcs, uint32_t nRegs
 uint8_t
 NrFhControl::DoGetMaxMcsAssignable(uint16_t bwpId, uint32_t reg, uint32_t rnti, uint8_t dlRank)
 {
+    NS_LOG_FUNCTION(this);
     uint16_t numOfActiveBwps =
         GetNumberActiveBwps(); // considers only active BWPs with data in queue
     NS_ASSERT_MSG(numOfActiveBwps > 0, "No Active BWPs, sth is wrong");
-    uint32_t availableCapacity = m_fhCapacity / static_cast<uint32_t>(numOfActiveBwps);
+    NS_ASSERT_MSG(m_enableModComp == true,
+                  "DoGetMaxMcsAssignable has no sense without modulation compression enabled");
+    uint64_t availableCapacity = m_fhCapacity / static_cast<uint64_t>(numOfActiveBwps);
 
     uint16_t numActiveUes = GetNumberActiveUes(bwpId);
     NS_LOG_INFO("BwpId: " << bwpId << " Number of Active UEs: " << numActiveUes);
@@ -462,25 +529,25 @@ NrFhControl::DoGetMaxMcsAssignable(uint16_t bwpId, uint32_t reg, uint32_t rnti, 
 
     Time slotLength = MicroSeconds(
         static_cast<uint16_t>(1000 / std::pow(2, m_numerologyPerBwp.at(bwpId)))); // slot length
-    uint32_t overheadMac = static_cast<uint32_t>(
+    auto overheadMac = static_cast<uint32_t>(
         10e6 * 1e-3 /
         std::pow(2, m_numerologyPerBwp.at(bwpId))); // bits (10e6 (bps) x slot length (in s))
 
     if (availableCapacity * 1e6 * slotLength.GetSeconds() <=
-        numActiveUes * m_overheadDyn + numActiveUes * overheadMac + numActiveUes * 12 * 2 * 10)
+        numActiveUes * (m_overheadDyn + overheadMac + (12 * 2 * 10)))
     {
         while (availableCapacity * 1e6 * slotLength.GetSeconds() <=
-               Kp * m_overheadDyn + Kp * overheadMac + Kp * 12 * 2 * 10)
+               Kp * (m_overheadDyn + overheadMac + (12 * 2 * 10)))
         {
             Kp--;
         }
     }
     NS_ABORT_MSG_IF(availableCapacity * 1e6 * slotLength.GetSeconds() <=
-                        Kp * m_overheadDyn + Kp * overheadMac + Kp * 12 * 2 * 10,
+                        Kp * (m_overheadDyn + overheadMac + (12 * 2 * 10)),
                     "Not enough fronthaul capacity to send intra-PHY split overhead");
 
-    uint32_t num = static_cast<uint32_t>(availableCapacity * 1e6 * slotLength.GetSeconds() -
-                                         Kp * m_overheadDyn - Kp * overheadMac - Kp * 12 * 2 * 10);
+    auto num = static_cast<uint32_t>(availableCapacity * 1e6 * slotLength.GetSeconds() -
+                                     Kp * (m_overheadDyn + overheadMac + (12 * 2 * 10)));
     if (Kp == 0)
     {
         return 0;
@@ -500,45 +567,53 @@ NrFhControl::DoGetMaxMcsAssignable(uint16_t bwpId, uint32_t reg, uint32_t rnti, 
 uint32_t
 NrFhControl::DoGetMaxRegAssignable(uint16_t bwpId, uint32_t mcs, uint32_t rnti, uint8_t dlRank)
 {
+    NS_LOG_FUNCTION(this);
     uint32_t modulationOrder =
-        m_mcsTable == 1 ? GetModulationOrderTable1(mcs) : GetModulationOrderTable2(mcs);
+        m_mcsTable == 1 ? nrEesmT1.m_mcsMTable->at(mcs) : nrEesmT2.m_mcsMTable->at(mcs);
 
     uint16_t numOfActiveBwps =
         GetNumberActiveBwps(); // considers only active BWPs with data in queue
     NS_ASSERT_MSG(numOfActiveBwps > 0, "No Active BWPs, sth is wrong");
-    uint32_t availableCapacity = m_fhCapacity / static_cast<uint32_t>(numOfActiveBwps);
+    uint64_t availableCapacity = m_fhCapacity / static_cast<uint64_t>(numOfActiveBwps);
 
     uint16_t numActiveUes = GetNumberActiveUes(bwpId);
     NS_LOG_INFO("BwpId: " << bwpId << " Number of Active UEs: " << numActiveUes);
     uint16_t Kp = numActiveUes;
 
+    uint8_t overheadDyn =
+        (m_enableModComp ? m_overheadDyn : 0); // overhead of dynamic adaptations due to
+                                               // dynamic modulation compression.
+                                               // 0 if modulation compression is disabled.
+
     Time slotLength = MicroSeconds(
         static_cast<uint16_t>(1000 / std::pow(2, m_numerologyPerBwp.at(bwpId)))); // slot length
-    uint32_t overheadMac = static_cast<uint32_t>(
+    auto overheadMac = static_cast<uint32_t>(
         10e6 * 1e-3 /
         std::pow(2, m_numerologyPerBwp.at(bwpId))); // bits (10e6 (bps) x slot length (in s))
 
     if (availableCapacity * 1e6 * slotLength.GetSeconds() <=
-        numActiveUes * m_overheadDyn + numActiveUes * overheadMac + numActiveUes * 12 * 2 * 10)
+        numActiveUes * (overheadDyn + overheadMac + (12 * 2 * 10)))
     {
         while (availableCapacity * 1e6 * slotLength.GetSeconds() <=
-               Kp * m_overheadDyn + Kp * overheadMac + Kp * 12 * 2 * 10)
+               Kp * (overheadDyn + overheadMac + (12 * 2 * 10)))
         {
             Kp--;
         }
     }
     NS_ABORT_MSG_IF(availableCapacity * 1e6 * slotLength.GetSeconds() <=
-                        Kp * m_overheadDyn + Kp * overheadMac + Kp * 12 * 2 * 10,
+                        Kp * (overheadDyn + overheadMac + (12 * 2 * 10)),
                     "Not enough fronthaul capacity to send intra-PHY split overhead");
 
-    uint32_t num = static_cast<uint32_t>(availableCapacity * 1e6 * slotLength.GetSeconds() -
-                                         Kp * m_overheadDyn - Kp * overheadMac - Kp * 12 * 2 * 10);
+    auto num = static_cast<uint32_t>(availableCapacity * 1e6 * slotLength.GetSeconds() -
+                                     Kp * (overheadDyn + overheadMac + (12 * 2 * 10)));
     if (Kp == 0)
     {
         return 0;
     }
+
+    uint32_t W = (m_enableModComp ? modulationOrder : 32); // bitwidth (number of IQ bits)
     uint32_t nMax =
-        num / (12 * Kp * modulationOrder * dlRank) /
+        num / (12 * Kp * W * dlRank) /
         static_cast<uint32_t>(
             m_fhSchedSapUser.at(bwpId)
                 ->GetNumRbPerRbgFromSched()); // in REGs, otherwise, should divide by nSymb
@@ -562,21 +637,22 @@ NrFhControl::DoUpdateTracesBasedOnDroppedData(uint16_t bwpId,
 
     // update FH trace and AI trace
     NS_LOG_DEBUG("Update Traces based on Dropped Data");
+    uint16_t antennaPorts = m_fhPhySapUser.at(bwpId)->GetNumAntennaPorts();
     // bwpId not in the map
+    FhThrParams fhThrparams = {bwpId, mcs, (numRbs * nSymb), dlRank, nSymb, antennaPorts};
     if (m_reqFhDlThrTracedValuePerBwp.find(bwpId) == m_reqFhDlThrTracedValuePerBwp.end())
     {
-        NS_LOG_DEBUG("Create pair for"
-                     << " m_reqFhDlThrTracedValuePerBwp.at(" << bwpId
-                     << "): " << m_reqFhDlThrTracedValuePerBwp.at(bwpId));
+        NS_LOG_DEBUG("Create pair for" << " m_reqFhDlThrTracedValuePerBwp.at(" << bwpId
+                                       << "): " << GetFhThr(fhThrparams));
     }
-    m_reqFhDlThrTracedValuePerBwp[bwpId] += GetFhThr(bwpId, mcs, (numRbs * nSymb), dlRank);
+    m_reqFhDlThrTracedValuePerBwp[bwpId] += GetFhThr(fhThrparams);
     NS_LOG_DEBUG("Update m_reqFhDlThrTracedValuePerBwp.at("
                  << bwpId << "): " << m_reqFhDlThrTracedValuePerBwp.at(bwpId));
 
     if (m_rbsAirTracedValue.find(bwpId) == m_rbsAirTracedValue.end()) // bwpId not in the map
     {
-        NS_LOG_DEBUG("Create pair for m_rbsAirTracedValue.at("
-                     << bwpId << "): " << m_rbsAirTracedValue.at(bwpId) << " RBs");
+        NS_LOG_DEBUG("Create pair for m_rbsAirTracedValue.at(" << bwpId << "): " << numRbs
+                                                               << " RBs");
     }
     m_rbsAirTracedValue[bwpId] += numRbs;
     NS_LOG_DEBUG("Update m_rbsAirTracedValue.at(" << bwpId << "): " << m_rbsAirTracedValue.at(bwpId)
@@ -642,168 +718,130 @@ NrFhControl::DoNotifyEndSlot(uint16_t bwpId, SfnSf currentSlot)
 }
 
 uint64_t
-NrFhControl::GetFhThr(uint16_t bwpId, uint32_t mcs, uint32_t nRegs, uint8_t dlRank) const
+NrFhControl::GetFhThr(const FhThrParams& params) const
 {
-    uint64_t thr;
-    uint32_t modulationOrder =
-        m_mcsTable == 1 ? GetModulationOrderTable1(mcs) : GetModulationOrderTable2(mcs);
+    NS_LOG_FUNCTION(this);
+    double thr = 0;
+    uint16_t numerology = m_fhPhySapUser.at(params.m_bwpId)->GetNumerology();
 
-    uint16_t numerology = m_fhPhySapUser.at(bwpId)->GetNumerology();
-    NS_ASSERT_MSG(numerology == m_numerologyPerBwp.at(bwpId),
-                  " Numerology has not been configured properly for bwpId: " << bwpId);
-    Time slotLength =
-        MicroSeconds(static_cast<uint16_t>(1000 / std::pow(2, numerology))); // slot length
-    uint32_t overheadMac = static_cast<uint32_t>(
-        10e6 * 1e-3 / std::pow(2, numerology)); // bits (10e6 (bps) x slot length (in s))
+    NS_ASSERT_MSG(numerology == m_numerologyPerBwp.at(params.m_bwpId),
+                  " Numerology has not been configured properly for bwpId: " << params.m_bwpId);
+    NS_ASSERT(params.m_numSym > 0);
+    NS_ASSERT(m_bwDlRef > 0);
+    NS_ASSERT(m_RankDlRef > 0);
+    NS_ASSERT(m_MDlRef > 0);
 
-    thr = (12 * modulationOrder * nRegs * dlRank + m_overheadDyn + overheadMac + 12 * 2 * 10) /
-          slotLength.GetSeconds(); // added 10 RBs of DCI overhead over 1 symbol, encoded with QPSK
+    Time slotLength = MicroSeconds(1000.0 / std::pow(2.0, numerology));
 
-    return thr;
+    auto overheadMac{0};
+    double bwUeDl{0.0};
+
+    const std::vector<uint8_t>* mcsMTable =
+        (m_mcsTable == 1) ? nrEesmT1.m_mcsMTable : nrEesmT2.m_mcsMTable;
+
+    NS_ASSERT(mcsMTable != nullptr);
+
+    bwUeDl = 12.0 * ceil(static_cast<double>(params.m_nRegs) / params.m_numSym) *
+             std::pow(2.0, numerology) * 15e3;
+
+    // Calculate the transmitted FH throughput based on the selected functional split
+    switch (m_funcSplit)
+    {
+    case FS_6: {
+        // Split 6 centralizes the MAC layer. The fronthaul transmits data from the MAC
+        // layer to the PHY layer, including both packets and control information.
+        thr = (m_prDl + m_crDl) * (bwUeDl / static_cast<double>(m_bwDlRef)) *
+              (static_cast<double>(params.m_dlRank) / m_RankDlRef) *
+              (static_cast<double>(mcsMTable->at(params.m_mcs)) / m_MDlRef);
+        break;
+    }
+    case FS_7_3: {
+        // Split 7.3 centralizes the channel coding process belonging to the PHY layer.
+        overheadMac = static_cast<uint32_t>(
+            12e6 * 1e-3 / std::pow(2, numerology)); // bits (12e6 (bps) x slot length (in s))
+
+        const std::vector<double>* mcsEcrTable =
+            (m_mcsTable == 1) ? nrEesmT1.m_mcsEcrTable : nrEesmT2.m_mcsEcrTable;
+
+        NS_ASSERT(mcsEcrTable != nullptr);
+
+        const double R = mcsEcrTable->at(params.m_mcs);
+
+        thr = (m_prDl + m_crDl) * (bwUeDl / static_cast<double>(m_bwDlRef)) *
+                  (static_cast<double>(params.m_dlRank) / m_RankDlRef) *
+                  (static_cast<double>(mcsMTable->at(params.m_mcs)) / m_MDlRef) * (1.0 / R) +
+              overheadMac;
+        break;
+    }
+    case FS_7_2: {
+        overheadMac = static_cast<uint32_t>(10e6 * 1e-3 / std::pow(2, numerology));
+
+        uint32_t effectiveModulationOrder =
+            m_enableModComp ? (m_mcsTable == 1 ? nrEesmT1.m_mcsMTable->at(params.m_mcs)
+                                               : nrEesmT2.m_mcsMTable->at(params.m_mcs))
+                            : 32;
+
+        uint8_t overheadDyn = (m_enableModComp ? m_overheadDyn : 0);
+        thr = ((12.0 * effectiveModulationOrder * params.m_nRegs * params.m_dlRank) + overheadDyn +
+               overheadMac) /
+              slotLength.GetSeconds();
+        break;
+    }
+    case FS_7_1: {
+        overheadMac = static_cast<uint32_t>(2e6 * 1e-3 / std::pow(2, numerology));
+        thr = (12.0 * 32.0 * params.m_nRegs * params.m_antennaPorts + overheadMac) /
+              slotLength.GetSeconds();
+        break;
+    }
+    default: {
+        NS_ABORT_MSG("This split cannot be configured in the current version of 5G-LENA.");
+        break;
+    }
+    }
+    return static_cast<uint64_t>(thr);
 }
 
 uint8_t
 NrFhControl::GetMaxMcs(uint8_t mcsTable, uint16_t modOrder) const
 {
-    uint8_t mcsMax = 0;
-    if (mcsTable == 1)
+    // If the calculated modOrder is higher than 6 or 8, limit its value to the maximum allowed in
+    // the MCS table
+    while (true)
     {
         if (modOrder < 4)
         {
-            mcsMax = GetMcsTable1(0);
+            modOrder = 2;
+            break;
         }
-        else if (modOrder >= 4 && modOrder < 6)
+
+        if (modOrder < 6)
         {
-            mcsMax = GetMcsTable1(1);
+            modOrder = 4;
+            break;
         }
-        else if (modOrder >= 6)
+
+        if (modOrder < 8)
         {
-            mcsMax = GetMcsTable1(2);
+            modOrder = 6;
+            break;
         }
+
+        if (m_mcsTable == 1)
+        {
+            NS_ABORT_MSG("Illegal modOrder for MCS Table 1");
+        }
+        modOrder = 8;
+        break;
     }
-    else if (m_mcsTable == 2)
-    {
-        if (modOrder < 4)
-        {
-            mcsMax = GetMcsTable2(0);
-        }
-        else if (modOrder >= 4 && modOrder < 6)
-        {
-            mcsMax = GetMcsTable2(1);
-        }
-        else if (modOrder >= 6 && modOrder < 8)
-        {
-            mcsMax = GetMcsTable2(2);
-        }
-        else if (modOrder >= 8)
-        {
-            mcsMax = GetMcsTable2(3);
-        }
-    }
+
+    const std::vector<uint8_t>* mcsMTable =
+        (mcsTable == 1) ? nrEesmT1.m_mcsMTable : nrEesmT2.m_mcsMTable;
+    // Find the last position where the modulation order appears in the MCS table. This position
+    // corresponds to the highest MCS that can be associated with that modulation order.
+    auto it = std::find(mcsMTable->rbegin(), mcsMTable->rend(), modOrder);
+    uint8_t mcsMax = std::distance(mcsMTable->begin(), it.base()) - 1;
+
     return mcsMax;
-}
-
-uint32_t
-NrFhControl::GetModulationOrderTable1(const uint32_t mcs) const
-{
-    std::vector<uint8_t> McsMTable1 = {// QPSK (modulationOrder = 2)
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       // 16QAM (modulationOrder = 4)
-                                       4,
-                                       4,
-                                       4,
-                                       4,
-                                       4,
-                                       4,
-                                       4,
-                                       // 64QAM (modulationOrder = 6)
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6};
-    return McsMTable1.at(mcs);
-}
-
-uint32_t
-NrFhControl::GetModulationOrderTable2(const uint32_t mcs) const
-{
-    NS_ASSERT_MSG(mcs <= 27, "MCS must be up to 27");
-    std::vector<uint8_t> McsMTable2 = {// QPSK (modulationOrder = 2)
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       2,
-                                       // 16QAM (modulationOrder = 4)
-                                       4,
-                                       4,
-                                       4,
-                                       4,
-                                       4,
-                                       4,
-                                       // 64QAM (modulationOrder = 6)
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       6,
-                                       // 256QAM (modulationOrder = 8)
-                                       8,
-                                       8,
-                                       8,
-                                       8,
-                                       8,
-                                       8,
-                                       8,
-                                       8};
-    return McsMTable2.at(mcs);
-}
-
-uint8_t
-NrFhControl::GetMcsTable1(const uint8_t modOrd) const
-{
-    std::vector<uint8_t> McsTable1 = {// QPSK (modulationOrder = 2)
-                                      9,
-                                      // 16QAM (modulationOrder = 4)
-                                      16,
-                                      // 64QAM (modulationOrder = 6)
-                                      28};
-    return McsTable1.at(modOrd);
-}
-
-uint8_t
-NrFhControl::GetMcsTable2(const uint8_t modOrd) const
-{
-    std::vector<uint8_t> McsTable2 = {// QPSK (modulationOrder = 2)
-                                      4,
-                                      // 16QAM (modulationOrder = 4)
-                                      10,
-                                      // 64QAM (modulationOrder = 6)
-                                      19,
-                                      // 256QAM (modulationOrder = 8)
-                                      27};
-    return McsTable2.at(modOrd);
 }
 
 } // namespace ns3

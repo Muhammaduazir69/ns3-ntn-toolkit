@@ -28,6 +28,7 @@
 #include <iomanip>
 #include <iostream>
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/satellite-link-results.h"
 #include "ns3/satellite-enums.h"
 #include "ns3/ntn-realistic-traffic-helper.h"
@@ -358,6 +359,8 @@ main(int argc, char* argv[])
     traffic.Wire();
 
     Simulator::Stop(Seconds(simTime + 0.5));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
     traffic.WriteHealthReport();
     std::cout << "  [WF-06] ISL physics -> data plane: " << g_couplingUpdates

@@ -6,6 +6,20 @@
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
 
+/**
+ * @ingroup test
+ * @file nr-test-epc-e2e-data.cc
+ *
+ * @brief End-to-end EPC data plane test suite (nr-epc-e2e-data). Each test case builds a full
+ * NR plus EPC topology with NrHelper and NrPointToPointEpcHelper (ideal RRC, PHY error model
+ * disabled): gNBs placed on a grid, UEs scattered around each gNB, and a remote host behind the
+ * PGW. For every configured bearer a dedicated QoS flow is activated and UDP traffic is run in
+ * both downlink and uplink; the test then asserts that the PDCP statistics report the expected
+ * number of transmitted and received packets and that each packet sink received the expected
+ * number of bytes. Cases cover one to three gNBs, multiple UEs and bearers per UE, and packet
+ * sizes chosen to exercise RLC fragmentation and aggregation.
+ */
+
 #include "ns3/abort.h"
 #include "ns3/boolean.h"
 #include "ns3/config.h"
@@ -13,23 +27,23 @@
 #include "ns3/inet-socket-address.h"
 #include "ns3/internet-stack-helper.h"
 #include "ns3/ipv4-address-helper.h"
+#include "ns3/ipv4-static-routing-helper.h"
+#include "ns3/ipv4-static-routing.h"
 #include "ns3/log.h"
 #include "ns3/mobility-helper.h"
 #include "ns3/nr-bearer-stats-calculator.h"
 #include "ns3/nr-helper.h"
 #include "ns3/nr-point-to-point-epc-helper.h"
+#include "ns3/nr-ue-net-device.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/packet-sink.h"
 #include "ns3/point-to-point-helper.h"
+#include "ns3/ptr.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 #include "ns3/udp-client-server-helper.h"
 #include "ns3/udp-echo-helper.h"
 #include "ns3/uinteger.h"
-#include <ns3/ipv4-static-routing-helper.h>
-#include <ns3/ipv4-static-routing.h>
-#include <ns3/nr-ue-net-device.h>
-#include <ns3/ptr.h>
 
 #include <cstdint>
 
@@ -38,20 +52,20 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("NrEpcE2eData");
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  */
 
-/// BearerTestData structure
-struct BearerTestData
+/// NrBearerTestData structure
+struct NrBearerTestData
 {
     /**
      * Constructor
      *
-     * \param n the number of packets
-     * \param s the packet size
-     * \param i the inter packet interval in seconds
+     * @param n the number of packets
+     * @param s the packet size
+     * @param i the inter packet interval in seconds
      */
-    BearerTestData(uint32_t n, uint32_t s, double i);
+    NrBearerTestData(uint32_t n, uint32_t s, double i);
 
     uint32_t numPkts;         ///< the number of packets
     uint32_t pktSize;         ///< the packet size
@@ -64,7 +78,7 @@ struct BearerTestData
     Ptr<Application> ulClientApp; ///< the UL client app
 };
 
-BearerTestData::BearerTestData(uint32_t n, uint32_t s, double i)
+NrBearerTestData::NrBearerTestData(uint32_t n, uint32_t s, double i)
     : numPkts(n),
       pktSize(s),
       interPacketInterval(Seconds(i))
@@ -74,7 +88,7 @@ BearerTestData::BearerTestData(uint32_t n, uint32_t s, double i)
 /// UeTestData structure
 struct UeTestData
 {
-    std::vector<BearerTestData> bearers; ///< the bearer test data
+    std::vector<NrBearerTestData> bearers; ///< the bearer test data
 };
 
 /// GnbTestData structure
@@ -84,9 +98,9 @@ struct GnbTestData
 };
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Test that e2e packet flow is correct. Compares the data send and the
+ * @brief Test that e2e packet flow is correct. Compares the data send and the
  * data received. Test uses mostly the PDCP stats to check the performance.
  */
 
@@ -96,8 +110,8 @@ class NrEpcE2eDataTestCase : public TestCase
     /**
      * Constructor
      *
-     * \param name the reference name
-     * \param v the gNB test data
+     * @param name the reference name
+     * @param v the gNB test data
      */
     NrEpcE2eDataTestCase(std::string name, std::vector<GnbTestData> v);
     ~NrEpcE2eDataTestCase() override;
@@ -137,8 +151,7 @@ NrEpcE2eDataTestCase::DoRun()
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     nrHelper->SetEpcHelper(nrEpcHelper);
 
-    auto bandwidthAndBWPPair =
-        nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1, BandwidthPartInfo::UMa}});
+    auto bandwidthAndBWPPair = nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1}}, "UMa");
 
     // allow jumbo frames on the S1-U link
     nrEpcHelper->SetAttribute("S1uLinkMtu", UintegerValue(30000));
@@ -192,7 +205,6 @@ NrEpcE2eDataTestCase::DoRun()
                                      StringValue("RowFirst"));
     gnbMobility.Install(gnbs);
     NetDeviceContainer nrGnbDevs = nrHelper->InstallGnbDevice(gnbs, bandwidthAndBWPPair.second);
-    nrHelper->UpdateDeviceConfigs(nrGnbDevs);
     auto nrGnbDevIt = nrGnbDevs.Begin();
 
     uint16_t ulPort = 1000;
@@ -215,7 +227,6 @@ NrEpcE2eDataTestCase::DoRun()
         ueMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
         ueMobility.Install(ues);
         NetDeviceContainer ueNrDevs = nrHelper->InstallUeDevice(ues, bandwidthAndBWPPair.second);
-        nrHelper->UpdateDeviceConfigs(ueNrDevs);
 
         // we install the IP stack on the UEs
         internet.Install(ues);
@@ -227,18 +238,15 @@ NrEpcE2eDataTestCase::DoRun()
             Ptr<NetDevice> ueNrDevice = ueNrDevs.Get(u);
             Ipv4InterfaceContainer ueIpIface =
                 nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNrDevice));
-            // set the default gateway for the UE
-            Ptr<Ipv4StaticRouting> ueStaticRouting =
-                ipv4RoutingHelper.GetStaticRouting(ue->GetObject<Ipv4>());
-            ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
 
-            // we can now attach the UE, which will also activate the default EPS bearer
+            // AttachToGnb sets up the default DRB (QFI=1, DRBID=3, LCID=3)
             nrHelper->AttachToGnb(ueNrDevice, *nrGnbDevIt);
 
             uint16_t dlPort = 2000;
-            for (uint32_t b = 0; b < gnbit->ues.at(u).bearers.size(); ++b)
+            for (uint32_t bearerIndex = 0; bearerIndex < gnbit->ues.at(u).bearers.size();
+                 ++bearerIndex)
             {
-                BearerTestData& bearerTestData = gnbit->ues.at(u).bearers.at(b);
+                NrBearerTestData& bearerTestData = gnbit->ues.at(u).bearers.at(bearerIndex);
 
                 { // Downlink
                     ++dlPort;
@@ -276,22 +284,36 @@ NrEpcE2eDataTestCase::DoRun()
                     bearerTestData.ulClientApp = apps.Get(0);
                 }
 
-                NrEpsBearer epsBearer(NrEpsBearer::NGBR_VOICE_VIDEO_GAMING);
+                NrQosFlow flow(NrQosFlow::NGBR_VOICE_VIDEO_GAMING);
 
-                Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-                NrEpcTft::PacketFilter dlpf;
+                Ptr<NrQosRule> rule = Create<NrQosRule>();
+                NrQosRule::PacketFilter dlpf;
                 dlpf.localPortStart = dlPort;
                 dlpf.localPortEnd = dlPort;
-                tft->Add(dlpf);
-                NrEpcTft::PacketFilter ulpf;
+                rule->Add(dlpf);
+                NrQosRule::PacketFilter ulpf;
                 ulpf.remotePortStart = ulPort;
                 ulpf.remotePortEnd = ulPort;
-                tft->Add(ulpf);
+                rule->Add(ulpf);
 
-                // all data will go over the dedicated bearer instead of the default EPS bearer
-                nrHelper->ActivateDedicatedEpsBearer(ueNrDevice, epsBearer, tft);
+                // Activate dedicated QoS flows. Each dedicated flow will get QFI 3, 4, 5, ...
+                // (skipping QFI 2) which maps to DRBID 5, 6, 7, ... and LCID 5, 6, 7, ...
+                nrHelper->ActivateDedicatedQosFlow(ueNrDevice, flow, rule);
             }
         }
+
+        // Note: the remote host stack was historically (re)assigned at base
+        // 4000 after an initial 1000; the later assignment wins, so a single
+        // assignment at 4000 reproduces the exact stream allocation.
+        nrHelper->AssignStreams({.assignEpc = true,
+                                 .remoteHostNodes = remoteHostContainer,
+                                 .ueNodes = ues,
+                                 .gnbNodes = gnbs,
+                                 .gnbDevs = nrGnbDevs,
+                                 .ueDevs = ueNrDevs,
+                                 .remoteHostStream = 4000,
+                                 .ueNodeStream = 3000,
+                                 .gnbNodeStream = 2000});
     }
     Config::Set("/NodeList/*/DeviceList/*/NrGnbRrc/UeMap/*/RadioBearerMap/*/NrRlc/MaxTxBufferSize",
                 UintegerValue(2 * 1024 * 1024));
@@ -315,18 +337,22 @@ NrEpcE2eDataTestCase::DoRun()
     {
         for (auto ueit = gnbit->ues.begin(); ueit < gnbit->ues.end(); ++ueit)
         {
-            for (uint32_t b = 0; b < ueit->bearers.size(); ++b)
+            for (uint32_t bearerIndex = 0; bearerIndex < ueit->bearers.size(); ++bearerIndex)
             {
                 // Since IMSIs now match NodeId, we can use this shortcut to retrieve the IMSI
-                uint64_t imsi = ueit->bearers.at(b).dlServerApp->GetNode()->GetId();
+                uint64_t imsi = ueit->bearers.at(bearerIndex).dlServerApp->GetNode()->GetId();
 
-                // LCID 0, 1, 2 are for SRBs
-                // LCID 3 is (at the moment) the Default EPS bearer, and is unused in this test
-                // program
-                uint8_t lcid = b + 4;
-                uint32_t expectedPkts = ueit->bearers.at(b).numPkts;
-                uint32_t expectedBytes =
-                    (ueit->bearers.at(b).numPkts) * (ueit->bearers.at(b).pktSize);
+                // LCID allocation:
+                // LCID 0:   Reserved
+                // LCID 1-2: SRBs (SRB1, SRB2)
+                // LCID 3:   Default DRB (QFI 1)
+                // LCID 4:   Reserved for sidelink
+                // LCID 5+:  Dedicated DRBs (first dedicated at LCID 5 = QFI 3)
+                // Dedicated bearers in this test start at bearerIndex 0, mapped to LCID 5+
+                uint8_t lcid = bearerIndex + 5;
+                uint32_t expectedPkts = ueit->bearers.at(bearerIndex).numPkts;
+                uint32_t expectedBytes = (ueit->bearers.at(bearerIndex).numPkts) *
+                                         (ueit->bearers.at(bearerIndex).pktSize);
                 uint32_t txPktsPdcpDl =
                     nrHelper->GetPdcpStatsCalculator()->GetDlTxPackets(imsi, lcid);
                 uint32_t rxPktsPdcpDl =
@@ -335,8 +361,8 @@ NrEpcE2eDataTestCase::DoRun()
                     nrHelper->GetPdcpStatsCalculator()->GetUlTxPackets(imsi, lcid);
                 uint32_t rxPktsPdcpUl =
                     nrHelper->GetPdcpStatsCalculator()->GetUlRxPackets(imsi, lcid);
-                uint32_t rxBytesDl = ueit->bearers.at(b).dlServerApp->GetTotalRx();
-                uint32_t rxBytesUl = ueit->bearers.at(b).ulServerApp->GetTotalRx();
+                uint32_t rxBytesDl = ueit->bearers.at(bearerIndex).dlServerApp->GetTotalRx();
+                uint32_t rxBytesUl = ueit->bearers.at(bearerIndex).ulServerApp->GetTotalRx();
 
                 NS_TEST_ASSERT_MSG_EQ(txPktsPdcpDl,
                                       expectedPkts,
@@ -370,9 +396,9 @@ NrEpcE2eDataTestCase::DoRun()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief Test that the S1-U interface implementation works correctly
+ * @brief Test that the S1-U interface implementation works correctly
  */
 class NrEpcE2eDataTestSuite : public TestSuite
 {
@@ -387,98 +413,98 @@ NrEpcE2eDataTestSuite::NrEpcE2eDataTestSuite()
     std::vector<GnbTestData> v1;
     GnbTestData e1;
     UeTestData u1;
-    BearerTestData f1(1, 100, 0.01);
+    NrBearerTestData f1(1, 100, 0.01);
     u1.bearers.push_back(f1);
     e1.ues.push_back(u1);
     v1.push_back(e1);
-    AddTestCase(new NrEpcE2eDataTestCase("1 eNB, 1UE", v1), TestCase::Duration::QUICK);
+    AddTestCase(new NrEpcE2eDataTestCase("1 gNB, 1UE", v1), TestCase::Duration::QUICK);
 
     std::vector<GnbTestData> v2;
     GnbTestData e2;
     UeTestData u2_1;
-    BearerTestData f2_1(1, 100, 0.01);
+    NrBearerTestData f2_1(1, 100, 0.01);
     u2_1.bearers.push_back(f2_1);
     e2.ues.push_back(u2_1);
     UeTestData u2_2;
-    BearerTestData f2_2(2, 200, 0.01);
+    NrBearerTestData f2_2(2, 200, 0.01);
     u2_2.bearers.push_back(f2_2);
     e2.ues.push_back(u2_2);
     v2.push_back(e2);
-    AddTestCase(new NrEpcE2eDataTestCase("1 eNB, 2UEs", v2), TestCase::Duration::EXTENSIVE);
+    AddTestCase(new NrEpcE2eDataTestCase("1 gNB, 2UEs", v2), TestCase::Duration::EXTENSIVE);
 
     std::vector<GnbTestData> v3;
     v3.push_back(e1);
     v3.push_back(e2);
-    AddTestCase(new NrEpcE2eDataTestCase("2 eNBs", v3), TestCase::Duration::EXTENSIVE);
+    AddTestCase(new NrEpcE2eDataTestCase("2 gNBs", v3), TestCase::Duration::EXTENSIVE);
 
     GnbTestData e4;
     UeTestData u4_1;
-    BearerTestData f4_1(3, 50, 0.01);
+    NrBearerTestData f4_1(3, 50, 0.01);
     u4_1.bearers.push_back(f4_1);
     e4.ues.push_back(u4_1);
     UeTestData u4_2;
-    BearerTestData f4_2(5, 1400, 0.01);
+    NrBearerTestData f4_2(5, 1400, 0.01);
     u4_2.bearers.push_back(f4_2);
     e4.ues.push_back(u4_2);
     UeTestData u4_3;
-    BearerTestData f4_3(1, 12, 0.01);
+    NrBearerTestData f4_3(1, 12, 0.01);
     u4_3.bearers.push_back(f4_3);
     e4.ues.push_back(u4_3);
     std::vector<GnbTestData> v4;
     v4.push_back(e4);
     v4.push_back(e1);
     v4.push_back(e2);
-    AddTestCase(new NrEpcE2eDataTestCase("3 eNBs", v4), TestCase::Duration::EXTENSIVE);
+    AddTestCase(new NrEpcE2eDataTestCase("3 gNBs", v4), TestCase::Duration::EXTENSIVE);
 
     GnbTestData e5;
     UeTestData u5;
-    BearerTestData f5(5, 1000, 0.01);
+    NrBearerTestData f5(5, 1000, 0.01);
     u5.bearers.push_back(f5);
     e5.ues.push_back(u5);
     std::vector<GnbTestData> v5;
     v5.push_back(e5);
-    AddTestCase(new NrEpcE2eDataTestCase("1 eNB, 1UE with 1000 byte packets", v5),
+    AddTestCase(new NrEpcE2eDataTestCase("1 gNB, 1UE with 1000 byte packets", v5),
                 TestCase::Duration::EXTENSIVE);
 
     GnbTestData e6;
     UeTestData u6;
-    BearerTestData f6(5, 1400, 0.01);
+    NrBearerTestData f6(5, 1400, 0.01);
     u6.bearers.push_back(f6);
     e6.ues.push_back(u6);
     std::vector<GnbTestData> v6;
     v6.push_back(e6);
-    AddTestCase(new NrEpcE2eDataTestCase("1 eNB, 1UE with 1400 byte packets", v6),
+    AddTestCase(new NrEpcE2eDataTestCase("1 gNB, 1UE with 1400 byte packets", v6),
                 TestCase::Duration::EXTENSIVE);
 
     GnbTestData e7;
     UeTestData u7;
-    BearerTestData f7_1(1, 1400, 0.01);
+    NrBearerTestData f7_1(1, 1400, 0.01);
     u7.bearers.push_back(f7_1);
-    BearerTestData f7_2(1, 100, 0.01);
+    NrBearerTestData f7_2(1, 100, 0.01);
     u7.bearers.push_back(f7_2);
     e7.ues.push_back(u7);
     std::vector<GnbTestData> v7;
     v7.push_back(e7);
-    AddTestCase(new NrEpcE2eDataTestCase("1 eNB, 1UE with 2 bearers", v7),
+    AddTestCase(new NrEpcE2eDataTestCase("1 gNB, 1UE with 2 bearers", v7),
                 TestCase::Duration::EXTENSIVE);
 
     GnbTestData e8;
     UeTestData u8;
-    BearerTestData f8(50, 8000, 0.02); // watch out for ns3::NrRlcUm::MaxTxBufferSize
+    NrBearerTestData f8(50, 8000, 0.02); // watch out for ns3::NrRlcUm::MaxTxBufferSize
     u8.bearers.push_back(f8);
     e8.ues.push_back(u8);
     std::vector<GnbTestData> v8;
     v8.push_back(e8);
-    AddTestCase(new NrEpcE2eDataTestCase("1 eNB, 1UE with fragmentation", v8),
+    AddTestCase(new NrEpcE2eDataTestCase("1 gNB, 1UE with fragmentation", v8),
                 TestCase::Duration::EXTENSIVE);
 
     GnbTestData e9;
     UeTestData u9;
-    BearerTestData f9(1000, 20, 0.0001);
+    NrBearerTestData f9(1000, 20, 0.0001);
     u9.bearers.push_back(f9);
     e9.ues.push_back(u9);
     std::vector<GnbTestData> v9;
     v9.push_back(e9);
-    AddTestCase(new NrEpcE2eDataTestCase("1 eNB, 1UE with aggregation", v9),
+    AddTestCase(new NrEpcE2eDataTestCase("1 gNB, 1UE with aggregation", v9),
                 TestCase::Duration::EXTENSIVE);
 }

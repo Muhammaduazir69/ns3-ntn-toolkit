@@ -38,12 +38,6 @@ TcpOptionTS::GetTypeId()
     return tid;
 }
 
-TypeId
-TcpOptionTS::GetInstanceTypeId() const
-{
-    return GetTypeId();
-}
-
 void
 TcpOptionTS::Print(std::ostream& os) const
 {
@@ -135,7 +129,7 @@ TcpOptionTS::ElapsedTimeFromTsValue(uint32_t echoTime)
     uint64_t now64 = (uint64_t)Simulator::Now().GetMilliSeconds();
     uint32_t now32 = now64 & 0xFFFFFFFF;
 
-    Time ret = Seconds(0.0);
+    Time ret;
     if (now32 > echoTime)
     {
         ret = MilliSeconds(now32 - echoTime);

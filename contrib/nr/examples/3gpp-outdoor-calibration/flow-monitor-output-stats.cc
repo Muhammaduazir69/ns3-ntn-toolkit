@@ -2,11 +2,24 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file flow-monitor-output-stats.cc
+ *
+ * @brief Implementation of FlowMonitorOutputStats, used by the cttc-nr-3gpp-calibration example
+ * to dump the end-to-end FlowMonitor results into the SQLite output database. For every flow it
+ * stores TX/RX packets and bytes, offered rate, throughput, mean delay and mean jitter in a
+ * table (named "e2e" by the example), keyed by RNG seed and run number so that re-running the
+ * same seed/run pair replaces the old rows; Save() can optionally restrict the database rows to
+ * flows whose endpoints match a given set of IP addresses. A human-readable summary with the
+ * per-flow and mean throughput/delay figures is also written to a text file.
+ */
+
 #include "flow-monitor-output-stats.h"
 
-#include <ns3/abort.h>
-#include <ns3/flow-monitor-module.h>
-#include <ns3/rng-seed-manager.h>
+#include "ns3/abort.h"
+#include "ns3/flow-monitor-module.h"
+#include "ns3/rng-seed-manager.h"
 
 #include <fstream>
 
@@ -51,7 +64,8 @@ FlowMonitorOutputStats::SetDb(SQLiteOutput* db, const std::string& tableName)
 void
 FlowMonitorOutputStats::Save(const Ptr<FlowMonitor>& monitor,
                              FlowMonitorHelper& flowmonHelper,
-                             const std::string& filename)
+                             const std::string& filename,
+                             std::set<Ipv4Address> addressesToConsider)
 {
     bool ret;
     monitor->CheckForLostPackets();
@@ -75,6 +89,14 @@ FlowMonitorOutputStats::Save(const Ptr<FlowMonitor>& monitor,
     for (const auto& flowStat : flowStats)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(flowStat.first);
+
+        // Filter: Skip if neither src nor dst IP is in the allowed set
+        if (!addressesToConsider.empty() && (!addressesToConsider.contains(t.sourceAddress) &&
+                                             !addressesToConsider.contains(t.destinationAddress)))
+        {
+            continue; // Skip this flow
+        }
+
         std::stringstream protoStream;
         protoStream << (uint16_t)t.protocol;
         if (t.protocol == 6)

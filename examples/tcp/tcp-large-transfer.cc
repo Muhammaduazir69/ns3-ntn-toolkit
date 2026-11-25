@@ -52,25 +52,25 @@ uint8_t data[writeSize];
 /**
  * Start a flow.
  *
- * \param localSocket The local (sending) socket.
- * \param servAddress The server address.
- * \param servPort The server port.
+ * @param localSocket The local (sending) socket.
+ * @param servAddress The server address.
+ * @param servPort The server port.
  */
 void StartFlow(Ptr<Socket> localSocket, Ipv4Address servAddress, uint16_t servPort);
 
 /**
  * Write to the buffer, filling it.
  *
- * \param localSocket The socket.
- * \param txSpace The number of bytes to write.
+ * @param localSocket The socket.
+ * @param txSpace The number of bytes to write.
  */
 void WriteUntilBufferFull(Ptr<Socket> localSocket, uint32_t txSpace);
 
 /**
  * Congestion window tracker function.
  *
- * \param oldval Old value.
- * \param newval New value.
+ * @param oldval Old value.
+ * @param newval New value.
  */
 static void
 CwndTracer(uint32_t oldval, uint32_t newval)
@@ -151,8 +151,8 @@ main(int argc, char* argv[])
                           InetSocketAddress(Ipv4Address::GetAny(), servPort));
 
     ApplicationContainer apps = sink.Install(n1n2.Get(1));
-    apps.Start(Seconds(0.0));
-    apps.Stop(Seconds(3.0));
+    apps.Start(Seconds(0));
+    apps.Stop(Seconds(3));
 
     // Create a source to send packets from n0.  Instead of a full Application
     // and the helper APIs you might see in other example files, this example

@@ -90,6 +90,9 @@
 //     plus serialization time of the packets sent on that hop);
 //   - --czml / --netsim write an ntn-observability scene of satellites, devices and gateways.
 
+#include "ns3/ntn-dataset-writer.h"
+
+#include <filesystem>
 #include "ns3/applications-module.h"
 #include "ns3/contact-graph-router.h"
 #include "ns3/contact-graph-scheduler.h"
@@ -1597,8 +1600,8 @@ main(int argc, char* argv[])
     g_e2eMon->SetAttribute("FlowInterruptionsBinWidth", DoubleValue(3600.0));
     g_e2eCls = Create<NtnOranFlowClassifier>();
     g_e2eMon->AddFlowClassifier(g_e2eCls);
-    g_e2eTx = Create<NtnOranFlowProbe>(g_e2eMon, g_e2eCls, "device");
-    g_e2eRx = Create<NtnOranFlowProbe>(g_e2eMon, g_e2eCls, "server");
+    g_e2eTx = CreateObject<NtnOranFlowProbe>(g_e2eMon, g_e2eCls, "device");
+    g_e2eRx = CreateObject<NtnOranFlowProbe>(g_e2eMon, g_e2eCls, "server");
     g_e2eMon->Start(Seconds(0));
     // Per-hop IPv4 FlowMonitor on every node.
     FlowMonitorHelper fmh;
@@ -1685,6 +1688,8 @@ main(int argc, char* argv[])
     }
     Simulator::Schedule(Seconds(0), &Tick);
     Simulator::Stop(Seconds(horizon));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(std::filesystem::path(out).parent_path().string());
     Simulator::Run();
     if (sceneRec)
     {
@@ -1950,6 +1955,9 @@ main(int argc, char* argv[])
         }
     }
     g_out.close();
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(std::filesystem::path(out).parent_path().string(), "sagin-store-forward-iot", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

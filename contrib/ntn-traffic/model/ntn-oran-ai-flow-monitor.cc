@@ -155,7 +155,7 @@ void
 NtnOranAiFlowMonitor::AddSource(Ptr<NtnOranApplication> app)
 {
     Ptr<NtnOranFlowProbe> probe =
-        Create<NtnOranFlowProbe>(m_monitor, m_classifier, "source");
+        CreateObject<NtnOranFlowProbe>(m_monitor, m_classifier, "source");
     m_probes.push_back(probe);
     app->TraceConnectWithoutContext(
         "Tx", MakeCallback(&NtnOranFlowProbe::ReportTx, PeekPointer(probe)));
@@ -192,7 +192,7 @@ void
 NtnOranAiFlowMonitor::AddSink(Ptr<NtnOranSink> sink, int32_t ueIndex, Direction dir)
 {
     Ptr<NtnOranFlowProbe> probe =
-        Create<NtnOranFlowProbe>(m_monitor, m_classifier, "sink");
+        CreateObject<NtnOranFlowProbe>(m_monitor, m_classifier, "sink");
     m_probes.push_back(probe);
     // The sink's "Rx" trace fires with the full packet (header still inside).
     sink->TraceConnectWithoutContext("Rx", MakeBoundCallback(&SinkRxTrampoline, probe));

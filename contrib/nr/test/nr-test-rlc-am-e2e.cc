@@ -7,6 +7,20 @@
  *         Nicola Baldo <nbaldo@cttc.es>
  */
 
+/**
+ * @ingroup test
+ * @file nr-test-rlc-am-e2e.cc
+ *
+ * @brief Test suite `nr-rlc-am-e2e`: end-to-end delivery over RLC AM under packet loss. Using
+ * NrSimpleHelper, a gNB and a UE stack of test RRC/PDCP entities around real NrRlcAm entities are
+ * connected through SimpleChannel devices; the gNB RRC generates 1000 SDUs of 100 bytes
+ * (continuous or bulk arrival) while the test MACs issue periodic fixed-size transmission
+ * opportunities and a RateErrorModel drops downlink PDUs at rates from 0% to 95%. After a
+ * loss-dependent settling time the test asserts that transmitted RLC PDUs equal received plus
+ * dropped ones, and that AM retransmissions recovered every loss so all RRC SDUs are delivered.
+ * Cases sweep the loss rate, the RngRun value and the SDU arrival pattern.
+ */
+
 #include "nr-test-rlc-am-e2e.h"
 
 #include "nr-simple-helper.h"
@@ -87,7 +101,7 @@ NrRlcAmE2eTestSuite::NrRlcAmE2eTestSuite()
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrRlcAmE2eTestSuite nrRlcAmE2eTestSuite;
@@ -166,14 +180,14 @@ NrRlcAmE2eTestCase::DoRun()
     // Note: Just one gNB and UE is supported. Everything is done in InstallGnbDevice and
     // InstallUeDevice
 
-    // Attach one UE per eNodeB
+    // Attach one UE per gNB
     // for (uint16_t i = 0; i < numberOfNodes; i++)
     //   {
     //     nrSimpleHelper->Attach (ueNrDevs.Get(i), nrGnbDevs.Get(i));
     //   }
 
-    //   nrSimpleHelper->ActivateEpsBearer (ueNrDevs, NrEpsBearer
-    //   (NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT), NrEpcTft::Default ());
+    //   nrSimpleHelper->ActivateEpsBearer (ueNrDevs, NrQosFlow);
+    //   (NrQosFlow::NGBR_VIDEO_TCP_DEFAULT), NrQosRule::Default ());
 
     // Error models: downlink and uplink
     Ptr<RateErrorModel> dlEm = CreateObject<RateErrorModel>();

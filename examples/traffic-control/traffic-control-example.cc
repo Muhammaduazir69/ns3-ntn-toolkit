@@ -57,8 +57,8 @@ NS_LOG_COMPONENT_DEFINE("TrafficControlExample");
 /**
  * Number of packets in TX queue trace.
  *
- * \param oldValue Old velue.
- * \param newValue New value.
+ * @param oldValue Old velue.
+ * @param newValue New value.
  */
 void
 TcPacketsInQueueTrace(uint32_t oldValue, uint32_t newValue)
@@ -69,8 +69,8 @@ TcPacketsInQueueTrace(uint32_t oldValue, uint32_t newValue)
 /**
  * Packets in the device queue trace.
  *
- * \param oldValue Old velue.
- * \param newValue New value.
+ * @param oldValue Old velue.
+ * @param newValue New value.
  */
 void
 DevicePacketsInQueueTrace(uint32_t oldValue, uint32_t newValue)
@@ -81,7 +81,7 @@ DevicePacketsInQueueTrace(uint32_t oldValue, uint32_t newValue)
 /**
  * TC Soujoun time trace.
  *
- * \param sojournTime The soujourn time.
+ * @param sojournTime The soujourn time.
  */
 void
 SojournTimeTrace(Time sojournTime)
@@ -149,7 +149,7 @@ main(int argc, char* argv[])
     PacketSinkHelper packetSinkHelper(socketType, localAddress);
     ApplicationContainer sinkApp = packetSinkHelper.Install(nodes.Get(0));
 
-    sinkApp.Start(Seconds(0.0));
+    sinkApp.Start(Seconds(0));
     sinkApp.Stop(Seconds(simulationTime + 0.1));
 
     uint32_t payloadSize = 1448;
@@ -166,7 +166,7 @@ main(int argc, char* argv[])
     onoff.SetAttribute("Remote", AddressValue(rmt));
     onoff.SetAttribute("Tos", UintegerValue(0xb8));
     apps.Add(onoff.Install(nodes.Get(1)));
-    apps.Start(Seconds(1.0));
+    apps.Start(Seconds(1));
     apps.Stop(Seconds(simulationTime + 0.1));
 
     FlowMonitorHelper flowmon;

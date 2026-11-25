@@ -13,16 +13,12 @@
  * Authors: Elena Buchatskaia <borovkovaes@iitp.ru>
  *          Pavel Boyko <boyko@iitp.ru>
  */
-#define NS_LOG_APPEND_CONTEXT                                                                      \
-    if (m_ipv4)                                                                                    \
-    {                                                                                              \
-        std::clog << "[node " << m_ipv4->GetObject<Node>()->GetId() << "] ";                       \
-    }
 
 #include "aodv-routing-protocol.h"
 
 #include "ns3/adhoc-wifi-mac.h"
 #include "ns3/boolean.h"
+#include "ns3/iana-internet-protocol-numbers.h"
 #include "ns3/inet-socket-address.h"
 #include "ns3/log.h"
 #include "ns3/pointer.h"
@@ -30,13 +26,19 @@
 #include "ns3/string.h"
 #include "ns3/trace-source-accessor.h"
 #include "ns3/udp-header.h"
-#include "ns3/udp-l4-protocol.h"
 #include "ns3/udp-socket-factory.h"
 #include "ns3/wifi-mpdu.h"
 #include "ns3/wifi-net-device.h"
 
 #include <algorithm>
 #include <limits>
+
+#undef NS_LOG_APPEND_CONTEXT
+#define NS_LOG_APPEND_CONTEXT                                                                      \
+    if (m_ipv4)                                                                                    \
+    {                                                                                              \
+        ns3LogStream << "[node " << m_ipv4->GetObject<Node>()->GetId() << "] ";                    \
+    }
 
 namespace ns3
 {
@@ -51,15 +53,15 @@ NS_OBJECT_ENSURE_REGISTERED(RoutingProtocol);
 const uint32_t RoutingProtocol::AODV_PORT = 654;
 
 /**
- * \ingroup aodv
- * \brief Tag used by AODV implementation
+ * @ingroup aodv
+ * @brief Tag used by AODV implementation
  */
 class DeferredRouteOutputTag : public Tag
 {
   public:
     /**
-     * \brief Constructor
-     * \param o the output interface
+     * @brief Constructor
+     * @param o the output interface
      */
     DeferredRouteOutputTag(int32_t o = -1)
         : Tag(),
@@ -68,8 +70,8 @@ class DeferredRouteOutputTag : public Tag
     }
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId()
     {
@@ -86,8 +88,8 @@ class DeferredRouteOutputTag : public Tag
     }
 
     /**
-     * \brief Get the output interface
-     * \return the output interface
+     * @brief Get the output interface
+     * @return the output interface
      */
     int32_t GetInterface() const
     {
@@ -95,8 +97,8 @@ class DeferredRouteOutputTag : public Tag
     }
 
     /**
-     * \brief Set the output interface
-     * \param oif the output interface
+     * @brief Set the output interface
+     * @param oif the output interface
      */
     void SetInterface(int32_t oif)
     {
@@ -167,7 +169,7 @@ RoutingProtocol::RoutingProtocol()
       m_htimer(Timer::CANCEL_ON_DESTROY),
       m_rreqRateLimitTimer(Timer::CANCEL_ON_DESTROY),
       m_rerrRateLimitTimer(Timer::CANCEL_ON_DESTROY),
-      m_lastBcastTime(Seconds(0))
+      m_lastBcastTime()
 {
     m_nb.SetCallback(MakeCallback(&RoutingProtocol::SendRerrWhenBreaksLinkToNextHop, this));
 }
@@ -558,7 +560,7 @@ RoutingProtocol::RouteInput(Ptr<const Packet> p,
                 {
                     return true;
                 }
-                if (header.GetProtocol() == UdpL4Protocol::PROT_NUMBER)
+                if (header.GetProtocol() == iana::internetprotocolnumbers::UDP)
                 {
                     UdpHeader udpHeader;
                     p->PeekHeader(udpHeader);
@@ -1145,7 +1147,7 @@ RoutingProtocol::SendRequest(Ipv4Address dst)
         }
         NS_LOG_DEBUG("Send RREQ with id " << rreqHeader.GetId() << " to socket");
         m_lastBcastTime = Simulator::Now();
-        Simulator::Schedule(Time(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10))),
+        Simulator::Schedule(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10)),
                             &RoutingProtocol::SendTo,
                             this,
                             socket,
@@ -1507,7 +1509,7 @@ RoutingProtocol::RecvRequest(Ptr<Packet> p, Ipv4Address receiver, Ipv4Address sr
             destination = iface.GetBroadcast();
         }
         m_lastBcastTime = Simulator::Now();
-        Simulator::Schedule(Time(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10))),
+        Simulator::Schedule(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10)),
                             &RoutingProtocol::SendTo,
                             this,
                             socket,
@@ -1636,7 +1638,7 @@ RoutingProtocol::RecvReply(Ptr<Packet> p, Ipv4Address receiver, Ipv4Address send
     RrepHeader rrepHeader;
     p->RemoveHeader(rrepHeader);
     Ipv4Address dst = rrepHeader.GetDst();
-    NS_LOG_LOGIC("RREP destination " << dst << " RREP origin " << rrepHeader.GetOrigin());
+    NS_LOG_LOGIC("Route destination " << dst << " Route origin " << rrepHeader.GetOrigin());
 
     uint8_t hop = rrepHeader.GetHopCount() + 1;
     rrepHeader.SetHopCount(hop);
@@ -1930,8 +1932,8 @@ void
 RoutingProtocol::HelloTimerExpire()
 {
     NS_LOG_FUNCTION(this);
-    Time offset = Time(Seconds(0));
-    if (m_lastBcastTime > Time(Seconds(0)))
+    Time offset;
+    if (m_lastBcastTime.IsStrictlyPositive())
     {
         offset = Simulator::Now() - m_lastBcastTime;
         NS_LOG_DEBUG("Hello deferred due to last bcast at:" << m_lastBcastTime);
@@ -1942,8 +1944,8 @@ RoutingProtocol::HelloTimerExpire()
     }
     m_htimer.Cancel();
     Time diff = m_helloInterval - offset;
-    m_htimer.Schedule(std::max(Time(Seconds(0)), diff));
-    m_lastBcastTime = Time(Seconds(0));
+    m_htimer.Schedule(std::max(Seconds(0), diff));
+    m_lastBcastTime = Seconds(0);
 }
 
 void
@@ -2006,7 +2008,7 @@ RoutingProtocol::SendHello()
         {
             destination = iface.GetBroadcast();
         }
-        Time jitter = Time(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10)));
+        Time jitter = MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10));
         Simulator::Schedule(jitter, &RoutingProtocol::SendTo, this, socket, packet, destination);
     }
 }
@@ -2177,7 +2179,7 @@ RoutingProtocol::SendRerrMessage(Ptr<Packet> packet, std::vector<Ipv4Address> pr
             NS_LOG_LOGIC("one precursor => unicast RERR to "
                          << toPrecursor.GetDestination() << " from "
                          << toPrecursor.GetInterface().GetLocal());
-            Simulator::Schedule(Time(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10))),
+            Simulator::Schedule(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10)),
                                 &RoutingProtocol::SendTo,
                                 this,
                                 socket,
@@ -2218,7 +2220,7 @@ RoutingProtocol::SendRerrMessage(Ptr<Packet> packet, std::vector<Ipv4Address> pr
         {
             destination = i->GetBroadcast();
         }
-        Simulator::Schedule(Time(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10))),
+        Simulator::Schedule(MilliSeconds(m_uniformRandomVariable->GetInteger(0, 10)),
                             &RoutingProtocol::SendTo,
                             this,
                             socket,
@@ -2267,11 +2269,63 @@ void
 RoutingProtocol::DoInitialize()
 {
     NS_LOG_FUNCTION(this);
-    uint32_t startTime;
+    NS_ABORT_MSG_IF(m_ttlStart > m_netDiameter,
+                    "AODV: configuration error, TtlStart ("
+                        << m_ttlStart << ") must be less than or equal to NetDiameter ("
+                        << m_netDiameter << ").");
+    NS_ABORT_MSG_IF(m_netTraversalTime < m_nodeTraversalTime,
+                    "AODV: configuration error, NetTraversalTime ("
+                        << m_netTraversalTime.As(Time::S) << ") must be >= NodeTraversalTime ("
+                        << m_nodeTraversalTime.As(Time::S) << ").");
+
+    Time expectedNetTraversal = 2 * m_nodeTraversalTime * m_netDiameter;
+    if (m_netTraversalTime < expectedNetTraversal)
+    {
+        NS_LOG_WARN("AODV: NetTraversalTime ("
+                    << m_netTraversalTime.As(Time::S)
+                    << ") does not match RFC 3561: 2 * NodeTraversalTime * NetDiameter = "
+                    << expectedNetTraversal.As(Time::S));
+    }
+
+    Time expectedPathDiscovery = 2 * m_netTraversalTime;
+    if (m_pathDiscoveryTime < expectedPathDiscovery)
+    {
+        NS_LOG_WARN("AODV: PathDiscoveryTime ("
+                    << m_pathDiscoveryTime.As(Time::S)
+                    << ") does not match RFC 3561: 2 * NetTraversalTime = "
+                    << expectedPathDiscovery.As(Time::S));
+    }
+
+    Time expectedMyRouteTimeout = 2 * m_pathDiscoveryTime;
+    NS_ABORT_MSG_IF(m_myRouteTimeout < expectedMyRouteTimeout,
+                    "AODV: MyRouteTimeout ("
+                        << m_myRouteTimeout.As(Time::S)
+                        << ") violates RFC 3561 MUST: must be >= 2 * PathDiscoveryTime = "
+                        << expectedMyRouteTimeout.As(Time::S));
+
+    Time expectedBlackList = m_rreqRetries * m_netTraversalTime;
+    if (m_blackListTimeout < expectedBlackList)
+    {
+        NS_LOG_WARN("AODV: BlackListTimeout ("
+                    << m_blackListTimeout.As(Time::S)
+                    << ") is below RFC 3561 minimum: RreqRetries * NetTraversalTime = "
+                    << expectedBlackList.As(Time::S)
+                    << ". Note: a larger value may be correct when expanding ring search is used.");
+    }
+
+    Time expectedNextHopWait = m_nodeTraversalTime + MilliSeconds(10);
+    if (m_nextHopWait < expectedNextHopWait)
+    {
+        NS_LOG_WARN("AODV: NextHopWait ("
+                    << m_nextHopWait.As(Time::S)
+                    << ") does not match RFC 3561: NodeTraversalTime + 10ms = "
+                    << expectedNextHopWait.As(Time::S));
+    }
+
     if (m_enableHello)
     {
         m_htimer.SetFunction(&RoutingProtocol::HelloTimerExpire, this);
-        startTime = m_uniformRandomVariable->GetInteger(0, 100);
+        uint32_t startTime = m_uniformRandomVariable->GetInteger(0, 100);
         NS_LOG_DEBUG("Starting at time " << startTime << "ms");
         m_htimer.Schedule(MilliSeconds(startTime));
     }

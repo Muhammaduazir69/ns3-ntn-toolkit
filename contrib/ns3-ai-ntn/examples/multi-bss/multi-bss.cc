@@ -20,6 +20,10 @@
 
 #include "tgax-residential-propagation-loss-model.h"
 
+#include "../ntn-wifi-site-context.h"
+
+#include "ns3/ntn-dataset-writer.h"
+#include <filesystem>
 #include "ns3/ns3-ai-ntn-module.h"
 #include "ns3/ampdu-subframe-header.h"
 #include "ns3/ap-wifi-mac.h"
@@ -1783,11 +1787,9 @@ main(int argc, char* argv[])
     Config::SetDefault("ns3::WifiRemoteStationManager::FragmentationThreshold",
                        StringValue("22000"));
     Config::SetDefault("ns3::WifiRemoteStationManager::RtsCtsThreshold", StringValue("22000"));
-    // Disable short retransmission failure (make retransmissions persistent)
-    Config::SetDefault("ns3::WifiRemoteStationManager::MaxSlrc",
-                       UintegerValue(std::numeric_limits<uint32_t>::max()));
-    Config::SetDefault("ns3::WifiRemoteStationManager::MaxSsrc",
-                       UintegerValue(std::numeric_limits<uint32_t>::max()));
+    // Disable short retransmission failure (make retransmissions persistent). ns-3.49 replaced
+    // the station manager's MaxSlrc/MaxSsrc with WifiMac::FrameRetryLimit (at most 65535).
+    Config::SetDefault("ns3::WifiMac::FrameRetryLimit", UintegerValue(65535));
     // Set maximum queue size to the largest value and set maximum queue delay to be larger than
     // the simulation time
     Config::SetDefault("ns3::WifiMacQueue::MaxSize",
@@ -1836,6 +1838,12 @@ main(int argc, char* argv[])
     cmd.AddValue("boxsize", "Set the size of the box in meters", boxSize);
     cmd.AddValue("drl", "Enable the use of DRL for setting ccaSensitivity", drlCca);
     cmd.AddValue("configFile", "Configuration file of Multi-BSS example", configFileName);
+    ntnwifisite::SiteConfig site;
+    cmd.AddValue("siteLat", "Residential site latitude [deg] (scene context only)", site.latDeg);
+    cmd.AddValue("siteLon", "Residential site longitude [deg] (scene context only)", site.lonDeg);
+    cmd.AddValue("siteAlt",
+                 "Residential site height above WGS-84 [m] (scene context only)",
+                 site.altM);
     cmd.Parse(argc, argv);
 
     RngSeedManager::SetSeed(seedNumber);
@@ -2822,6 +2830,20 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(10), &RestartCalc);
     //    Simulator::Schedule(Seconds(10), &TrackTime);
     Simulator::Stop(Seconds((10) + duration));
+
+    // NTN context: the BSSs are satellite-backhauled residential hotspots at a real site.
+    // The Wi-Fi nodes keep their local positions, drawn as east-north-up offsets about the
+    // site; a device-less node carries the serving backhaul satellite, so the Wi-Fi
+    // results do not change.
+    const ntnwifisite::SiteContext ctx = ntnwifisite::AddBackhaulSatelliteContext(site);
+    if (ctx.satNode)
+    {
+        std::cout << "Backhaul satellite context: elevation " << ctx.elevationDeg
+                  << " deg, slant range " << ctx.slantRangeKm << " km (" << ctx.propagator
+                  << ")" << std::endl;
+    }
+    ns3::ntnobs::StartSceneFromNodeList(".");
+
     Simulator::Run();
 
     std::ostream& os = std::cout;
@@ -3119,14 +3141,15 @@ main(int argc, char* argv[])
     // Create a csv file to store the results
     std::ofstream out;
     out.open("results.csv", std::ios::trunc);
+    // One numeric value per column (ntn-dataset@1): times in ms, no trailing separator.
     out << "srcNodeId,"
-        << "pktSize,"
-        << "lastPacketTime,"
-        << "dequeueTime,"
-        << "HOL,"
-        << "queuingDelay,"
-        << "accessDelay,"
-        << "txDelay"
+        << "pktSize_bytes,"
+        << "holTime_ms,"
+        << "dequeueTime_ms,"
+        << "HOL_ms,"
+        << "queuingDelay_ms,"
+        << "accessDelay_ms,"
+        << "txDelay_ms"
         << "\n";
 
     for (auto mapIt : m_inFlightPacketMap)
@@ -3137,12 +3160,12 @@ main(int argc, char* argv[])
             {
                 uint32_t srcNodeId = MacAddressToNodeId(listIt.m_srcAddress);
                 out << srcNodeId << "," << listIt.m_ptrToPacket->GetSize() << ","
-                    << listIt.m_HoLTime << "," << listIt.m_edcaDequeueTime << ","
+                    << listIt.m_HoLTime.ToDouble(Time::MS) << ","
+                    << listIt.m_edcaDequeueTime.ToDouble(Time::MS) << ","
                     << (listIt.m_edcaDequeueTime - listIt.m_HoLTime).ToDouble(Time::MS) << ","
                     << (listIt.m_HoLTime - listIt.m_edcaEnqueueTime).ToDouble(Time::MS) << ","
                     << (listIt.m_phyTxTime - listIt.m_HoLTime).ToDouble(Time::MS) << ","
-                    << (listIt.m_edcaDequeueTime - listIt.m_phyTxTime).ToDouble(Time::MS) << ","
-                    << std::endl;
+                    << (listIt.m_edcaDequeueTime - listIt.m_phyTxTime).ToDouble(Time::MS) << "\n";
             }
         }
     }
@@ -3192,6 +3215,8 @@ main(int argc, char* argv[])
     //        rlAlgo.SetFinish();
     //    }
     PrintPythonPlotCSV("box.csv");
+    // ntn-dataset@1: standard manifest + sim_health (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md)
+    ns3::ntnobs::WriteDatasetRecord(".", std::filesystem::path(argv[0]).filename().string(), "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

@@ -13,6 +13,7 @@
 #include "ns3/log.h"
 #include "ns3/mobility-helper.h"
 #include "ns3/multi-model-spectrum-channel.h"
+#include "ns3/node-list.h"
 #include "ns3/packet-socket-client.h"
 #include "ns3/packet-socket-helper.h"
 #include "ns3/packet-socket-server.h"
@@ -26,6 +27,7 @@
 #include "ns3/test.h"
 #include "ns3/wifi-mac-header.h"
 #include "ns3/wifi-net-device.h"
+#include "ns3/wifi-ns3-constants.h"
 #include "ns3/wifi-ppdu.h"
 #include "ns3/wifi-psdu.h"
 
@@ -34,10 +36,10 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("WifiTxopTest");
 
 /**
- * \ingroup wifi-test
- * \ingroup tests
+ * @ingroup wifi-test
+ * @ingroup tests
  *
- * \brief Test TXOP rules
+ * @brief Test TXOP rules
  *
  * A BSS consisting of an AP and 3 non-AP STAs is considered in this test. Both non-HT (802.11a)
  * and HE devices are tested. Two TXOPs are simulated in this test:
@@ -47,7 +49,10 @@ NS_LOG_COMPONENT_DEFINE("WifiTxopTest");
  *   received, while the second frame to STA 2 is corrupted. It is checked that the AP performs
  *   PIFS recovery or invokes backoff depending on the value of the PifsRecovery attribute. All
  *   QoS data frames transmitted have a length/duration that does not exceed the length/duration
- *   based RTS/CTS threshold, hence RTS/CTS is never used.
+ *   based RTS/CTS threshold, hence RTS/CTS is never used. After that a QoS data frame has been
+ *   sent to every STA, the AP sends another QoS data frame to one of them; the size/duration of
+ *   this frame exceeds the threshold, but, given that the STA has already sent a response to the
+ *   AP in this TXOP, RTS/CTS is only used if the ProtectedIfResponded is false.
  * - In the second TXOP, the AP sends a QoS data frame, in case of non-HT devices, or an A-MPDU
  *   consisting of 2 MPDUs, in case of HE devices, to each of the three STAs. All PSDUs transmitted
  *   have a length/duration that exceeds the length/duration based RTS/CTS threshold, hence RTS/CTS
@@ -65,32 +70,43 @@ class WifiTxopTest : public TestCase
         bool singleRtsPerTxop; //!< whether protection mechanism is used no more than once per TXOP
         bool lengthBasedRtsCtsThresh; //!< if true, use length based RTS/CTS threshold; if false,
                                       //!< use TX duration based RTS/CTS threshold
+        bool protectedIfResponded;  //!< whether a station is assumed to be protected if replied to
+                                    //!< a frame requiring acknowledgment
+        bool protectSingleExchange; //!< whether the Duration/ID field in frames establishing
+                                    //!< protection only covers the immediate frame exchange instead
+                                    //!< of rest of the TXOP limit
+        Time singleExchangeProtectionBuffer; //!< whether the NAV duration should be extended by a
+                                             //!< PIFS after the frame exchange when protection only
+                                             //!< covers the immediate frame exchange instead of
+                                             //!< rest of the TXOP limit
     };
 
     /**
      * Constructor
-     * \param params parameters for the Wi-Fi TXOP test
+     * @param params parameters for the Wi-Fi TXOP test
      */
     WifiTxopTest(const Params& params);
 
     /**
      * Function to trace packets received by the server application
-     * \param context the context
-     * \param p the packet
-     * \param addr the address
+     * @param context the context
+     * @param p the packet
+     * @param addr the address
      */
     void L7Receive(std::string context, Ptr<const Packet> p, const Address& addr);
+
     /**
      * Callback invoked when PHY receives a PSDU to transmit
-     * \param context the context
-     * \param psduMap the PSDU map
-     * \param txVector the TX vector
-     * \param txPowerW the tx power in Watts
+     * @param context the context
+     * @param psduMap the PSDU map
+     * @param txVector the TX vector
+     * @param txPowerW the tx power in Watts
      */
     void Transmit(std::string context,
                   WifiConstPsduMap psduMap,
                   WifiTxVector txVector,
                   double txPowerW);
+
     /**
      * Check correctness of transmitted frames
      */
@@ -98,6 +114,26 @@ class WifiTxopTest : public TestCase
 
   private:
     void DoRun() override;
+
+    /// Enumeration for traffic directions
+    enum TrafficDirection : uint8_t
+    {
+        DOWNLINK = 0,
+        UPLINK
+    };
+
+    /**
+     * @param dir the traffic direction (downlink/uplink)
+     * @param staId the index (starting at 0) of the non-AP STA generating/receiving packets
+     * @param count the number of packets to generate
+     * @param pktSize the size of the packets to generate
+     * @return an application generating the given number packets of the given size from/to the
+     *         AP to/from the given non-AP STA
+     */
+    Ptr<PacketSocketClient> GetApplication(TrafficDirection dir,
+                                           std::size_t staId,
+                                           std::size_t count,
+                                           std::size_t pktSize) const;
 
     /// Information about transmitted frames
     struct FrameInfo
@@ -109,32 +145,45 @@ class WifiTxopTest : public TestCase
         WifiTxVector txVector; ///< TX vector used to transmit the frame
     };
 
-    uint16_t m_nStations;                ///< number of stations
-    NetDeviceContainer m_staDevices;     ///< container for stations' NetDevices
-    NetDeviceContainer m_apDevices;      ///< container for AP's NetDevice
-    std::vector<FrameInfo> m_txPsdus;    ///< transmitted PSDUs
-    Time m_apTxopLimit;                  ///< TXOP limit for AP (AC BE)
-    uint8_t m_staAifsn;                  ///< AIFSN for STAs (AC BE)
-    uint32_t m_staCwMin;                 ///< CWmin for STAs (AC BE)
-    uint32_t m_staCwMax;                 ///< CWmax for STAs (AC BE)
-    Time m_staTxopLimit;                 ///< TXOP limit for STAs (AC BE)
-    uint16_t m_received;                 ///< number of packets received by the stations
-    bool m_nonHt;                        ///< whether to use 802.11a or 802.11ax
-    std::size_t m_payloadSizeRtsOn;      ///< size in bytes of packets protected by RTS
-    std::size_t m_payloadSizeRtsOff;     ///< size in bytes of packets not protected by RTS
-    Time m_startTime;                    ///< time when data frame exchanges start
-    WifiMode m_mode;                     ///< wifi mode used to transmit data frames
-    bool m_pifsRecovery;                 ///< whether to use PIFS recovery
-    bool m_singleRtsPerTxop;             ///< whether to use single RTS per TXOP
-    bool m_lengthBasedRtsCtsThresh;      ///< whether to use length based RTS/CTS threshold
-    Ptr<ListErrorModel> m_apErrorModel;  ///< error model to install on the AP
-    Ptr<ListErrorModel> m_staErrorModel; ///< error model to install on a STA
+    uint16_t m_nStations;                   ///< number of stations
+    NetDeviceContainer m_staDevices;        ///< container for stations' NetDevices
+    NetDeviceContainer m_apDevices;         ///< container for AP's NetDevice
+    std::vector<FrameInfo> m_txPsdus;       ///< transmitted PSDUs
+    Time m_apTxopLimit;                     ///< TXOP limit for AP (AC BE)
+    uint8_t m_staAifsn;                     ///< AIFSN for STAs (AC BE)
+    uint32_t m_staCwMin;                    ///< CWmin for STAs (AC BE)
+    uint32_t m_staCwMax;                    ///< CWmax for STAs (AC BE)
+    Time m_staTxopLimit;                    ///< TXOP limit for STAs (AC BE)
+    uint16_t m_received;                    ///< number of packets received by the stations
+    bool m_nonHt;                           ///< @copydoc Params::nonHt
+    std::size_t m_payloadSizeRtsOn;         ///< size in bytes of packets protected by RTS
+    std::size_t m_payloadSizeRtsOff;        ///< size in bytes of packets not protected by RTS
+    Time m_startTime;                       ///< time when data frame exchanges start
+    WifiMode m_mode;                        ///< wifi mode used to transmit data frames
+    bool m_pifsRecovery;                    ///< @copydoc Params::pifsRecovery
+    bool m_singleRtsPerTxop;                ///< @copydoc Params::singleRtsPerTxop
+    bool m_lengthBasedRtsCtsThresh;         ///< @copydoc Params::lengthBasedRtsCtsThresh
+    bool m_protectedIfResponded;            ///< @copydoc Params::protectedIfResponded
+    bool m_protectSingleExchange;           ///< @copydoc Params::protectSingleExchange
+    Time m_singleExchangeProtectionSurplus; ///< @copydoc Params::singleExchangeProtectionBuffer
+    Ptr<ListErrorModel> m_apErrorModel;     ///< error model to install on the AP
+    Ptr<ListErrorModel> m_staErrorModel;    ///< error model to install on a STA
     bool m_apCorrupted;  ///< whether the frame to be corrupted by the AP has been corrupted
     bool m_staCorrupted; ///< whether the frame to be corrupted by the STA has been corrupted
+    std::vector<PacketSocketAddress> m_dlSockets; ///< packet socket address for DL traffic
+    std::vector<PacketSocketAddress> m_ulSockets; ///< packet socket address for UL traffic
 };
 
-WifiTxopTest::WifiTxopTest(const Params& params)
-    : TestCase("Check correct operation within TXOPs"),
+WifiTxopTest::WifiTxopTest(const WifiTxopTest::Params& params)
+    : TestCase("Check correct operation within TXOPs with parameters: nonHt=" +
+               std::to_string(params.nonHt) +
+               " pifsRecovery=" + std::to_string(params.pifsRecovery) +
+               " singleRtsPerTxop=" + std::to_string(params.singleRtsPerTxop) +
+               " lengthBasedRtsCtsThresh=" + std::to_string(params.lengthBasedRtsCtsThresh) +
+               " protectedIfResponded=" + std::to_string(params.protectedIfResponded) +
+               " protectSingleExchange=" + std::to_string(params.protectSingleExchange) +
+               " singleExchangeProtectionBuffer=" +
+               std::to_string(params.singleExchangeProtectionBuffer.GetMicroSeconds()) + "us"),
       m_nStations(3),
       m_apTxopLimit(MicroSeconds(4768)),
       m_staAifsn(4),
@@ -150,6 +199,9 @@ WifiTxopTest::WifiTxopTest(const Params& params)
       m_pifsRecovery(params.pifsRecovery),
       m_singleRtsPerTxop(params.singleRtsPerTxop),
       m_lengthBasedRtsCtsThresh(params.lengthBasedRtsCtsThresh),
+      m_protectedIfResponded(params.protectedIfResponded),
+      m_protectSingleExchange(params.protectSingleExchange),
+      m_singleExchangeProtectionSurplus(params.singleExchangeProtectionBuffer),
       m_apErrorModel(CreateObject<ListErrorModel>()),
       m_staErrorModel(CreateObject<ListErrorModel>()),
       m_apCorrupted(false),
@@ -182,7 +234,7 @@ WifiTxopTest::Transmit(std::string context,
         m_txPsdus.back().header.GetAddr1() == m_staDevices.Get(0)->GetAddress())
     {
         corrupted = m_apCorrupted = true;
-        m_apErrorModel->SetList({psduMap.begin()->second->GetPacket()->GetUid()});
+        m_apErrorModel->SetList({(*psduMap.begin()->second->begin())->GetPacket()->GetUid()});
     }
 
     // The second station does not correctly receive the first QoS data frame sent by the AP
@@ -196,12 +248,24 @@ WifiTxopTest::Transmit(std::string context,
         }
         if (corrupted)
         {
-            m_staErrorModel->SetList({psduMap.begin()->second->GetPacket()->GetUid()});
+            m_staErrorModel->SetList({(*psduMap.begin()->second->begin())->GetPacket()->GetUid()});
         }
         else
         {
             m_staErrorModel->SetList({});
         }
+    }
+
+    // When the AP sends the first frame to the third station (which is not protected by RTS/CTS),
+    // we generate another frame addressed to the second station whose size/duration exceeds the
+    // threshold; however, RTS is not used because the second station has already responded to
+    // another frame in the same TXOP
+    if (const auto& hdr = psduMap.begin()->second->GetHeader(0);
+        hdr.IsQosData() && hdr.GetAddr1() == m_staDevices.Get(2)->GetAddress() &&
+        hdr.GetSequenceNumber() == (m_nonHt ? 0 : 1))
+    {
+        m_apDevices.Get(0)->GetNode()->AddApplication(
+            GetApplication(DOWNLINK, 1, m_nonHt ? 1 : 2, m_payloadSizeRtsOn));
     }
 
     // Log all transmitted frames that are not beacon frames and have been transmitted
@@ -227,6 +291,9 @@ WifiTxopTest::Transmit(std::string context,
 void
 WifiTxopTest::DoRun()
 {
+    // LogComponentEnable("WifiTxopTest", LOG_LEVEL_ALL);
+    NS_LOG_FUNCTION(this);
+
     RngSeedManager::SetSeed(1);
     RngSeedManager::SetRun(40);
     int64_t streamNumber = 100;
@@ -249,6 +316,10 @@ WifiTxopTest::DoRun()
     phy.Set("ChannelSettings", StringValue("{0, 20, BAND_5GHZ, 0}"));
 
     Config::SetDefault("ns3::QosFrameExchangeManager::PifsRecovery", BooleanValue(m_pifsRecovery));
+    Config::SetDefault("ns3::QosFrameExchangeManager::ProtectSingleExchange",
+                       BooleanValue(m_protectSingleExchange));
+    Config::SetDefault("ns3::QosFrameExchangeManager::SingleExchangeProtectionSurplus",
+                       TimeValue(m_singleExchangeProtectionSurplus));
     Config::SetDefault("ns3::WifiDefaultProtectionManager::SingleRtsPerTxop",
                        BooleanValue(m_singleRtsPerTxop));
     if (m_lengthBasedRtsCtsThresh)
@@ -260,8 +331,10 @@ WifiTxopTest::DoRun()
     {
         Config::SetDefault("ns3::WifiRemoteStationManager::RtsCtsTxDurationThresh",
                            TimeValue(Seconds(m_payloadSizeRtsOn * (m_nonHt ? 1 : 2) * 8.0 /
-                                             m_mode.GetDataRate(20))));
+                                             m_mode.GetDataRate(MHz_u{20}))));
     }
+    Config::SetDefault("ns3::FrameExchangeManager::ProtectedIfResponded",
+                       BooleanValue(m_protectedIfResponded));
 
     WifiHelper wifi;
     wifi.SetStandard(m_nonHt ? WIFI_STANDARD_80211a : WIFI_STANDARD_80211ax);
@@ -279,6 +352,7 @@ WifiTxopTest::DoRun()
                 SsidValue(Ssid("non-existent-ssid")));
 
     m_staDevices = wifi.Install(phy, mac, wifiStaNodes);
+    streamNumber += WifiHelper::AssignStreams(m_staDevices, streamNumber);
 
     mac.SetType(
         "ns3::ApWifiMac",
@@ -287,7 +361,7 @@ WifiTxopTest::DoRun()
         "Ssid",
         SsidValue(Ssid("wifi-txop-ssid")),
         "BeaconInterval",
-        TimeValue(MicroSeconds(102400)),
+        TimeValue(DEFAULT_BEACON_INTERVAL()),
         "EnableBeaconJitter",
         BooleanValue(false),
         "AifsnsForSta",
@@ -303,6 +377,7 @@ WifiTxopTest::DoRun()
     mac.SetEdca(AC_BE, "TxopLimits", AttributeContainerValue<TimeValue>(std::list{m_apTxopLimit}));
 
     m_apDevices = wifi.Install(phy, mac, wifiApNode);
+    streamNumber += WifiHelper::AssignStreams(m_apDevices, streamNumber);
 
     // schedule association requests at different times. One station's SSID is
     // set to the correct value before initialization, so that such a station
@@ -313,14 +388,11 @@ WifiTxopTest::DoRun()
     for (uint16_t i = 1; i < m_nStations; i++)
     {
         dev = DynamicCast<WifiNetDevice>(m_staDevices.Get(i));
-        Simulator::Schedule(i * MicroSeconds(102400),
+        Simulator::Schedule(i * DEFAULT_BEACON_INTERVAL(),
                             &WifiMac::SetSsid,
                             dev->GetMac(),
                             Ssid("wifi-txop-ssid"));
     }
-
-    // Assign fixed streams to random variables in use
-    WifiHelper::AssignStreams(m_apDevices, streamNumber);
 
     MobilityHelper mobility;
     Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
@@ -339,53 +411,60 @@ WifiTxopTest::DoRun()
     packetSocket.Install(wifiApNode);
     packetSocket.Install(wifiStaNodes);
 
+    // install a packet socket server on all nodes
+    for (auto nodeIt = NodeList::Begin(); nodeIt != NodeList::End(); ++nodeIt)
+    {
+        PacketSocketAddress srvAddr;
+        auto device = DynamicCast<WifiNetDevice>((*nodeIt)->GetDevice(0));
+        NS_TEST_ASSERT_MSG_NE(device, nullptr, "Expected a WifiNetDevice");
+        srvAddr.SetSingleDevice(device->GetIfIndex());
+        srvAddr.SetProtocol(1);
+
+        auto server = CreateObject<PacketSocketServer>();
+        server->SetLocal(srvAddr);
+        (*nodeIt)->AddApplication(server);
+        server->SetStartTime(Time{0}); // now
+        server->SetStopTime(Seconds(1));
+    }
+
+    // set DL and UL packet sockets
+    for (uint16_t i = 0; i < m_nStations; ++i)
+    {
+        m_dlSockets.emplace_back();
+        m_dlSockets.back().SetSingleDevice(m_apDevices.Get(0)->GetIfIndex());
+        m_dlSockets.back().SetPhysicalAddress(m_staDevices.Get(i)->GetAddress());
+        m_dlSockets.back().SetProtocol(1);
+
+        m_ulSockets.emplace_back();
+        m_ulSockets.back().SetSingleDevice(m_staDevices.Get(i)->GetIfIndex());
+        m_ulSockets.back().SetPhysicalAddress(m_apDevices.Get(0)->GetAddress());
+        m_ulSockets.back().SetProtocol(1);
+    }
+
     // DL frames
     for (uint16_t i = 0; i < m_nStations; i++)
     {
-        PacketSocketAddress socket;
-        socket.SetSingleDevice(m_apDevices.Get(0)->GetIfIndex());
-        socket.SetPhysicalAddress(m_staDevices.Get(i)->GetAddress());
-        socket.SetProtocol(1);
-
         if (!m_nonHt)
         {
             // Send one QoS data frame to establish Block Ack agreement (packet size is such that
             // this packet is not counted as a received packet)
-            auto client = CreateObject<PacketSocketClient>();
-            client->SetAttribute("PacketSize", UintegerValue(m_payloadSizeRtsOff - 1));
-            client->SetAttribute("MaxPackets", UintegerValue(1));
-            client->SetAttribute("Interval", TimeValue(MicroSeconds(1)));
-            client->SetRemote(socket);
-            wifiApNode.Get(0)->AddApplication(client);
-            client->SetStartTime(m_startTime - MilliSeconds(110 - i * 25));
-            client->SetStopTime(Seconds(1.0));
+            Simulator::Schedule(m_startTime - MilliSeconds(110 - i * 25),
+                                &Node::AddApplication,
+                                wifiApNode.Get(0),
+                                GetApplication(DOWNLINK, i, 1, m_payloadSizeRtsOff - 1));
         }
 
         // Send one QoS data frame (not protected by RTS/CTS) to each station
-        auto client1 = CreateObject<PacketSocketClient>();
-        client1->SetAttribute("PacketSize", UintegerValue(m_payloadSizeRtsOff));
-        client1->SetAttribute("MaxPackets", UintegerValue(1));
-        client1->SetAttribute("Interval", TimeValue(MicroSeconds(1)));
-        client1->SetRemote(socket);
-        wifiApNode.Get(0)->AddApplication(client1);
-        client1->SetStartTime(m_startTime);
-        client1->SetStopTime(Seconds(1.0));
+        Simulator::Schedule(m_startTime,
+                            &Node::AddApplication,
+                            wifiApNode.Get(0),
+                            GetApplication(DOWNLINK, i, 1, m_payloadSizeRtsOff));
 
         // Send one QoS data frame (protected by RTS/CTS) to each station
-        auto client2 = CreateObject<PacketSocketClient>();
-        client2->SetAttribute("PacketSize", UintegerValue(m_payloadSizeRtsOn));
-        client2->SetAttribute("MaxPackets", UintegerValue(m_nonHt ? 1 : 2));
-        client2->SetAttribute("Interval", TimeValue(Time{0}));
-        client2->SetRemote(socket);
-        wifiApNode.Get(0)->AddApplication(client2);
-        client2->SetStartTime(m_startTime + MilliSeconds(110));
-        client2->SetStopTime(Seconds(1.0));
-
-        auto server = CreateObject<PacketSocketServer>();
-        server->SetLocal(socket);
-        wifiStaNodes.Get(i)->AddApplication(server);
-        server->SetStartTime(Seconds(0.0));
-        server->SetStopTime(Seconds(1.0));
+        Simulator::Schedule(m_startTime + MilliSeconds(110),
+                            &Node::AddApplication,
+                            wifiApNode.Get(0),
+                            GetApplication(DOWNLINK, i, m_nonHt ? 1 : 2, m_payloadSizeRtsOn));
     }
 
     // install the error model on the AP
@@ -398,39 +477,20 @@ WifiTxopTest::DoRun()
 
     // UL Traffic (the first station sends one frame to the AP)
     {
-        PacketSocketAddress socket;
-        socket.SetSingleDevice(m_staDevices.Get(0)->GetIfIndex());
-        socket.SetPhysicalAddress(m_apDevices.Get(0)->GetAddress());
-        socket.SetProtocol(1);
-
         if (!m_nonHt)
         {
             // Send one QoS data frame to establish Block Ack agreement (packet size is such that
             // this packet is not counted as a received packet)
-            auto client = CreateObject<PacketSocketClient>();
-            client->SetAttribute("PacketSize", UintegerValue(m_payloadSizeRtsOff - 1));
-            client->SetAttribute("MaxPackets", UintegerValue(1));
-            client->SetAttribute("Interval", TimeValue(MicroSeconds(0)));
-            client->SetRemote(socket);
-            wifiStaNodes.Get(0)->AddApplication(client);
-            client->SetStartTime(m_startTime - MilliSeconds(35));
-            client->SetStopTime(Seconds(1.0));
+            Simulator::Schedule(m_startTime - MilliSeconds(35),
+                                &Node::AddApplication,
+                                wifiStaNodes.Get(0),
+                                GetApplication(UPLINK, 0, 1, m_payloadSizeRtsOff - 1));
         }
 
-        auto client = CreateObject<PacketSocketClient>();
-        client->SetAttribute("PacketSize", UintegerValue(m_payloadSizeRtsOff));
-        client->SetAttribute("MaxPackets", UintegerValue(1));
-        client->SetAttribute("Interval", TimeValue(MicroSeconds(0)));
-        client->SetRemote(socket);
-        wifiStaNodes.Get(0)->AddApplication(client);
-        client->SetStartTime(m_startTime + MilliSeconds(2));
-        client->SetStopTime(Seconds(1.0));
-
-        auto server = CreateObject<PacketSocketServer>();
-        server->SetLocal(socket);
-        wifiApNode.Get(0)->AddApplication(server);
-        server->SetStartTime(Seconds(0.0));
-        server->SetStopTime(Seconds(1.0));
+        Simulator::Schedule(m_startTime + MilliSeconds(2),
+                            &Node::AddApplication,
+                            wifiStaNodes.Get(0),
+                            GetApplication(UPLINK, 0, 1, m_payloadSizeRtsOff));
     }
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::PacketSocketServer/Rx",
@@ -445,6 +505,23 @@ WifiTxopTest::DoRun()
     CheckResults();
 
     Simulator::Destroy();
+}
+
+Ptr<PacketSocketClient>
+WifiTxopTest::GetApplication(TrafficDirection dir,
+                             std::size_t staId,
+                             std::size_t count,
+                             std::size_t pktSize) const
+{
+    auto client = CreateObject<PacketSocketClient>();
+    client->SetAttribute("PacketSize", UintegerValue(pktSize));
+    client->SetAttribute("MaxPackets", UintegerValue(count));
+    client->SetAttribute("Interval", TimeValue(MicroSeconds(0)));
+    client->SetRemote(dir == DOWNLINK ? m_dlSockets.at(staId) : m_ulSockets.at(staId));
+    client->SetStartTime(Time{0}); // now
+    client->SetStopTime(Seconds(1));
+
+    return client;
 }
 
 void
@@ -499,27 +576,38 @@ WifiTxopTest::CheckResults()
      * fails. Also, verify that a CF-end frame is sent if enough time remains in the TXOP.
      * The destination of failed frames is put in square brackets below.
      *
-     *          |--NAV----till end TXOP-------->|
-     *          |     |---NAV--till end TXOP--->|
-     *          |     |              |-------------------------NAV------------------------------>|
-     *          |     |              |     |------------------------NAV------------------------->|
-     *          |     |              |     |     |-----------------------NAV-------------------->|
-     *          |     |              |     |     |                  |-----------NAV------------->|
-     *     Start|     |         Start|     |     |                  |     |--------NAV---------->|
-     *     TXOP |     |         TXOP |     |     |   Ack            |     |     |------NAV------>|
-     *      |   |     |          |   |     |     | Timeout          |     |     |     |---NAV--->|
-     *      |---| |---|-backoff->|---| |---| |---|   |-PIFS or->|---| |---| |---| |---| |-----|
-     *      |QoS| |Ack|          |QoS| |Ack| |QoS|   |-backoff->|QoS| |Ack| |QoS| |Ack| |CFend|
-     * --------------------------------------------------------------------------------------------
-     * From:  AP   STA1            AP   STA1   AP                 AP   STA2   AP   STA3   AP
-     *   To: STA1  [AP]           STA1   AP  [STA2]              STA2   AP   STA3   AP    all
+     *        |--NAV----till end TXOP-------->|
+     *        |     |---NAV--till end TXOP--->|
+     *        |     |          |-----------------------------NAV--------------------------------->|
+     *        |     |          |     |----------------------------NAV---------------------------->|
+     *        |     |          |     |     |---------------------------NAV----------------------->|
+     *        |     |          |     |     |               |----------------NAV------------------>|
+     *        |     |          |     |     |               |     |-------------NAV--------------->|
+     *        |     |          |     |     |   Ack         |     |     |-----------NAV----------->|
+     *   Start|     |     Start|     |     | Timeout       |     |     |     |--------NAV-------->|
+     *   TXOP |     |     TXOP |     |     |   |-PIFS->    |     |     |     |     |-----NAV----->|
+     *    |   |     | back |   |     |     |   |- or ->    |     |     |     |     |     |--NAV-->|
+     *    ┌───┐ ┌───┐-off->┌───┐ ┌───┐ ┌───┐   |-back->┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌─────┐
+     *    │QoS│ │Ack│      │QoS│ │Ack│ │QoS│   |-off ->│QoS│ │Ack│ │QoS│ │Ack│ │QoS│ │Ack│ │CFend│
+     * ───┴───┴─┴───┴──────┴───┴─┴───┴─┴───┴───────────┴───┴─┴───┴─┴───┴─┴───┴─┴───┴─┴───┴─┴─────┴─
+     * TA:  AP   STA1        AP   STA1   AP              AP   STA2   AP   STA3   AP   STA2    AP
+     * RA: STA1  [AP]       STA1   AP  [STA2]           STA2   AP   STA3   AP   STA2   AP    all
+     *
+     * NOTE: If ProtectedIfResponded is false, the last QoS data frame is protected by RTS/CTS
+     * NOTE: If ProtectSingleExchange is true, CF-END frames are not transmitted
+     *       and NAV ends once DATA+Ack is completed
      */
 
     // We expect 25 frames to be transmitted if SingleRtsPerTxop is false and 22 frames (2 RTS
-    // less, 2 CTS less, 1 more CF-End)
-    NS_TEST_ASSERT_MSG_EQ(m_txPsdus.size(),
-                          (m_singleRtsPerTxop ? 22 : 25),
-                          "Unexpected number of transmitted frames");
+    // less, 2 CTS less, 1 more CF-End). If ProtectedIfResponded is false, there are 2 frames
+    // (an RTS and a CTS) more. If ProtectSingleExchange is true, there are 2 (if
+    // SingleRtsPerTxop is false) or 3 (if SingleRtsPerTxop is true) less frames (CF-END)
+    NS_TEST_ASSERT_MSG_EQ(
+        m_txPsdus.size(),
+        (m_singleRtsPerTxop
+             ? 21U + (m_protectedIfResponded ? 0U : 2U) + (m_protectSingleExchange ? 0U : 3U)
+             : 25U + (m_protectedIfResponded ? 0U : 2U) + (m_protectSingleExchange ? 0U : 2U)),
+        "Unexpected number of transmitted frames");
 
     // the first frame sent after 400ms is a QoS data frame sent by the AP to STA1 without RTS/CTS
     txopStart = m_txPsdus[0].txStart;
@@ -541,9 +629,15 @@ WifiTxopTest::CheckResults()
             rtsCtsTxDurationThresh,
             "PSDU duration expected not to exceed duration based RTS/CTS threshold");
     }
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[0].header.GetDuration(),
-                          RoundDurationId(m_apTxopLimit - m_txPsdus[0].txDuration),
-                          "Duration/ID of the first frame must cover the whole TXOP");
+    NS_TEST_EXPECT_MSG_EQ(
+        m_txPsdus[0].header.GetDuration(),
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_apTxopLimit - m_txPsdus[0].txDuration)
+             : sifs + m_txPsdus[1].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the first frame must cover the whole TXOP"
+             : "Duration/ID of the first frame must be set to remaining time to "
+               "complete DATA+ACK sequence"));
 
     // a Normal Ack is sent by STA1
     tEnd = m_txPsdus[0].txStart + m_txPsdus[0].txDuration;
@@ -571,7 +665,7 @@ WifiTxopTest::CheckResults()
     tStart = m_txPsdus[2].txStart;
 
     auto apPhy = apDev->GetPhy(SINGLE_LINK_OP_ID);
-    auto eifsNoDifs = apPhy->GetSifs() + apPhy->GetAckTxTime();
+    auto eifsNoDifs = apPhy->GetSifs() + GetEstimatedAckTxTime(m_txPsdus[1].txVector);
 
     NS_TEST_EXPECT_MSG_GT_OR_EQ(
         tStart - tEnd,
@@ -600,9 +694,15 @@ WifiTxopTest::CheckResults()
             rtsCtsTxDurationThresh,
             "PSDU duration expected not to exceed duration based RTS/CTS threshold");
     }
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[2].header.GetDuration(),
-                          RoundDurationId(m_apTxopLimit - m_txPsdus[2].txDuration),
-                          "Duration/ID of the retransmitted frame must cover the whole TXOP");
+    NS_TEST_EXPECT_MSG_EQ(
+        m_txPsdus[2].header.GetDuration(),
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_apTxopLimit - m_txPsdus[2].txDuration)
+             : sifs + m_txPsdus[3].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the retransmitted frame must cover the whole TXOP"
+             : "Duration/ID of the retransmitted frame must be set to remaining time to "
+               "complete DATA+ACK sequence"));
 
     // a Normal Ack is then sent by STA1
     tEnd = m_txPsdus[2].txStart + m_txPsdus[2].txDuration;
@@ -645,9 +745,16 @@ WifiTxopTest::CheckResults()
             "PSDU duration expected not to exceed duration based RTS/CTS threshold");
     }
     NS_TEST_EXPECT_MSG_EQ(m_txPsdus[4].header.GetDuration(),
-                          RoundDurationId(m_apTxopLimit - (m_txPsdus[4].txStart - txopStart) -
-                                          m_txPsdus[4].txDuration),
-                          "Duration/ID of the second frame does not cover the remaining TXOP");
+                          (!m_protectSingleExchange
+                               ? RoundDurationId(m_apTxopLimit -
+                                                 (m_txPsdus[4].txStart - txopStart) -
+                                                 m_txPsdus[4].txDuration)
+                               : sifs +
+                                     m_txPsdus[6].txDuration + m_singleExchangeProtectionSurplus /* ACK is 2 frames later since this DATA is first corrupted */),
+                          (!m_protectSingleExchange
+                               ? "Duration/ID of the second frame does not cover the remaining TXOP"
+                               : "Duration/ID of the second frame must be set to remaining time to "
+                                 "complete DATA+ACK sequence"));
 
     // STA2 receives a corrupted frame and hence it does not send the Ack. When the AckTimeout
     // expires, the AP performs PIFS recovery or invoke backoff, without terminating the TXOP,
@@ -693,10 +800,16 @@ WifiTxopTest::CheckResults()
             rtsCtsTxDurationThresh,
             "PSDU duration expected not to exceed duration based RTS/CTS threshold");
     }
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[5].header.GetDuration(),
-                          RoundDurationId(m_apTxopLimit - (m_txPsdus[5].txStart - txopStart) -
-                                          m_txPsdus[5].txDuration),
-                          "Duration/ID of the second frame does not cover the remaining TXOP");
+    NS_TEST_EXPECT_MSG_EQ(
+        m_txPsdus[5].header.GetDuration(),
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_apTxopLimit - (m_txPsdus[5].txStart - txopStart) -
+                               m_txPsdus[5].txDuration)
+             : sifs + m_txPsdus[6].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the second frame does not cover the remaining TXOP"
+             : "Duration/ID of the second frame must be set to remaining time to "
+               "complete DATA+ACK sequence"));
 
     // a Normal Ack is then sent by STA2
     tEnd = m_txPsdus[5].txStart + m_txPsdus[5].txDuration;
@@ -740,10 +853,16 @@ WifiTxopTest::CheckResults()
             rtsCtsTxDurationThresh,
             "PSDU duration expected not to exceed duration based RTS/CTS threshold");
     }
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[7].header.GetDuration(),
-                          RoundDurationId(m_apTxopLimit - (m_txPsdus[7].txStart - txopStart) -
-                                          m_txPsdus[7].txDuration),
-                          "Duration/ID of the third frame does not cover the remaining TXOP");
+    NS_TEST_EXPECT_MSG_EQ(
+        m_txPsdus[7].header.GetDuration(),
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_apTxopLimit - (m_txPsdus[7].txStart - txopStart) -
+                               m_txPsdus[7].txDuration)
+             : sifs + m_txPsdus[8].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the third frame does not cover the remaining TXOP"
+             : "Duration/ID of the third frame must be set to remaining time to "
+               "complete DATA+ACK sequence"));
 
     // a Normal Ack is then sent by STA3
     tEnd = m_txPsdus[7].txStart + m_txPsdus[7].txDuration;
@@ -762,20 +881,142 @@ WifiTxopTest::CheckResults()
         RoundDurationId(m_txPsdus[7].header.GetDuration() - sifs - m_txPsdus[8].txDuration),
         "Duration/ID of the Ack must be derived from that of the previous frame");
 
-    // the TXOP limit is such that enough time for sending a CF-End frame remains
-    tEnd = m_txPsdus[8].txStart + m_txPsdus[8].txDuration;
-    tStart = m_txPsdus[9].txStart;
+    // the AP sends another frame to STA2, which is only protected if ProtectedIfResponded is true,
+    // because its size/duration exceeds the threshold but STA2 has already responded to the AP in
+    // this TXOP
+    if (!m_protectedIfResponded)
+    {
+        tEnd = m_txPsdus[8].txStart + m_txPsdus[8].txDuration;
+        tStart = m_txPsdus[9].txStart;
 
-    NS_TEST_EXPECT_MSG_LT(tEnd + sifs, tStart, "CF-End sent too early");
-    NS_TEST_EXPECT_MSG_LT(tStart, tEnd + sifs + tolerance, "CF-End sent too late");
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[9].header.IsCfEnd(), true, "Expected a CF-End frame");
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[9].header.GetDuration(),
-                          Seconds(0),
-                          "Duration/ID must be set to 0 for CF-End frames");
+        NS_TEST_EXPECT_MSG_LT(tEnd + sifs, tStart, "RTS before fourth frame sent too early");
+        NS_TEST_EXPECT_MSG_LT(tStart,
+                              tEnd + sifs + tolerance,
+                              "RTS before fourth frame sent too late");
+        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[9].header.IsRts(), true, "Expected an RTS frame");
+        NS_TEST_EXPECT_MSG_EQ(
+            m_txPsdus[9].header.GetAddr1(),
+            DynamicCast<WifiNetDevice>(m_staDevices.Get(1))->GetMac()->GetAddress(),
+            "Expected an RTS frame sent by the AP to the second station");
+        NS_TEST_EXPECT_MSG_EQ(
+            m_txPsdus[9].header.GetDuration(),
+            (!m_protectSingleExchange
+                 ? RoundDurationId(m_apTxopLimit - (m_txPsdus[9].txStart - txopStart) -
+                                   m_txPsdus[9].txDuration)
+                 : sifs + m_txPsdus[10].txDuration + sifs + m_txPsdus[11].txDuration + sifs +
+                       m_txPsdus[12].txDuration + m_singleExchangeProtectionSurplus),
+            (!m_protectSingleExchange
+                 ? "Duration/ID of the RTS before the fourth frame does not cover the remaining "
+                   "TXOP"
+                 : "Duration/ID of the RTS before the fourth frame must be set to remaining time "
+                   "to complete CTS+DATA+ACK sequence"));
 
-    // the CF-End frame resets the NAV on STA1, which can now transmit
+        // a CTS is sent by STA2
+        tEnd = m_txPsdus[9].txStart + m_txPsdus[9].txDuration;
+        tStart = m_txPsdus[10].txStart;
+
+        NS_TEST_EXPECT_MSG_LT(tEnd + sifs,
+                              tStart,
+                              "CTS in response to RTS before the fourth frame sent too early");
+        NS_TEST_EXPECT_MSG_LT(tStart,
+                              tEnd + sifs + tolerance,
+                              "CTS in response to RTS before the fourth frame sent too late");
+        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[10].header.IsCts(), true, "Expected a CTS");
+        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[10].header.GetAddr1(),
+                              apDev->GetMac()->GetAddress(),
+                              "Expected a CTS frame sent to the AP");
+        NS_TEST_EXPECT_MSG_EQ(
+            m_txPsdus[10].header.GetDuration(),
+            RoundDurationId(m_txPsdus[9].header.GetDuration() - sifs - m_txPsdus[10].txDuration),
+            "Duration/ID of the CTS frame must be derived from that of the RTS frame");
+
+        // the AP sends another frame to STA2
+        tEnd = m_txPsdus[10].txStart + m_txPsdus[10].txDuration;
+        tStart = m_txPsdus[11].txStart;
+
+        // remove RTS and CTS so that indices are aligned with the ProtectedIfResponded true case
+        m_txPsdus.erase(std::next(m_txPsdus.cbegin(), 9), std::next(m_txPsdus.cbegin(), 11));
+    }
+    else
+    {
+        // the AP sends another frame to STA2
+        tEnd = m_txPsdus[8].txStart + m_txPsdus[8].txDuration;
+        tStart = m_txPsdus[9].txStart;
+    }
+
+    NS_TEST_EXPECT_MSG_LT(tEnd + sifs, tStart, "Fourth frame sent too early");
+    NS_TEST_EXPECT_MSG_LT(tStart, tEnd + sifs + tolerance, "Fourth frame sent too late");
+    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[9].header.IsQosData(), true, "Expected a QoS data frame");
+    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[9].header.GetAddr1(),
+                          DynamicCast<WifiNetDevice>(m_staDevices.Get(1))->GetMac()->GetAddress(),
+                          "Expected a frame sent by the AP to the second station");
+    if (m_lengthBasedRtsCtsThresh)
+    {
+        NS_TEST_EXPECT_MSG_GT(m_txPsdus[9].size,
+                              rtsCtsThreshold,
+                              "PSDU size expected to exceed length based RTS/CTS threshold");
+    }
+    else
+    {
+        NS_TEST_EXPECT_MSG_GT(m_txPsdus[9].txDuration,
+                              rtsCtsTxDurationThresh,
+                              "PSDU duration expected to exceed duration based RTS/CTS threshold");
+    }
+    NS_TEST_EXPECT_MSG_EQ(
+        m_txPsdus[9].header.GetDuration(),
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_apTxopLimit - (m_txPsdus[9].txStart - txopStart) -
+                               m_txPsdus[9].txDuration)
+             : sifs + m_txPsdus[10].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the fourth frame does not cover the remaining TXOP"
+             : "Duration/ID of the fourth frame must be set to remaining time to "
+               "complete DATA+(Block)ACK sequence"));
+
+    std::string ack(m_nonHt ? "Normal Ack" : "Block Ack");
+
+    // a Normal/Block Ack is then sent by STA1
     tEnd = m_txPsdus[9].txStart + m_txPsdus[9].txDuration;
     tStart = m_txPsdus[10].txStart;
+
+    NS_TEST_EXPECT_MSG_LT(tEnd + sifs,
+                          tStart,
+                          ack << " in response to the fourth QoS data frame sent too early");
+    NS_TEST_EXPECT_MSG_LT(tStart,
+                          tEnd + sifs + tolerance,
+                          ack << " in response to the fourth QoS data frame sent too late");
+    NS_TEST_EXPECT_MSG_EQ(
+        (m_nonHt ? m_txPsdus[10].header.IsAck() : m_txPsdus[10].header.IsBlockAck()),
+        true,
+        "Expected a " << ack);
+    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[10].header.GetAddr1(),
+                          apDev->GetMac()->GetAddress(),
+                          "Expected a " << ack << " sent to the AP");
+    NS_TEST_EXPECT_MSG_EQ(
+        m_txPsdus[10].header.GetDuration(),
+        RoundDurationId(m_txPsdus[9].header.GetDuration() - sifs - m_txPsdus[10].txDuration),
+        "Duration/ID of the " << ack << " must be derived from that of the previous frame");
+
+    if (!m_protectSingleExchange)
+    {
+        // the TXOP limit is such that enough time for sending a CF-End frame remains
+        tEnd = m_txPsdus[10].txStart + m_txPsdus[10].txDuration;
+        tStart = m_txPsdus[11].txStart;
+
+        NS_TEST_EXPECT_MSG_LT(tEnd + sifs, tStart, "CF-End sent too early");
+        NS_TEST_EXPECT_MSG_LT(tStart, tEnd + sifs + tolerance, "CF-End sent too late");
+        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[11].header.IsCfEnd(), true, "Expected a CF-End frame");
+        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[11].header.GetDuration(),
+                              MicroSeconds(0),
+                              "Duration/ID must be set to 0 for CF-End frames");
+
+        // remove CF-END so that indices are aligned with the protectSingleExchange false case
+        m_txPsdus.erase(std::next(m_txPsdus.cbegin(), 11), std::next(m_txPsdus.cbegin(), 12));
+    }
+
+    // the CF-End frame resets the NAV on STA1, which can now transmit
+    tEnd = m_txPsdus[10].txStart + m_txPsdus[10].txDuration;
+    tStart = m_txPsdus[11].txStart;
 
     NS_TEST_EXPECT_MSG_GT_OR_EQ(tStart - tEnd,
                                 sifs + m_staAifsn * slot,
@@ -783,53 +1024,66 @@ WifiTxopTest::CheckResults()
     NS_TEST_EXPECT_MSG_LT_OR_EQ(tStart - tEnd,
                                 sifs + m_staAifsn * slot + m_staCwMin * slot + tolerance,
                                 "More than AIFS+BO elapsed between two TXOPs");
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[10].header.IsQosData(), true, "Expected a QoS data frame");
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[10].header.GetAddr1(),
+    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[11].header.IsQosData(), true, "Expected a QoS data frame");
+    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[11].header.GetAddr1(),
                           apDev->GetMac()->GetAddress(),
                           "Expected a frame sent by the first station to the AP");
     if (m_lengthBasedRtsCtsThresh)
     {
-        NS_TEST_EXPECT_MSG_LT(m_txPsdus[10].size,
+        NS_TEST_EXPECT_MSG_LT(m_txPsdus[11].size,
                               rtsCtsThreshold,
                               "PSDU size expected not to exceed length based RTS/CTS threshold");
     }
     else
     {
         NS_TEST_EXPECT_MSG_LT(
-            m_txPsdus[10].txDuration,
+            m_txPsdus[11].txDuration,
             rtsCtsTxDurationThresh,
             "PSDU duration expected not to exceed duration based RTS/CTS threshold");
     }
     NS_TEST_EXPECT_MSG_EQ(
-        m_txPsdus[10].header.GetDuration(),
-        RoundDurationId(m_staTxopLimit - m_txPsdus[10].txDuration),
-        "Duration/ID of the frame sent by the first station does not cover the remaining TXOP");
+        m_txPsdus[11].header.GetDuration(),
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_staTxopLimit - m_txPsdus[11].txDuration)
+             : sifs + m_txPsdus[12].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the frame sent by the first station does not "
+               "cover the remaining TXOP"
+             : "Duration/ID of the frame sent by the first station must be set "
+               "to remaining time to "
+               "complete DATA+ACK sequence"));
 
     // a Normal Ack is then sent by the AP
-    tEnd = m_txPsdus[10].txStart + m_txPsdus[10].txDuration;
-    tStart = m_txPsdus[11].txStart;
-
-    NS_TEST_EXPECT_MSG_LT(tEnd + sifs, tStart, "Ack sent too early");
-    NS_TEST_EXPECT_MSG_LT(tStart, tEnd + sifs + tolerance, "Ack sent too late");
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[11].header.IsAck(), true, "Expected a Normal Ack");
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[11].header.GetAddr1(),
-                          DynamicCast<WifiNetDevice>(m_staDevices.Get(0))->GetMac()->GetAddress(),
-                          "Expected a Normal Ack sent to the first station");
-    NS_TEST_EXPECT_MSG_EQ(
-        m_txPsdus[11].header.GetDuration(),
-        RoundDurationId(m_txPsdus[10].header.GetDuration() - sifs - m_txPsdus[11].txDuration),
-        "Duration/ID of the Ack must be derived from that of the previous frame");
-
-    // the TXOP limit is such that enough time for sending a CF-End frame remains
     tEnd = m_txPsdus[11].txStart + m_txPsdus[11].txDuration;
     tStart = m_txPsdus[12].txStart;
 
-    NS_TEST_EXPECT_MSG_LT(tEnd + sifs, tStart, "CF-End sent too early");
-    NS_TEST_EXPECT_MSG_LT(tStart, tEnd + sifs + tolerance, "CF-End sent too late");
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[12].header.IsCfEnd(), true, "Expected a CF-End frame");
-    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[12].header.GetDuration(),
-                          Seconds(0),
-                          "Duration/ID must be set to 0 for CF-End frames");
+    NS_TEST_EXPECT_MSG_LT(tEnd + sifs, tStart, "Ack sent too early");
+    NS_TEST_EXPECT_MSG_LT(tStart, tEnd + sifs + tolerance, "Ack sent too late");
+    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[12].header.IsAck(), true, "Expected a Normal Ack");
+    NS_TEST_EXPECT_MSG_EQ(m_txPsdus[12].header.GetAddr1(),
+                          DynamicCast<WifiNetDevice>(m_staDevices.Get(0))->GetMac()->GetAddress(),
+                          "Expected a Normal Ack sent to the first station");
+    NS_TEST_EXPECT_MSG_EQ(
+        m_txPsdus[12].header.GetDuration(),
+        RoundDurationId(m_txPsdus[11].header.GetDuration() - sifs - m_txPsdus[12].txDuration),
+        "Duration/ID of the Ack must be derived from that of the previous frame");
+
+    if (!m_protectSingleExchange)
+    {
+        // the TXOP limit is such that enough time for sending a CF-End frame remains
+        tEnd = m_txPsdus[12].txStart + m_txPsdus[12].txDuration;
+        tStart = m_txPsdus[13].txStart;
+
+        NS_TEST_EXPECT_MSG_LT(tEnd + sifs, tStart, "CF-End sent too early");
+        NS_TEST_EXPECT_MSG_LT(tStart, tEnd + sifs + tolerance, "CF-End sent too late");
+        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[13].header.IsCfEnd(), true, "Expected a CF-End frame");
+        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[13].header.GetDuration(),
+                              MicroSeconds(0),
+                              "Duration/ID must be set to 0 for CF-End frames");
+
+        // remove CF-END so that indices are aligned with the protectSingleExchange false case
+        m_txPsdus.erase(std::next(m_txPsdus.cbegin(), 13), std::next(m_txPsdus.cbegin(), 14));
+    }
 
     /*
      * Verify that the Duration/ID of RTS/CTS frames is set correctly, that the TXOP holder is
@@ -857,15 +1111,21 @@ WifiTxopTest::CheckResults()
 
     // the first frame is an RTS frame sent by the AP to STA1
     txopStart = m_txPsdus[13].txStart;
-    std::string ack(m_nonHt ? "Normal Ack" : "Block Ack");
 
     NS_TEST_EXPECT_MSG_EQ(m_txPsdus[13].header.IsRts(), true, "Expected an RTS frame");
     NS_TEST_EXPECT_MSG_EQ(m_txPsdus[13].header.GetAddr1(),
                           DynamicCast<WifiNetDevice>(m_staDevices.Get(0))->GetMac()->GetAddress(),
                           "Expected an RTS frame sent by the AP to the first station");
     NS_TEST_EXPECT_MSG_EQ(m_txPsdus[13].header.GetDuration(),
-                          RoundDurationId(m_apTxopLimit - m_txPsdus[13].txDuration),
-                          "Duration/ID of the first RTS frame must cover the whole TXOP");
+                          (!m_protectSingleExchange
+                               ? RoundDurationId(m_apTxopLimit - m_txPsdus[13].txDuration)
+                               : sifs + m_txPsdus[14].txDuration + sifs + m_txPsdus[15].txDuration +
+                                     sifs + m_txPsdus[16].txDuration +
+                                     m_singleExchangeProtectionSurplus),
+                          (!m_protectSingleExchange
+                               ? "Duration/ID of the first RTS frame must cover the whole TXOP"
+                               : "Duration/ID of the first RTS frame must be set to remaining time "
+                                 "to complete CTS+DATA+(Block)ACK sequence"));
 
     // a CTS is sent by STA1
     tEnd = m_txPsdus[13].txStart + m_txPsdus[13].txDuration;
@@ -910,9 +1170,14 @@ WifiTxopTest::CheckResults()
     }
     NS_TEST_EXPECT_MSG_EQ(
         m_txPsdus[15].header.GetDuration(),
-        RoundDurationId(m_apTxopLimit - (m_txPsdus[15].txStart - txopStart) -
-                        m_txPsdus[15].txDuration),
-        "Duration/ID of the first QoS data frame does not cover the remaining TXOP");
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_apTxopLimit - (m_txPsdus[15].txStart - txopStart) -
+                               m_txPsdus[15].txDuration)
+             : sifs + m_txPsdus[16].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the first QoS data frame does not cover the remaining TXOP"
+             : "Duration/ID of the first QoS data frame must be set to remaining time to "
+               "complete DATA+(Block)ACK sequence"));
 
     // a Normal/Block Ack is then sent by STA1
     tEnd = m_txPsdus[15].txStart + m_txPsdus[15].txDuration;
@@ -952,10 +1217,17 @@ WifiTxopTest::CheckResults()
             m_txPsdus[idx].header.GetAddr1(),
             DynamicCast<WifiNetDevice>(m_staDevices.Get(1))->GetMac()->GetAddress(),
             "Expected an RTS frame sent by the AP to the second station");
-        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[idx].header.GetDuration(),
-                              RoundDurationId(m_apTxopLimit - (m_txPsdus[idx].txStart - txopStart) -
-                                              m_txPsdus[idx].txDuration),
-                              "Duration/ID of the second RTS frame must cover the whole TXOP");
+        NS_TEST_EXPECT_MSG_EQ(
+            m_txPsdus[idx].header.GetDuration(),
+            (!m_protectSingleExchange
+                 ? RoundDurationId(m_apTxopLimit - (m_txPsdus[idx].txStart - txopStart) -
+                                   m_txPsdus[idx].txDuration)
+                 : sifs + m_txPsdus[idx + 1].txDuration + sifs + m_txPsdus[idx + 2].txDuration +
+                       sifs + m_txPsdus[idx + 3].txDuration + m_singleExchangeProtectionSurplus),
+            (!m_protectSingleExchange
+                 ? "Duration/ID of the second RTS frame must cover the whole TXOP"
+                 : "Duration/ID of the second RTS frame must be set to remaining time to complete "
+                   "CTS+DATA+(Block)ACK sequence"));
 
         // a CTS is sent by STA2 (which ignores the NAV)
         tEnd = m_txPsdus[idx].txStart + m_txPsdus[idx].txDuration;
@@ -1005,9 +1277,14 @@ WifiTxopTest::CheckResults()
     }
     NS_TEST_EXPECT_MSG_EQ(
         m_txPsdus[idx].header.GetDuration(),
-        RoundDurationId(m_apTxopLimit - (m_txPsdus[idx].txStart - txopStart) -
-                        m_txPsdus[idx].txDuration),
-        "Duration/ID of the second QoS data frame does not cover the remaining TXOP");
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_apTxopLimit - (m_txPsdus[idx].txStart - txopStart) -
+                               m_txPsdus[idx].txDuration)
+             : sifs + m_txPsdus[idx + 1].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the second QoS data frame does not cover the remaining TXOP"
+             : "Duration/ID of the second QoS data frame must be set to remaining time to "
+               "complete DATA+(Block)ACK sequence"));
 
     // a Normal/Block Ack is then sent by STA2
     tEnd = m_txPsdus[idx].txStart + m_txPsdus[idx].txDuration;
@@ -1046,10 +1323,17 @@ WifiTxopTest::CheckResults()
             m_txPsdus[idx].header.GetAddr1(),
             DynamicCast<WifiNetDevice>(m_staDevices.Get(2))->GetMac()->GetAddress(),
             "Expected an RTS frame sent by the AP to the third station");
-        NS_TEST_EXPECT_MSG_EQ(m_txPsdus[idx].header.GetDuration(),
-                              RoundDurationId(m_apTxopLimit - (m_txPsdus[idx].txStart - txopStart) -
-                                              m_txPsdus[idx].txDuration),
-                              "Duration/ID of the third RTS frame must cover the whole TXOP");
+        NS_TEST_EXPECT_MSG_EQ(
+            m_txPsdus[idx].header.GetDuration(),
+            (!m_protectSingleExchange
+                 ? RoundDurationId(m_apTxopLimit - (m_txPsdus[idx].txStart - txopStart) -
+                                   m_txPsdus[idx].txDuration)
+                 : sifs + m_txPsdus[idx + 1].txDuration + sifs + m_txPsdus[idx + 2].txDuration +
+                       sifs + m_txPsdus[idx + 3].txDuration + m_singleExchangeProtectionSurplus),
+            (!m_protectSingleExchange
+                 ? "Duration/ID of the third RTS frame must cover the whole TXOP"
+                 : "Duration/ID of the third RTS frame must be set to remaining time to complete "
+                   "CTS+DATA+(Block)ACK sequence"));
 
         // a CTS is sent by STA3 (which ignores the NAV)
         tEnd = m_txPsdus[idx].txStart + m_txPsdus[idx].txDuration;
@@ -1098,9 +1382,14 @@ WifiTxopTest::CheckResults()
     }
     NS_TEST_EXPECT_MSG_EQ(
         m_txPsdus[idx].header.GetDuration(),
-        RoundDurationId(m_apTxopLimit - (m_txPsdus[idx].txStart - txopStart) -
-                        m_txPsdus[idx].txDuration),
-        "Duration/ID of the third QoS data frame does not cover the remaining TXOP");
+        (!m_protectSingleExchange
+             ? RoundDurationId(m_apTxopLimit - (m_txPsdus[idx].txStart - txopStart) -
+                               m_txPsdus[idx].txDuration)
+             : sifs + m_txPsdus[idx + 1].txDuration + m_singleExchangeProtectionSurplus),
+        (!m_protectSingleExchange
+             ? "Duration/ID of the third QoS data frame does not cover the remaining TXOP"
+             : "Duration/ID of the third QoS data frame must be set to remaining time to "
+               "complete DATA+(Block)ACK sequence"));
 
     // a Normal/Block Ack is then sent by STA3
     tEnd = m_txPsdus[idx].txStart + m_txPsdus[idx].txDuration;
@@ -1127,7 +1416,7 @@ WifiTxopTest::CheckResults()
 
     // there is no time remaining for sending a CF-End frame if SingleRtsPerTxop is false. This is
     // verified by checking that 25 frames are transmitted (done at the beginning of this method)
-    if (m_singleRtsPerTxop)
+    if (m_singleRtsPerTxop && !m_protectSingleExchange)
     {
         tEnd = m_txPsdus[idx].txStart + m_txPsdus[idx].txDuration;
         ++idx;
@@ -1137,22 +1426,22 @@ WifiTxopTest::CheckResults()
         NS_TEST_EXPECT_MSG_LT(tStart, tEnd + sifs + tolerance, "CF-End sent too late");
         NS_TEST_EXPECT_MSG_EQ(m_txPsdus[idx].header.IsCfEnd(), true, "Expected a CF-End frame");
         NS_TEST_EXPECT_MSG_EQ(m_txPsdus[idx].header.GetDuration(),
-                              Seconds(0),
+                              MicroSeconds(0),
                               "Duration/ID must be set to 0 for CF-End frames");
     }
 
     // Expected received packets:
-    // - 3 DL packets (without RTS/CTS)
+    // - 4 DL packets (without RTS/CTS) if non-HT, 5 DL packets (without RTS/CTS) if HE
     // - 1 UL packet
     // - 3 DL packets (with RTS/CTS) if non-HT, 6 DL packets (with RTS/CTS) if HE
-    NS_TEST_EXPECT_MSG_EQ(m_received, (m_nonHt ? 7 : 10), "Unexpected number of packets received");
+    NS_TEST_EXPECT_MSG_EQ(m_received, (m_nonHt ? 8 : 12), "Unexpected number of packets received");
 }
 
 /**
- * \ingroup wifi-test
- * \ingroup tests
+ * @ingroup wifi-test
+ * @ingroup tests
  *
- * \brief wifi TXOP Test Suite
+ * @brief wifi TXOP Test Suite
  */
 class WifiTxopTestSuite : public TestSuite
 {
@@ -1165,21 +1454,41 @@ WifiTxopTestSuite::WifiTxopTestSuite()
 {
     for (const auto nonHt : {true, false})
     {
-        AddTestCase(new WifiTxopTest({.nonHt = nonHt,
-                                      .pifsRecovery = true,
-                                      .singleRtsPerTxop = false,
-                                      .lengthBasedRtsCtsThresh = false}),
-                    TestCase::Duration::QUICK);
-        AddTestCase(new WifiTxopTest({.nonHt = nonHt,
-                                      .pifsRecovery = false,
-                                      .singleRtsPerTxop = true,
-                                      .lengthBasedRtsCtsThresh = false}),
-                    TestCase::Duration::QUICK);
-        AddTestCase(new WifiTxopTest({.nonHt = nonHt,
-                                      .pifsRecovery = true,
-                                      .singleRtsPerTxop = true,
-                                      .lengthBasedRtsCtsThresh = true}),
-                    TestCase::Duration::QUICK);
+        for (const auto pifsRecovery : {true, false})
+        {
+            for (const auto singleRtsPerTxop : {true, false})
+            {
+                for (const auto lengthBasedRtsCtsThresh : {true, false})
+                {
+                    for (const auto protectedIfResponded : {true, false})
+                    {
+                        for (const auto protectSingleExchange : {false, true})
+                        {
+                            for (const auto& singleExchangeProtectionBuffer :
+                                 {Time(), MicroSeconds(25) /* PIFS */})
+                            {
+                                if (!protectSingleExchange &&
+                                    singleExchangeProtectionBuffer.IsStrictlyPositive())
+                                {
+                                    continue;
+                                }
+                                AddTestCase(new WifiTxopTest({
+                                                .nonHt = nonHt,
+                                                .pifsRecovery = pifsRecovery,
+                                                .singleRtsPerTxop = singleRtsPerTxop,
+                                                .lengthBasedRtsCtsThresh = lengthBasedRtsCtsThresh,
+                                                .protectedIfResponded = protectedIfResponded,
+                                                .protectSingleExchange = protectSingleExchange,
+                                                .singleExchangeProtectionBuffer =
+                                                    singleExchangeProtectionBuffer,
+                                            }),
+                                            TestCase::Duration::QUICK);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

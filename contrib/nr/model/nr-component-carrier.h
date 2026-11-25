@@ -7,13 +7,14 @@
 #ifndef NR_COMPONENT_CARRIER_H
 #define NR_COMPONENT_CARRIER_H
 
-#include <ns3/object.h>
+#include "ns3/nr-export.h"
+#include "ns3/object.h"
 
 namespace ns3
 {
 
 /**
- * \ingroup nr
+ * @ingroup nr
  *
  * NrComponentCarrier Object, it defines a single Carrier
  * This is the parent class for both NrComponentCarrier
@@ -22,12 +23,12 @@ namespace ns3
  * parameters for a carrier. Does not contain pointers to
  * the MAC/PHY objects of the carrier.
  */
-class NrComponentCarrier : public Object
+class NR_EXPORT NrComponentCarrier : public Object
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -37,55 +38,45 @@ class NrComponentCarrier : public Object
     void DoDispose() override;
 
     /**
-     * \return the uplink bandwidth in RBs
+     * @return the uplink bandwidth in RBs
      */
     uint16_t GetUlBandwidth() const;
 
     /**
-     * \param bw the uplink bandwidth in RBs
+     * @param bw the uplink bandwidth in RBs
      */
     virtual void SetUlBandwidth(uint16_t bw);
 
     /**
-     * \return the downlink bandwidth in RBs
+     * @return the downlink bandwidth in RBs
      */
     uint16_t GetDlBandwidth() const;
 
     /**
-     * \param bw the downlink bandwidth in RBs
+     * @param bw the downlink bandwidth in RBs
      */
     virtual void SetDlBandwidth(uint16_t bw);
 
     /**
-     * \return the downlink carrier frequency (EARFCN)
+     * @return the carrier frequency (ARFCN)
      */
-    uint32_t GetDlEarfcn() const;
+    uint32_t GetArfcn() const;
 
     /**
-     * \param earfcn the downlink carrier frequency (EARFCN)
+     * @param earfcn the carrier frequency (ARFCN)
      */
-    void SetDlEarfcn(uint32_t earfcn);
+    void SetArfcn(uint32_t earfcn);
 
     /**
-     * \return the uplink carrier frequency (EARFCN)
-     */
-    uint32_t GetUlEarfcn() const;
-
-    /**
-     * \param earfcn the uplink carrier frequency (EARFCN)
-     */
-    void SetUlEarfcn(uint32_t earfcn);
-
-    /**
-     * \brief Returns the CSG ID of the eNodeB.
-     * \return the Closed Subscriber Group identity
+     * @brief Returns the CSG ID of the eNodeB.
+     * @return the Closed Subscriber Group identity
      * \sa NrGnbNetDevice::SetCsgId
      */
     uint32_t GetCsgId() const;
 
     /**
-     * \brief Associate the eNodeB device with a particular CSG.
-     * \param csgId the intended Closed Subscriber Group identity
+     * @brief Associate the eNodeB device with a particular CSG.
+     * @param csgId the intended Closed Subscriber Group identity
      *
      * CSG identity is a number identifying a Closed Subscriber Group which the
      * cell belongs to. eNodeB is associated with a single CSG identity.
@@ -98,15 +89,15 @@ class NrComponentCarrier : public Object
     void SetCsgId(uint32_t csgId);
 
     /**
-     * \brief Returns the CSG indication flag of the eNodeB.
-     * \return the CSG indication flag
+     * @brief Returns the CSG indication flag of the eNodeB.
+     * @return the CSG indication flag
      * \sa NrGnbNetDevice::SetCsgIndication
      */
     bool GetCsgIndication() const;
 
     /**
-     * \brief Enable or disable the CSG indication flag.
-     * \param csgIndication if TRUE, only CSG members are allowed to access this
+     * @brief Enable or disable the CSG indication flag.
+     * @param csgIndication if TRUE, only CSG members are allowed to access this
      *                      cell
      *
      * When the CSG indication field is set to TRUE, only UEs which are members of
@@ -114,7 +105,7 @@ class NrComponentCarrier : public Object
      * enforcing closed access mode. Otherwise, the eNodeB operates as a non-CSG
      * cell and implements open access mode.
      *
-     * \note This restriction only applies to initial cell selection and
+     * @note This restriction only applies to initial cell selection and
      *       EPC-enabled simulation.
      *
      * \sa NrGnbNetDevice::SetCsgIndication
@@ -122,14 +113,14 @@ class NrComponentCarrier : public Object
     void SetCsgIndication(bool csgIndication);
 
     /**
-     * \brief Set as primary carrier
-     * \param primaryCarrier true to set as primary carrier
+     * @brief Set as primary carrier
+     * @param primaryCarrier true to set as primary carrier
      */
     void SetAsPrimary(bool primaryCarrier);
 
     /**
-     * \brief Checks if the carrier is the primary carrier
-     * \returns true if the carrier is primary
+     * @brief Checks if the carrier is the primary carrier
+     * @returns true if the carrier is primary
      */
     bool IsPrimary() const;
 
@@ -142,8 +133,7 @@ class NrComponentCarrier : public Object
     uint16_t m_dlBandwidth{0}; ///< downlink bandwidth in RBs */
     uint16_t m_ulBandwidth{0}; ///< uplink bandwidth in RBs */
 
-    uint32_t m_dlEarfcn{0}; ///< downlink carrier frequency */
-    uint32_t m_ulEarfcn{0}; ///< uplink carrier frequency */
+    uint32_t m_arfcn{0}; ///< carrier frequency */
 };
 
 } // namespace ns3

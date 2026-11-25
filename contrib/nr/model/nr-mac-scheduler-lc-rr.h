@@ -7,72 +7,69 @@
 
 #include "nr-mac-scheduler-lc-alg.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 /**
- *\ingroup scheduler
+ *@ingroup scheduler
  *
- * \brief Default algorithm for distributing the assigned bytes to the different
+ * @brief Default algorithm for distributing the assigned bytes to the different
  * LCGs/LCs of a UE in a Round Robin fashion
  *
  */
-class NrMacSchedulerLcRR : public NrMacSchedulerLcAlgorithm
+class NR_EXPORT NrMacSchedulerLcRR : public NrMacSchedulerLcAlgorithm
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Get the type ID of this instance
-     * \return the Type ID of this instance
-     */
-    TypeId GetInstanceTypeId() const override;
-
-    /**
-     * \brief NrMacSchedulerLcRR constructor
+     * @brief NrMacSchedulerLcRR constructor
      */
     NrMacSchedulerLcRR();
     /**
-     * \brief NrMacSchedulerLcRR deconstructor
+     * @brief NrMacSchedulerLcRR deconstructor
      */
     ~NrMacSchedulerLcRR() override;
 
+  private:
     /**
-     * \brief Method to decide how to distribute the assigned bytes to the different LCs
+     * @brief Method to decide how to distribute the assigned bytes to the different LCs
      *        for the DL direction. In the RR case the method to distribute the bytes will
      *        be the same as in the UL direction.
-     * \param ueLCG LCG of an UE
-     * \param tbs TBS to divide between the LCG/LC
-     * \return A vector of Assignation
+     * @param ueLCG LCG of an UE
+     * @param tbs TBS to divide between the LCG/LC
+     * @return A vector of Assignation
      */
-    std::vector<Assignation> AssignBytesToDlLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
-                                               uint32_t tbs,
-                                               Time slotPeriod) const override;
+    std::vector<Assignation> DoAssignBytesToDlLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
+                                                 uint32_t tbs,
+                                                 Time slotPeriod) const override;
 
     /**
-     * \brief Method to decide how to distribute the assigned bytes to the different LCs
+     * @brief Method to decide how to distribute the assigned bytes to the different LCs
      *        for the UL direction. In the RR case the method to distribute the bytes will
      *        be the same as in the DL direction.
-     * \param ueLCG LCG of an UE
-     * \param tbs TBS to divide between the LCG/LC
-     * \return A vector of Assignation
+     * @param ueLCG LCG of an UE
+     * @param tbs TBS to divide between the LCG/LC
+     * @return A vector of Assignation
      */
-    std::vector<Assignation> AssignBytesToUlLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
-                                               uint32_t tbs) const override;
+    std::vector<Assignation> DoAssignBytesToUlLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
+                                                 uint32_t tbs) const override;
 
     /**
-     * \brief Method to decide how to distribute the assigned bytes to the different LCs
-     * \param ueLCG LCG of an UE
-     * \param tbs TBS to divide between the LCG/LC
-     * \return A vector of Assignation
+     * @brief Method to decide how to distribute the assigned bytes to the different LCs
+     * @param ueLCG LCG of an UE
+     * @param tbs TBS to divide between the LCG/LC
+     * @return A vector of Assignation
      */
-  private:
     std::vector<Assignation> AssignBytesToLC(const std::unordered_map<uint8_t, LCGPtr>& ueLCG,
-                                             uint32_t tbs) const;
+                                             uint32_t tbs,
+                                             bool isDl) const;
 };
 } // namespace ns3
 

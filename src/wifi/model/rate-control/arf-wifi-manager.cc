@@ -11,15 +11,13 @@
 #include "ns3/log.h"
 #include "ns3/wifi-tx-vector.h"
 
-#define Min(a, b) ((a < b) ? a : b)
-
 namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("ArfWifiManager");
 
 /**
- * \brief hold per-remote-station state for ARF Wifi manager.
+ * @brief hold per-remote-station state for ARF Wifi manager.
  *
  * This struct extends from WifiRemoteStation struct to hold additional
  * information required by the ARF Wifi manager
@@ -124,7 +122,7 @@ ArfWifiManager::DoReportRtsFailed(WifiRemoteStation* station)
  * The fundamental reason for this is that there is a backoff between each data
  * transmission, be it an initial transmission or a retransmission.
  *
- * \param st the station that we failed to send Data
+ * @param st the station that we failed to send Data
  */
 void
 ArfWifiManager::DoReportDataFailed(WifiRemoteStation* st)
@@ -227,9 +225,9 @@ ArfWifiManager::DoGetDataTxVector(WifiRemoteStation* st, MHz_u allowedWidth)
     NS_LOG_FUNCTION(this << st << allowedWidth);
     auto station = static_cast<ArfWifiRemoteStation*>(st);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     WifiMode mode = GetSupported(station, station->m_rate);
     uint64_t rate = mode.GetDataRate(channelWidth);
@@ -254,13 +252,13 @@ WifiTxVector
 ArfWifiManager::DoGetRtsTxVector(WifiRemoteStation* st)
 {
     NS_LOG_FUNCTION(this << st);
-    /// \todo we could/should implement the ARF algorithm for
+    /// @todo we could/should implement the ARF algorithm for
     /// RTS only by picking a single rate within the BasicRateSet.
     auto station = static_cast<ArfWifiRemoteStation*>(st);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     WifiMode mode;
     if (!GetUseNonErpProtection())

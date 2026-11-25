@@ -6,6 +6,20 @@
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
 
+/**
+ * @ingroup test
+ * @file nr-test-rlc-am-transmitter.cc
+ *
+ * @brief Test suite `nr-rlc-am-transmitter`: transmitter-side behavior of NrRlcAm in isolation.
+ * A test PDCP and a test MAC are wired to a real RLC AM entity through the RLC/MAC SAPs; the test
+ * PDCP sends SDUs and the test MAC grants transmission opportunities of controlled size and time,
+ * recording the PDUs it receives. Scheduled checks compare the received data against expected
+ * strings to verify one-SDU-to-one-PDU delivery, segmentation of one SDU into several PDUs,
+ * concatenation of several SDUs into one PDU and the buffer status report primitive parameters; a
+ * dedicated case verifies that the max-retransmission (RLF) indication fires exactly once when a
+ * PDU is never acknowledged.
+ */
+
 #include "nr-test-rlc-am-transmitter.h"
 
 #include "nr-test-entities.h"
@@ -35,12 +49,14 @@ NrRlcAmTransmitterTestSuite::NrRlcAmTransmitterTestSuite()
                 TestCase::Duration::QUICK);
     AddTestCase(new NrRlcAmTransmitterConcatenationTestCase("Concatenation"),
                 TestCase::Duration::QUICK);
-    AddTestCase(new NrRlcAmTransmitterReportBufferStatusTestCase("ReportBufferStatus primitive"),
+    AddTestCase(new NrRlcAmTransmitterBufferStatusReportTestCase("BufferStatusReport primitive"),
+                TestCase::Duration::QUICK);
+    AddTestCase(new NrRlcAmTransmitterMaxRetxTestCase("Max retx raises RLF indication once"),
                 TestCase::Duration::QUICK);
 }
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrRlcAmTransmitterTestSuite nrRlcAmTransmitterTestSuite;
@@ -223,26 +239,26 @@ NrRlcAmTransmitterConcatenationTestCase::DoRun()
 }
 
 /**
- * Test 4.1.1.4 Report Buffer Status (test primitive parameters)
+ * Test 4.1.1.4 Buffer Status Report (test primitive parameters)
  */
-NrRlcAmTransmitterReportBufferStatusTestCase::NrRlcAmTransmitterReportBufferStatusTestCase(
+NrRlcAmTransmitterBufferStatusReportTestCase::NrRlcAmTransmitterBufferStatusReportTestCase(
     std::string name)
     : NrRlcAmTransmitterTestCase(name)
 {
 }
 
-NrRlcAmTransmitterReportBufferStatusTestCase::~NrRlcAmTransmitterReportBufferStatusTestCase()
+NrRlcAmTransmitterBufferStatusReportTestCase::~NrRlcAmTransmitterBufferStatusReportTestCase()
 {
 }
 
 void
-NrRlcAmTransmitterReportBufferStatusTestCase::DoRun()
+NrRlcAmTransmitterBufferStatusReportTestCase::DoRun()
 {
     // Create topology
     NrRlcAmTransmitterTestCase::DoRun();
 
     //
-    // d) Test the parameters of the ReportBufferStatus primitive
+    // d) Test the parameters of the BufferStatusReport primitive
     //
 
     //   txMac->SendTxOpportunity (Seconds (0.1), (2+2) + (10+6));
@@ -299,6 +315,70 @@ NrRlcAmTransmitterReportBufferStatusTestCase::DoRun()
     CheckDataReceived(Seconds(1.700), "XYZABCDEFGHIJKLMNOPQRSTUVWXYZ", "SDU #9 is not OK");
 
     Simulator::Stop(Seconds(2));
+    Simulator::Run();
+    Simulator::Destroy();
+}
+
+/**
+ * Test 4.1.1.5 Max retransmissions raise the RLF indication exactly once.
+ */
+NrRlcAmTransmitterMaxRetxTestCase::NrRlcAmTransmitterMaxRetxTestCase(std::string name)
+    : NrRlcAmTransmitterTestCase(name)
+{
+}
+
+NrRlcAmTransmitterMaxRetxTestCase::~NrRlcAmTransmitterMaxRetxTestCase()
+{
+}
+
+void
+NrRlcAmTransmitterMaxRetxTestCase::OnMaxRetxReached()
+{
+    NS_LOG_FUNCTION(this);
+    m_maxRetxCount++;
+}
+
+void
+NrRlcAmTransmitterMaxRetxTestCase::CheckMaxRetx(uint32_t expected, std::string assertMsg)
+{
+    NS_TEST_ASSERT_MSG_EQ(m_maxRetxCount, expected, assertMsg);
+}
+
+void
+NrRlcAmTransmitterMaxRetxTestCase::DoRun()
+{
+    // Create topology (txPdcp <-> txRlc(NrRlcAm) <-> txMac)
+    NrRlcAmTransmitterTestCase::DoRun();
+
+    // Wire the max-retx indication (the feature under test).
+    txRlc->SetMaxRetxReachedCallback(
+        MakeCallback(&NrRlcAmTransmitterMaxRetxTestCase::OnMaxRetxReached, this));
+
+    // One SDU -> one PDU. The transmitter-only harness never returns a STATUS PDU,
+    // so the PDU is never acknowledged. The poll-retransmit timer (20 ms default)
+    // repeatedly marks it for retransmission; each granted tx opportunity retransmits
+    // it and increments its retx count. After maxRetxThreshold (default 5)
+    // retransmissions the RLC-AM entity must raise the max-retx indication once.
+    txPdcp->SendData(Seconds(0.100), "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+
+    // Grant a tx opportunity every 25 ms (> the 20 ms poll-retransmit timer) so each
+    // cycle produces one (re)transmission; ~14 opportunities comfortably exceed the
+    // 1 original + 5 retransmissions needed to reach the threshold.
+    for (uint32_t i = 0; i < 14; ++i)
+    {
+        txMac->SendTxOpportunity(Seconds(0.150 + 0.025 * i), 30);
+    }
+
+    // The indication must fire exactly once: not zero (the mechanism works) and not
+    // repeatedly (the once-per-entity guard works), even though the RLC keeps
+    // retransmitting past the threshold.
+    Simulator::Schedule(Seconds(0.600),
+                        &NrRlcAmTransmitterMaxRetxTestCase::CheckMaxRetx,
+                        this,
+                        1u,
+                        "RLC-AM max-retx indication did not fire exactly once");
+
+    Simulator::Stop(Seconds(0.7));
     Simulator::Run();
     Simulator::Destroy();
 }

@@ -13,7 +13,7 @@ paths, in increasing order of effort and control:
 
 ## 1. Docker, the fastest path
 
-The published image carries a fully built tree: ns-3.43, all fourteen custom
+The published image carries a fully built tree: ns-3.49 with 5G-LENA v5.2, all fourteen custom
 modules, the SNS3 `satellite` stack, the mmWave and 5G-LENA `nr` NR stacks, the
 Python tooling and the digital-twin server. Nothing to compile.
 

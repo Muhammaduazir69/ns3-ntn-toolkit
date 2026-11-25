@@ -13,17 +13,19 @@
 
 #include "nr-no-backhaul-epc-helper.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 /**
- * \ingroup nr
- * \brief Create an EPC network with PointToPoint links in the backhaul network.
+ * @ingroup nr
+ * @brief Create an EPC network with PointToPoint links in the backhaul network.
  *
  * This Helper extends NrNoBackhaulEpcHelper creating PointToPoint links in the
  * backhaul network (i.e. in the S1-U and S1-MME interfaces)
  */
-class NrPointToPointEpcHelperBase : public NrNoBackhaulEpcHelper
+class NR_EXPORT NrPointToPointEpcHelperBase : public NrNoBackhaulEpcHelper
 {
   public:
     /**
@@ -39,16 +41,16 @@ class NrPointToPointEpcHelperBase : public NrNoBackhaulEpcHelper
     // inherited from Object
     /**
      * Register this type.
-     * \return The object TypeId.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
     void DoDispose() override;
 
     // inherited from NrEpcHelper
-    void AddGnb(Ptr<Node> gnbNode,
-                Ptr<NetDevice> nrGnbNetDevice,
-                std::vector<uint16_t> cellIds) override;
+    void AddGnb(Ptr<Node> gnbNode, Ptr<NetDevice> nrGnbNetDevice, uint16_t cellId) override;
+
+  protected:
+    void NotifyConstructionCompleted() override;
 
   private:
     /**

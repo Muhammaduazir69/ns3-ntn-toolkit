@@ -7,10 +7,10 @@
 #include "bwp-manager-algorithm.h"
 #include "nr-control-messages.h"
 
-#include <ns3/log.h>
-#include <ns3/object-map.h>
-#include <ns3/pointer.h>
-#include <ns3/uinteger.h>
+#include "ns3/log.h"
+#include "ns3/object-map.h"
+#include "ns3/pointer.h"
+#include "ns3/uinteger.h"
 
 namespace ns3
 {
@@ -52,7 +52,7 @@ BwpManagerGnb::SetBwpManagerAlgorithm(const Ptr<BwpManagerAlgorithm>& algorithm)
 }
 
 uint8_t
-BwpManagerGnb::GetResourceType(NrMacSapProvider::ReportBufferStatusParameters params)
+BwpManagerGnb::GetResourceType(NrMacSapProvider::BufferStatusReportParameters params)
 {
     NS_ASSERT_MSG(m_ueInfo.find(params.rnti) != m_ueInfo.end(),
                   "Trying to check the QoS of unknown UE");
@@ -63,8 +63,8 @@ BwpManagerGnb::GetResourceType(NrMacSapProvider::ReportBufferStatusParameters pa
 }
 
 std::vector<NrCcmRrcSapProvider::LcsConfig>
-BwpManagerGnb::DoSetupDataRadioBearer(NrEpsBearer bearer,
-                                      uint8_t bearerId,
+BwpManagerGnb::DoSetupDataRadioBearer(NrQosFlow flow,
+                                      uint8_t qfi,
                                       uint16_t rnti,
                                       uint8_t lcid,
                                       uint8_t lcGroup,
@@ -73,12 +73,7 @@ BwpManagerGnb::DoSetupDataRadioBearer(NrEpsBearer bearer,
     NS_LOG_FUNCTION(this);
 
     std::vector<NrCcmRrcSapProvider::LcsConfig> lcsConfig =
-        NrRrComponentCarrierManager::DoSetupDataRadioBearer(bearer,
-                                                            bearerId,
-                                                            rnti,
-                                                            lcid,
-                                                            lcGroup,
-                                                            msu);
+        NrRrComponentCarrierManager::DoSetupDataRadioBearer(flow, qfi, rnti, lcid, lcGroup, msu);
     return lcsConfig;
 }
 
@@ -92,11 +87,34 @@ BwpManagerGnb::GetBwpIndex(uint16_t rnti, uint8_t lcid)
                       m_ueInfo.at(rnti).m_rlcLcInstantiated.end(),
                   "Unknown logical channel of UE");
 
-    uint8_t qci = m_ueInfo[rnti].m_rlcLcInstantiated[lcid].qci;
+    // Same-cell BWP-switch override: if the UE has reported a primary BWP, all
+    // of its downlink is scheduled there regardless of 5QI, so DL data follows
+    // the UE to the BWP it is actually listening on.
+    auto ovrIt = m_uePrimaryBwp.find(rnti);
+    if (ovrIt != m_uePrimaryBwp.end())
+    {
+        return ovrIt->second;
+    }
+
+    uint8_t fiveQi = m_ueInfo[rnti].m_rlcLcInstantiated[lcid].fiveQi;
 
     // Force a conversion between the uint8_t type that comes from the LcInfo
     // struct (yeah, using the NrEpsBearer::Qci type was too hard ...)
-    return m_algorithm->GetBwpForEpsBearer(static_cast<NrEpsBearer::Qci>(qci));
+    uint8_t dataBwpId = m_algorithm->GetBwpForQosFlow(static_cast<NrQosFlow::FiveQi>(fiveQi));
+    // If BWP associated to bearer is not set, use the default BWP
+    if (dataBwpId == BwpManagerAlgorithm::NO_BWP_ASSIGNED)
+    {
+        dataBwpId = 0;
+    }
+    return dataBwpId;
+}
+
+void
+BwpManagerGnb::DoSetUePrimaryBwp(uint16_t rnti, uint8_t bwpId)
+{
+    NS_LOG_FUNCTION(this << rnti << +bwpId);
+    NS_LOG_INFO("UE " << rnti << " primary DL BWP override -> " << +bwpId);
+    m_uePrimaryBwp[rnti] = bwpId;
 }
 
 uint8_t
@@ -110,21 +128,28 @@ BwpManagerGnb::PeekBwpIndex(uint16_t rnti, uint8_t lcid) const
                       m_ueInfo.at(rnti).m_rlcLcInstantiated.end(),
                   "Unknown logical channel of UE");
 
-    uint8_t qci = m_ueInfo.at(rnti).m_rlcLcInstantiated.at(lcid).qci;
+    auto ovrIt = m_uePrimaryBwp.find(rnti);
+    if (ovrIt != m_uePrimaryBwp.end())
+    {
+        return ovrIt->second;
+    }
+
+    uint8_t fiveQi = m_ueInfo.at(rnti).m_rlcLcInstantiated.at(lcid).fiveQi;
 
     // Force a conversion between the uint8_t type that comes from the LcInfo
-    // struct (yeah, using the NrEpsBearer::Qci type was too hard ...)
-    return m_algorithm->GetBwpForEpsBearer(static_cast<NrEpsBearer::Qci>(qci));
+    // struct (yeah, using the NrQosFlow::FiveQi type was too hard ...)
+    return m_algorithm->GetBwpForQosFlow(static_cast<NrQosFlow::FiveQi>(fiveQi));
 }
 
-uint8_t
-BwpManagerGnb::RouteIngoingCtrlMsgs(const Ptr<NrControlMessage>& msg, uint8_t sourceBwpId) const
+uint32_t
+BwpManagerGnb::RouteIngoingCtrlMsgs(const Ptr<NrControlMessage>& msg, uint32_t sourceBwpArfcn) const
 {
     NS_LOG_FUNCTION(this);
 
-    NS_LOG_INFO("Msg type " << msg->GetMessageType() << " from bwp " << +sourceBwpId
-                            << " that wants to go in the gnb, goes in BWP " << msg->GetSourceBwp());
-    return msg->GetSourceBwp();
+    NS_LOG_INFO("Msg type " << msg->GetMessageType() << " from bwp " << +sourceBwpArfcn
+                            << " that wants to go in the gnb, goes in BWP with ARFCN "
+                            << msg->GetSourceBwpArfcn());
+    return msg->GetSourceBwpArfcn();
 }
 
 uint8_t
@@ -156,11 +181,17 @@ void
 BwpManagerGnb::SetOutputLink(uint32_t sourceBwp, uint32_t outputBwp)
 {
     NS_LOG_FUNCTION(this);
-    m_outputLinks.insert(std::make_pair(sourceBwp, outputBwp));
+    m_outputLinks[sourceBwp] = outputBwp;
+}
+
+bool
+BwpManagerGnb::HasOutputLink(uint32_t sourceBwp) const
+{
+    return m_outputLinks.contains(sourceBwp);
 }
 
 void
-BwpManagerGnb::DoReportBufferStatus(NrMacSapProvider::ReportBufferStatusParameters params)
+BwpManagerGnb::DoTransmitBufferStatusReport(NrMacSapProvider::BufferStatusReportParameters params)
 {
     NS_LOG_FUNCTION(this);
 
@@ -168,7 +199,7 @@ BwpManagerGnb::DoReportBufferStatus(NrMacSapProvider::ReportBufferStatusParamete
 
     if (m_macSapProvidersMap.find(bwpIndex) != m_macSapProvidersMap.end())
     {
-        m_macSapProvidersMap.find(bwpIndex)->second->ReportBufferStatus(params);
+        m_macSapProvidersMap.find(bwpIndex)->second->BufferStatusReport(params);
     }
     else
     {
@@ -180,11 +211,10 @@ void
 BwpManagerGnb::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
 {
     NS_LOG_FUNCTION(this);
-    std::map<uint16_t, NrUeInfo>::iterator rntiIt = m_ueInfo.find(txOpParams.rnti);
+    auto rntiIt = m_ueInfo.find(txOpParams.rnti);
     NS_ASSERT_MSG(rntiIt != m_ueInfo.end(), "could not find RNTI" << txOpParams.rnti);
 
-    std::map<uint8_t, NrMacSapUser*>::iterator lcidIt =
-        rntiIt->second.m_ueAttached.find(txOpParams.lcid);
+    auto lcidIt = rntiIt->second.m_ueAttached.find(txOpParams.lcid);
     NS_ASSERT_MSG(lcidIt != rntiIt->second.m_ueAttached.end(),
                   "could not find LCID " << (uint16_t)txOpParams.lcid);
 
@@ -227,6 +257,18 @@ BwpManagerGnb::DoUlReceiveSr(uint16_t rnti, uint8_t componentCarrierId)
     NS_ABORT_IF(it == m_ccmMacSapProviderMap.end());
 
     m_ccmMacSapProviderMap.find(componentCarrierId)->second->ReportSrToScheduler(rnti);
+}
+
+void
+BwpManagerGnb::DoRegisterSignalBearer(uint16_t rnti, uint8_t lcid, NrMacSapUser* rlcMacSapUser)
+{
+    NS_LOG_FUNCTION(this << rnti << +lcid);
+    // Register the signal bearer (e.g., SRB0) with the gNB MAC.
+    // This is called when a UE is created during random access.
+    // The UE needs to be registered with the gNB MAC so that it can
+    // deliver the RRC Connection Request (Msg3) to the correct RLC instance.
+    // Note: This method is kept as a no-op since the gNB RRC handles
+    // the registration via UeUpdateConfigurationReq in its AddUe method.
 }
 
 } // end of namespace ns3

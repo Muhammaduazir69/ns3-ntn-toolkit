@@ -19,11 +19,11 @@
 
 #include "ns3/boolean.h"
 #include "ns3/double.h"
-#include "ns3/dsr-fs-header.h"
 #include "ns3/dsr-helper.h"
 #include "ns3/dsr-main-helper.h"
 #include "ns3/dsr-option-header.h"
 #include "ns3/dsr-rcache.h"
+#include "ns3/dsr-routing-header.h"
 #include "ns3/dsr-rreq-table.h"
 #include "ns3/dsr-rsendbuff.h"
 #include "ns3/ipv4-address-helper.h"
@@ -42,16 +42,16 @@ using namespace dsr;
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr
- * \defgroup dsr-test DSR routing module tests
+ * @ingroup dsr
+ * @defgroup dsr-test DSR routing module tests
  */
 
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrFsHeaderTest
- * \brief Unit test for DSR Fixed Size Header
+ * @class DsrFsHeaderTest
+ * @brief Unit test for DSR Fixed Size Header
  */
 class DsrFsHeaderTest : public TestCase
 {
@@ -85,18 +85,18 @@ DsrFsHeaderTest::DoRun()
     header.Serialize(buf.Begin());
 
     const uint8_t* data = buf.PeekData();
-    NS_TEST_EXPECT_MSG_EQ(*(data + 8),
+    NS_TEST_EXPECT_MSG_EQ(*(data + 4),
                           rreqHeader.GetType(),
                           "expect the rreqHeader after fixed size header");
 }
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrRreqHeaderTest
- * \brief Unit test for RREQ
+ * @class DsrRreqHeaderTest
+ * @brief Unit test for RREQ
  */
 class DsrRreqHeaderTest : public TestCase
 {
@@ -139,20 +139,20 @@ DsrRreqHeaderTest::DoRun()
     dsr::DsrRoutingHeader header;
     header.AddDsrOption(h);
     p->AddHeader(header);
-    p->RemoveAtStart(8);
+    p->RemoveAtStart(4);
     dsr::DsrOptionRreqHeader h2;
     h2.SetNumberAddress(3);
     uint32_t bytes = p->RemoveHeader(h2);
-    NS_TEST_EXPECT_MSG_EQ(bytes, 20, "Total RREP is 20 bytes long");
+    NS_TEST_EXPECT_MSG_EQ(bytes, 20, "Total RREQ is 20 bytes long");
 }
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrRrepHeaderTest
- * \brief Unit test for RREP
+ * @class DsrRrepHeaderTest
+ * @brief Unit test for RREP
  */
 class DsrRrepHeaderTest : public TestCase
 {
@@ -191,20 +191,20 @@ DsrRrepHeaderTest::DoRun()
     dsr::DsrRoutingHeader header;
     header.AddDsrOption(h);
     p->AddHeader(header);
-    p->RemoveAtStart(8);
+    p->RemoveAtStart(4);
     dsr::DsrOptionRrepHeader h2;
     h2.SetNumberAddress(3);
     uint32_t bytes = p->RemoveHeader(h2);
-    NS_TEST_EXPECT_MSG_EQ(bytes, 16, "Total RREP is 16 bytes long");
+    NS_TEST_EXPECT_MSG_EQ(bytes, 15, "Total RREP is 15 bytes long");
 }
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrSRHeaderTest
- * \brief Unit test for Source Route
+ * @class DsrSRHeaderTest
+ * @brief Unit test for Source Route
  */
 class DsrSRHeaderTest : public TestCase
 {
@@ -248,20 +248,20 @@ DsrSRHeaderTest::DoRun()
     dsr::DsrRoutingHeader header;
     header.AddDsrOption(h);
     p->AddHeader(header);
-    p->RemoveAtStart(8);
+    p->RemoveAtStart(4);
     dsr::DsrOptionSRHeader h2;
     h2.SetNumberAddress(3);
     uint32_t bytes = p->RemoveHeader(h2);
-    NS_TEST_EXPECT_MSG_EQ(bytes, 16, "Total RREP is 16 bytes long");
+    NS_TEST_EXPECT_MSG_EQ(bytes, 16, "Total SR is 16 bytes long");
 }
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrRerrHeaderTest
- * \brief Unit test for RERR
+ * @class DsrRerrHeaderTest
+ * @brief Unit test for RERR
  */
 class DsrRerrHeaderTest : public TestCase
 {
@@ -297,19 +297,19 @@ DsrRerrHeaderTest::DoRun()
     dsr::DsrRoutingHeader header;
     header.AddDsrOption(h);
     p->AddHeader(header);
-    p->RemoveAtStart(8);
+    p->RemoveAtStart(4);
     dsr::DsrOptionRerrUnreachHeader h2;
     uint32_t bytes = p->RemoveHeader(h2);
-    NS_TEST_EXPECT_MSG_EQ(bytes, 20, "Total RREP is 20 bytes long");
+    NS_TEST_EXPECT_MSG_EQ(bytes, 20, "Total RERR is 20 bytes long");
 }
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrAckReqHeaderTest
- * \brief Unit test for ACK-REQ
+ * @class DsrAckReqHeaderTest
+ * @brief Unit test for ACK-REQ
  */
 class DsrAckReqHeaderTest : public TestCase
 {
@@ -340,21 +340,21 @@ DsrAckReqHeaderTest::DoRun()
     dsr::DsrRoutingHeader header;
     header.AddDsrOption(h);
     p->AddHeader(header);
-    p->RemoveAtStart(8);
+    p->RemoveAtStart(4);
     p->AddHeader(header);
     dsr::DsrOptionAckReqHeader h2;
-    p->RemoveAtStart(8);
+    p->RemoveAtStart(4);
     uint32_t bytes = p->RemoveHeader(h2);
-    NS_TEST_EXPECT_MSG_EQ(bytes, 4, "Total RREP is 4 bytes long");
+    NS_TEST_EXPECT_MSG_EQ(bytes, 4, "Total ACK-REQ is 4 bytes long");
 }
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrAckHeaderTest
- * \brief Unit test for ACK
+ * @class DsrAckHeaderTest
+ * @brief Unit test for ACK
  */
 class DsrAckHeaderTest : public TestCase
 {
@@ -389,21 +389,21 @@ DsrAckHeaderTest::DoRun()
     dsr::DsrRoutingHeader header;
     header.AddDsrOption(h);
     p->AddHeader(header);
-    p->RemoveAtStart(8);
+    p->RemoveAtStart(4);
     p->AddHeader(header);
     dsr::DsrOptionAckHeader h2;
-    p->RemoveAtStart(8);
+    p->RemoveAtStart(4);
     uint32_t bytes = p->RemoveHeader(h2);
-    NS_TEST_EXPECT_MSG_EQ(bytes, 12, "Total RREP is 12 bytes long");
+    NS_TEST_EXPECT_MSG_EQ(bytes, 12, "Total ACK is 12 bytes long");
 }
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrCacheEntryTest
- * \brief Unit test for DSR route cache entry
+ * @class DsrCacheEntryTest
+ * @brief Unit test for DSR route cache entry
  */
 class DsrCacheEntryTest : public TestCase
 {
@@ -466,11 +466,11 @@ DsrCacheEntryTest::DoRun()
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrSendBuffTest
- * \brief Unit test for Send Buffer
+ * @class DsrSendBuffTest
+ * @brief Unit test for Send Buffer
  */
 class DsrSendBuffTest : public TestCase
 {
@@ -575,11 +575,11 @@ DsrSendBuffTest::CheckTimeout()
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrRreqTableTest
- * \brief Unit test for DSR routing table entry
+ * @class DsrRreqTableTest
+ * @brief Unit test for DSR routing table entry
  */
 class DsrRreqTableTest : public TestCase
 {
@@ -609,11 +609,11 @@ DsrRreqTableTest::DoRun()
 
 // -----------------------------------------------------------------------------
 /**
- * \ingroup dsr-test
- * \ingroup tests
+ * @ingroup dsr-test
+ * @ingroup tests
  *
- * \class DsrTestSuite
- * \brief DSR test suite
+ * @class DsrTestSuite
+ * @brief DSR test suite
  */
 class DsrTestSuite : public TestSuite
 {

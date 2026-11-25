@@ -1,0 +1,14 @@
+
+diagram {
+
+NrGnbRrc;NrUeManager;NrEpcGnbApplication;"NrUeMac (All MACs)";Scheduler;"NrUePhy (All Phys)";NrSpectrumPhy;NrGnbComponentCarrierManager;RrcProtocol
+
+NrGnbRrc ->> NrUeManager [label="CancelPendingEvents ()"];
+NrGnbRrc ->> "NrUeMac (All MACs)" [label="RemoveUe (rnti)"];
+"NrUeMac (All MACs)" ->> Scheduler [label="CschedUeReleaseReq (params)"];
+NrGnbRrc ->> "NrUePhy (All Phys)" [label="RemoveUe (rnti)"];
+"NrUePhy (All Phys)" ->> NrSpectrumPhy [label="RemoveExpectedTb (rnti)"];
+NrGnbRrc ->> NrEpcGnbApplication [label="UeContextRelease (rnti)"];
+NrGnbRrc ->> NrGnbComponentCarrierManager [label="RemoveUe (rnti)"];
+NrGnbRrc ->> RrcProtocol [label="RemoveUe (rnti)"];
+}

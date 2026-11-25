@@ -6,7 +6,9 @@
 
 #include "ns3/geographic-positions.h"
 
+#include "ns3/boolean.h"
 #include "ns3/double.h"
+#include "ns3/uinteger.h"
 #include "ns3/log.h"
 #include "ns3/satellite-sgp4io.h"   // twoline2rv
 #include "ns3/satellite-sgp4unit.h" // elsetrec, sgp4, gravconsttype
@@ -118,7 +120,25 @@ Sgp4MobilityModel::GetTypeId()
         TypeId("ns3::ntncon::Sgp4MobilityModel")
             .SetParent<GeocentricConstantPositionMobilityModel>()
             .SetGroupName("NtnConstellation")
-            .AddConstructor<Sgp4MobilityModel>();
+            .AddConstructor<Sgp4MobilityModel>()
+            .AddAttribute("ElementEpochUnix",
+                          "Epoch of the element set (UTC seconds since 1970), read only",
+                          TypeId::ATTR_GET,
+                          DoubleValue(0.0),
+                          MakeDoubleAccessor(&Sgp4MobilityModel::GetElementEpochUnix),
+                          MakeDoubleChecker<double>())
+            .AddAttribute("NoradId",
+                          "Catalog number of the element set (0 for a generated shell), read only",
+                          TypeId::ATTR_GET,
+                          UintegerValue(0),
+                          MakeUintegerAccessor(&Sgp4MobilityModel::GetNoradId),
+                          MakeUintegerChecker<uint32_t>())
+            .AddAttribute("FromRealTle",
+                          "True when the elements came from a real TLE, read only",
+                          TypeId::ATTR_GET,
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&Sgp4MobilityModel::GetFromRealTle),
+                          MakeBooleanChecker());
     return tid;
 }
 
@@ -128,6 +148,7 @@ void
 Sgp4MobilityModel::SetElements(const KeplerianElements& elements)
 {
     m_elements = elements;
+    m_fromRealTle = false; // SetTle sets it again after this call
     m_cacheValid = false;
 }
 
@@ -146,6 +167,7 @@ Sgp4MobilityModel::SetElementsSgp4(const KeplerianElements& elements)
         return false;
     }
     SetUseVallado(true);
+    m_fromRealTle = false; // the TLE was generated from Walker/Kepler elements
     return IsUsingSgp4();
 }
 
@@ -165,6 +187,7 @@ Sgp4MobilityModel::SetTle(const TleRecord& tle)
     {
         m_vallado = std::make_shared<ValladoState>();
     }
+    m_fromRealTle = true;
     m_vallado->line1 = tle.line1;
     m_vallado->line2 = tle.line2;
     m_vallado->ready = false;

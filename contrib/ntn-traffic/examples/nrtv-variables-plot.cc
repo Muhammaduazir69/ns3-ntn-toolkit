@@ -49,6 +49,7 @@
  *
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
@@ -56,6 +57,12 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/stats-module.h"
 #include "ns3/ntn-traffic-module.h"
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
+
+#include <sstream>
 
 using namespace ns3;
 
@@ -195,12 +202,58 @@ main(int argc, char* argv[])
             tcpClient->TraceConnectWithoutContext("RxFrame", MakeCallback(&QoeRxFrame));
         }
 
+        // Globe scene (ntn-dataset@1). The 2 ms P2P delay is about the one-way delay of a
+        // 550 km LEO bent pipe near zenith, so device-less context nodes draw that geometry:
+        // satellite 0 of a Walker shell on its SGP4 orbit, the video client at its
+        // sub-satellite point at t = 0 and the server's gateway 100 km north. They carry no
+        // devices, so the TCP session and its QoE are unchanged.
+        ns3::ntncon::WalkerConfig wcfg;
+        wcfg.num_planes = 1;
+        wcfg.total_sats = 80;
+        wcfg.altitude_km = 550.0;
+        wcfg.inclination_deg = 53.0;
+        wcfg.epoch_unix_s = 1735689600.0;
+        const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+        Ptr<ns3::ntncon::Sgp4MobilityModel> satCtx = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+        satCtx->SetElementsSgp4(satElements[0]);
+        double subLat;
+        double subLon;
+        double subAlt;
+        satCtx->GetGeodetic(subLat, subLon, subAlt);
+        Ptr<ConstantPositionMobilityModel> clientCtx = CreateObject<ConstantPositionMobilityModel>();
+        clientCtx->SetPosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
+        Ptr<ConstantPositionMobilityModel> gatewayCtx =
+            CreateObject<ConstantPositionMobilityModel>();
+        gatewayCtx->SetPosition(ntngeo::GeodeticToEcef(subLat + 100.0 / 111.195, subLon, 0.0));
+        NodeContainer ctxNodes;
+        ctxNodes.Create(3);
+        ctxNodes.Get(0)->AggregateObject(satCtx);
+        ctxNodes.Get(1)->AggregateObject(clientCtx);
+        ctxNodes.Get(2)->AggregateObject(gatewayCtx);
+        ns3::ntnobs::StartSceneFromNodeList(".");
+
         Simulator::Stop(Seconds(simTime));
         Simulator::Run();
-        Simulator::Destroy();
 
         double meanDelayMs = (g_delaySamples > 0) ? g_delaySumMs / g_delaySamples : 0.0;
         double meanJitterMs = (g_jitterSamples > 0) ? g_jitterSumMs / g_jitterSamples : 0.0;
+        // ntn-dataset@1: standard manifest + sim_health for this measured example
+        // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+        std::ostringstream delayStr;
+        delayStr << meanDelayMs;
+        std::ostringstream jitterStr;
+        jitterStr << meanJitterMs;
+        ns3::ntnobs::WriteDatasetRecord(
+            ".",
+            "nrtv-variables-plot",
+            "measured",
+            argc,
+            argv,
+            {{"nrtv_qoe_slice_count", std::to_string(g_sliceCount), "measured"},
+             {"nrtv_qoe_frame_count", std::to_string(g_frameCount), "measured"},
+             {"nrtv_qoe_mean_delay_ms", delayStr.str(), "measured"},
+             {"nrtv_qoe_mean_jitter_ms", jitterStr.str(), "measured"}});
+        Simulator::Destroy();
 
         std::cout << "==== nrtv-variables-plot real-plane MEASURED QoE (TCP) ====" << std::endl;
         std::cout << "distribution_num_of_frames_mean = "
@@ -212,6 +265,23 @@ main(int argc, char* argv[])
         std::cout << "nrtv_qoe_mean_delay_ms          = " << meanDelayMs << std::endl;
         std::cout << "nrtv_qoe_mean_jitter_ms         = " << meanJitterMs << std::endl;
         std::cout << "===========================================================" << std::endl;
+    }
+    else
+    {
+        // ntn-dataset@1: only the 3GPP NRTV distributions were sampled, no packets.
+        ns3::ntnobs::WriteDatasetRecord(
+            ".",
+            "nrtv-variables-plot",
+            "analytic",
+            argc,
+            argv,
+            {{"num_of_samples", std::to_string(numOfSamples), "config"},
+             {"distribution_num_of_frames_mean",
+              std::to_string(nrtvVariables->GetNumOfFramesMean()),
+              "analytic"},
+             {"distribution_slice_size_mean",
+              std::to_string(nrtvVariables->GetSliceSizeMean()),
+              "analytic"}});
     }
 
     return 0;

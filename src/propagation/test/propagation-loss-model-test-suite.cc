@@ -9,6 +9,7 @@
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/double.h"
 #include "ns3/log.h"
+#include "ns3/node-container.h"
 #include "ns3/propagation-loss-model.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
@@ -23,14 +24,14 @@ NS_LOG_COMPONENT_DEFINE("PropagationLossModelsTest");
 // ===========================================================================
 
 /**
- * \ingroup propagation
- * \defgroup propagation-test Propagation module tests
+ * @ingroup propagation
+ * @defgroup propagation-test Propagation module tests
  */
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief FriisPropagationLossModel Test
+ * @brief FriisPropagationLossModel Test
  */
 class FriisPropagationLossModelTestCase : public TestCase
 {
@@ -139,9 +140,9 @@ FriisPropagationLossModelTestCase::DoRun()
 // Added for Two-Ray Ground Model - tomhewer@mac.com
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief TwoRayGroundPropagationLossModel Test
+ * @brief TwoRayGroundPropagationLossModel Test
  */
 class TwoRayGroundPropagationLossModelTestCase : public TestCase
 {
@@ -279,9 +280,9 @@ TwoRayGroundPropagationLossModelTestCase::DoRun()
 }
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief LogDistancePropagationLossModel Test
+ * @brief LogDistancePropagationLossModel Test
  */
 class LogDistancePropagationLossModelTestCase : public TestCase
 {
@@ -381,9 +382,9 @@ LogDistancePropagationLossModelTestCase::DoRun()
 }
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief MatrixPropagationLossModel Test
+ * @brief MatrixPropagationLossModel Test
  */
 class MatrixPropagationLossModelTestCase : public TestCase
 {
@@ -407,10 +408,12 @@ MatrixPropagationLossModelTestCase::~MatrixPropagationLossModelTestCase()
 void
 MatrixPropagationLossModelTestCase::DoRun()
 {
+    NodeContainer nc(3);
     Ptr<MobilityModel> m[3];
     for (int i = 0; i < 3; ++i)
     {
         m[i] = CreateObject<ConstantPositionMobilityModel>();
+        nc.Get(i)->AggregateObject(m[i]);
     }
 
     MatrixPropagationLossModel loss;
@@ -434,9 +437,9 @@ MatrixPropagationLossModelTestCase::DoRun()
 }
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief RangePropagationLossModel Test
+ * @brief RangePropagationLossModel Test
  */
 class RangePropagationLossModelTestCase : public TestCase
 {
@@ -479,9 +482,9 @@ RangePropagationLossModelTestCase::DoRun()
 }
 
 /**
- * \ingroup propagation-tests
+ * @ingroup propagation-tests
  *
- * \brief Propagation models TestSuite
+ * @brief Propagation models TestSuite
  *
  * This TestSuite tests the following models:
  *   - FriisPropagationLossModel

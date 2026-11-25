@@ -8,16 +8,18 @@
  *  Alberto Gallegos Ramonet <alramonet@is.tokushima-u.ac.jp>
  */
 
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-csmaca.h"
+#include "ns3/lr-wpan-helper.h"
+#include "ns3/lr-wpan-net-device.h"
+#include "ns3/packet.h"
+#include "ns3/propagation-delay-model.h"
+#include "ns3/propagation-loss-model.h"
 #include "ns3/rng-seed-manager.h"
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/core-module.h>
-#include <ns3/log.h>
-#include <ns3/lr-wpan-module.h>
-#include <ns3/packet.h>
-#include <ns3/propagation-delay-model.h>
-#include <ns3/propagation-loss-model.h>
-#include <ns3/simulator.h>
-#include <ns3/single-model-spectrum-channel.h>
+#include "ns3/simulator.h"
+#include "ns3/single-model-spectrum-channel.h"
+#include "ns3/test.h"
 
 #include <iomanip>
 #include <iostream>
@@ -28,8 +30,8 @@ using namespace ns3::lrwpan;
 NS_LOG_COMPONENT_DEFINE("lr-wpan-cca-test");
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
  * LrWpan CCA Test
  */
@@ -349,10 +351,10 @@ LrWpanCcaTestCase::DoRun()
 }
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief Test the sensitivity of the CSMA/CA clear channel assestment (CCA)
+ * @brief Test the sensitivity of the CSMA/CA clear channel assestment (CCA)
  */
 class CCAVulnerableWindowTest : public TestCase
 {
@@ -587,8 +589,8 @@ CCAVulnerableWindowTest::DoRun()
 }
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
  * LrWpan ACK TestSuite
  */

@@ -7,6 +7,7 @@
 #ifndef NR_RLC_SAP_H
 #define NR_RLC_SAP_H
 
+#include "ns3/nr-export.h"
 #include "ns3/packet.h"
 
 namespace ns3
@@ -19,7 +20,7 @@ namespace ns3
  * This is the RLC SAP Provider
  * (i.e. the part of the SAP that contains the RLC methods called by the PDCP)
  */
-class NrRlcSapProvider
+class NR_EXPORT NrRlcSapProvider
 {
   public:
     virtual ~NrRlcSapProvider() = default;
@@ -27,7 +28,7 @@ class NrRlcSapProvider
     /**
      * Parameters for NrRlcSapProvider::TransmitPdcpPdu
      */
-    struct TransmitPdcpPduParameters
+    struct NR_EXPORT TransmitPdcpPduParameters
     {
         Ptr<Packet> pdcpPdu; /**< the PDCP PDU */
         uint16_t rnti;       /**< the C-RNTI identifying the UE */
@@ -38,7 +39,7 @@ class NrRlcSapProvider
      * Send a PDCP PDU to the RLC for transmission
      * This method is to be called
      * when upper PDCP entity has a PDCP PDU ready to send
-     * \param params the TransmitPdcpPduParameters
+     * @param params the TransmitPdcpPduParameters
      */
     virtual void TransmitPdcpPdu(TransmitPdcpPduParameters params) = 0;
 };
@@ -50,7 +51,7 @@ class NrRlcSapProvider
  * This is the RLC SAP User
  * (i.e. the part of the SAP that contains the PDCP methods called by the RLC)
  */
-class NrRlcSapUser
+class NR_EXPORT NrRlcSapUser
 {
   public:
     virtual ~NrRlcSapUser() = default;
@@ -58,7 +59,7 @@ class NrRlcSapUser
     /**
      * Called by the RLC entity to notify the PDCP entity of the reception of a new PDCP PDU
      *
-     * \param p the PDCP PDU
+     * @param p the PDCP PDU
      */
     virtual void ReceivePdcpPdu(Ptr<Packet> p) = 0;
 };
@@ -71,7 +72,7 @@ class NrRlcSpecificNrRlcSapProvider : public NrRlcSapProvider
     /**
      * Constructor
      *
-     * \param rlc the RLC
+     * @param rlc the RLC
      */
     NrRlcSpecificNrRlcSapProvider(C* rlc);
 
@@ -80,7 +81,7 @@ class NrRlcSpecificNrRlcSapProvider : public NrRlcSapProvider
 
     /**
      * Interface implemented from NrRlcSapProvider
-     * \param params the TransmitPdcpPduParameters
+     * @param params the TransmitPdcpPduParameters
      */
     void TransmitPdcpPdu(TransmitPdcpPduParameters params) override;
 
@@ -109,7 +110,7 @@ class NrRlcSpecificNrRlcSapUser : public NrRlcSapUser
     /**
      * Constructor
      *
-     * \param pdcp the PDCP
+     * @param pdcp the PDCP
      */
     NrRlcSpecificNrRlcSapUser(C* pdcp);
 

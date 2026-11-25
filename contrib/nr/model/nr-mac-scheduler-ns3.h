@@ -12,8 +12,11 @@
 #include "nr-mac-scheduler-ue-info.h"
 #include "nr-mac-scheduler.h"
 #include "nr-phy-mac-common.h"
-
 #include <ns3/traced-callback.h>
+
+
+#include "ns3/nr-export.h"
+#include "ns3/traced-callback.h"
 
 #include <functional>
 #include <list>
@@ -23,6 +26,10 @@ namespace ns3
 {
 
 class NrSchedGeneralTestCase;
+class NrSchedOfdmaSymbolPerBeamTestCase;
+class NrTestMacSchedulerHarqRrReshape;
+class NrTestMacSchedulerHarqRrScheduleDlHarq;
+class NrHarqRetxSchedulerCase;
 class NrMacSchedulerHarqRr;
 class NrMacSchedulerSrsDefault;
 class NrMacSchedulerLcAlgorithm;
@@ -30,8 +37,8 @@ class NrFhSchedSapUser;
 class NrFhSchedSapProvider;
 
 /**
- * \ingroup scheduler
- * \brief A general scheduler for nr in NS3
+ * @ingroup scheduler
+ * @brief A general scheduler for nr in NS3
  *
  * This abstract class is taking care of creating a solid base for any schedulers
  * in the nr world. The class implements all the API from the FemtoForum API,
@@ -48,7 +55,7 @@ class NrFhSchedSapProvider;
  * Please refer to the function documentation to see a detailed description
  * of the steps done during all the phases.
  *
- * \section scheduler_registration Registration and Configuration
+ * @section scheduler_registration Registration and Configuration
  *
  * The attribute of any scheduler can be set directly calling `SetAttribute`
  * on the pointer obtained through NrHelper::GetScheduler() or, before
@@ -56,7 +63,7 @@ class NrFhSchedSapProvider;
  * the scheduler can be set only before its creation, through the method
  * NrHelper::SetSchedulerTypeId().
  *
- * \section scheduler_user_management User management (creation and removal)
+ * @section scheduler_user_management User management (creation and removal)
  *
  * When a user arrives in the cell, it is registered with a call to
  * DoCschedUeConfigReq. When the user leaves, the class is made aware with
@@ -68,11 +75,11 @@ class NrFhSchedSapProvider;
  * information such as Logical Channels, CQI, and other things. Please refer
  * to its documentation for a broader overview of its possibilities.
  *
- * \section scheduler_cell_conf Cell configuration
+ * @section scheduler_cell_conf Cell configuration
  *
  * The cell configuration, done with a call to DoCschedCellConfigReq, is ignored.
  *
- * \section scheduler_lc_creation LC creation and removal
+ * @section scheduler_lc_creation LC creation and removal
  *
  * After the registration of a UE, the scheduler has to know how many bytes
  * there are in its queue, for both uplink and downlink. Before that,
@@ -90,7 +97,7 @@ class NrFhSchedSapProvider;
  * reimplementing the methods CreateLCG() and CreateLC() to return a pointer to
  * a created instance.
  *
- * \section scheduler_update_lc Updating the LC bytes
+ * @section scheduler_update_lc Updating the LC bytes
  *
  * For the downlink case, the LC is updated with a message between the gNB RLC
  * layer and the MAC.  The scheduler receives a call to the method
@@ -102,7 +109,7 @@ class NrFhSchedSapProvider;
  * More details can be found in the documentation of the class NrMacSchedulerLCG
  * and NrMacSchedulerLC.
  *
- * \section scheduler_cqi CQI Management
+ * @section scheduler_cqi CQI Management
  *
  * The CQI is based on a parameter (m_cqiTimersThreshold) that indicates how
  * long a received CQI is valid. Every time that a Dl CQI is received, the
@@ -120,7 +127,7 @@ class NrFhSchedSapProvider;
  * At the end of these evaluations, inside the UE representation, is available
  * the value of the DL/UL MCS, ready to be used.
  *
- * \section scheduler_scheduling_general Scheduling phase
+ * @section scheduler_scheduling_general Scheduling phase
  *
  * After gathering the information regarding CQI, active users and flows, it is
  * time to take a look into how the class manages the most important thing,
@@ -128,7 +135,7 @@ class NrFhSchedSapProvider;
  * space, assigning resources to HARQ retransmission or DL/UL new data transmission.
  * The main scheduling function is NrMacSchedulerNs3::DoSchedTriggerReq.
  *
- * \section scheduler_cqi Refreshing CQI
+ * @section scheduler_cqi Refreshing CQI
  *
  * The refreshing of CQI consists in evaluating the validity timer of the value.
  * If the timer is equal to 0, the valued is expired, and the value is reset
@@ -137,7 +144,7 @@ class NrFhSchedSapProvider;
  * NrMacSchedulerCQIManagement::RefreshDlCQIMaps and
  * NrMacSchedulerCQIManagement::RefreshUlCQIMaps.
  *
- * \section scheduler_process_harq Process HARQ feedbacks
+ * @section scheduler_process_harq Process HARQ feedbacks
  *
  * To decide if it is necessary to perform HARQ retransmission, and to decide
  * how many retransmission perform, the first step is to evaluate the HARQ
@@ -154,7 +161,7 @@ class NrFhSchedSapProvider;
  * To discover more about how HARQ processes are stored and managed, please take
  * a look at the HarqProcess and NrMacHarqVector documentation.
  *
- * \section scheduler_general The concept of scheduling
+ * @section scheduler_general The concept of scheduling
  *
  * The scheduling of the resources is a process that should fill the slot time
  * and the slot frequencies with retransmitted or fresh data. To simplify the
@@ -171,7 +178,7 @@ class NrFhSchedSapProvider;
  * Please refer to the DoScheduling() documentation to know how the
  * scheduling is performed.
  *
- * \section scheduler_spat_mult Spatial multiplexing
+ * @section scheduler_spat_mult Spatial multiplexing
  *
  * The code does not support Spatial Multiplexing. It means that it is not possible
  * to schedule UEs that are in different beams at the same time. While this has
@@ -183,7 +190,7 @@ class NrFhSchedSapProvider;
  * data structures that group UE and retransmission by BeamID
  * (ActiveUeMap and ActiveHarqMap).
  *
- * \section scheduler_sched_ul Scheduling UL
+ * @section scheduler_sched_ul Scheduling UL
  * It is worth explaining that the
  * schedulers working on slot x for DL, are working on slot \f$x + y\f$
  * (where y is the value of N2 delay).
@@ -198,13 +205,13 @@ class NrFhSchedSapProvider;
  * All this details are considered in the functions ScheduleUl() and ScheduleDl().
  *
  *
- * \section scheduler_harq HARQ
+ * @section scheduler_harq HARQ
  *
  * The HARQ scheduling is done, if symbols for HARQ are available, before transmitting
  * new data, and this happens for both DL and UL. The detailed documentation
  * is available in the methods ScheduleDlHarq() and ScheduleUlHarq().
  *
- * \section scheduler_sched Scheduling new data
+ * @section scheduler_sched Scheduling new data
  *
  * The scheduling of new data is performed by functions ScheduleUlData() and
  * ScheduleDlData(). The priority is for HARQ retransmission, so if the
@@ -224,37 +231,55 @@ class NrFhSchedSapProvider;
  * The available schedulers are TDMA and OFDMA version of the Round Robin,
  * Proportional Fair, Maximum Rate, and QoS MAC scheduler.
  *
- * \see NrMacSchedulerOfdmaPF
- * \see NrMacSchedulerOfdmaRR
- * \see NrMacSchedulerOfdmaMR
- * \see NrMacSchedulerOfdmaQos
- * \see NrMacSchedulerTdmaPF
- * \see NrMacSchedulerTdmaRR
- * \see NrMacSchedulerTdmaMR
- * \see NrMacSchedulerTdmaQos
+ * @see NrMacSchedulerOfdmaPF
+ * @see NrMacSchedulerOfdmaRR
+ * @see NrMacSchedulerOfdmaMR
+ * @see NrMacSchedulerOfdmaQos
+ * @see NrMacSchedulerTdmaPF
+ * @see NrMacSchedulerTdmaRR
+ * @see NrMacSchedulerTdmaMR
+ * @see NrMacSchedulerTdmaQos
  */
-class NrMacSchedulerNs3 : public NrMacScheduler
+class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
 {
+    friend class NrTestSchedulerAiCase;
+    friend class NrSchedOfdmaMcsTestCase;
+    friend class NrSchedOfdmaSymbolPerBeamTestCase;
+    friend class NrSchedGeneralTestCase;
+    friend class NrTestMacSchedulerHarqRrReshape;
+    friend class NrTestMacSchedulerHarqRrScheduleDlHarq;
+    friend class NrHarqRetxSchedulerCase;
+    friend class NrTestMacSchedulerHarqRrBeamOrder;
+    friend class NrTestMacSchedulerHarqRrSymbolBudget;
+    friend class NrTestMacSchedulerHarqRrOfdmaSharing;
+    friend class NrTestMacSchedulerHarqRrUlSharing;
+    friend class NrTestMacSchedulerHarqRrDlReshape;
+    friend class NrTestMacSchedulerHarqRrUlFill;
+    friend class NrTestMacSchedulerHarqRrDlFill;
+    friend class NrTestMacSchedulerHarqRrFillUtilization;
+    friend class NrTestMacSchedulerHarqRrUlSpanSpread;
+    friend class NrTestMacSchedulerHarqRrBeamRoundRobin;
+
   public:
     /**
-     * \brief GetTypeId
-     * \return The TypeId of the class
+     * @brief GetTypeId
+     * @return The TypeId of the class
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief NrMacSchedulerNs3 default constructor
+     * @brief NrMacSchedulerNs3 default constructor
      */
     NrMacSchedulerNs3();
 
     /**
-     * \brief NrMacSchedulerNs3 copy constructor (deleted)
-     * \param other instance of NrMacSchedulerNs3 to be copied
+     * @brief NrMacSchedulerNs3 copy constructor (deleted)
+     * @param other instance of NrMacSchedulerNs3 to be copied
      */
     NrMacSchedulerNs3(const NrMacSchedulerNs3& other) = delete;
 
     /**
-     * \brief NrMacSchedulerNs3 deconstructor
+     * @brief NrMacSchedulerNs3 deconstructor
      */
     ~NrMacSchedulerNs3() override;
 
@@ -263,46 +288,46 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     NrFhSchedSapUser* GetNrFhSchedSapUser() override;
 
     /**
-     * \brief Install the AMC for the DL part
-     * \param dlAmc DL AMC
+     * @brief Install the AMC for the DL part
+     * @param dlAmc DL AMC
      *
      * Usually called by the helper
      */
     void InstallDlAmc(const Ptr<NrAmc>& dlAmc);
 
     /**
-     * \brief Install the AMC for the DL part
-     * \param ulAmc DL AMC
+     * @brief Install the AMC for the DL part
+     * @param ulAmc DL AMC
      *
      * Usually called by the helper
      */
     void InstallUlAmc(const Ptr<NrAmc>& ulAmc);
 
     /**
-     * \brief Get the AMC for UL
-     * \return the UL AMC
+     * @brief Get the AMC for UL
+     * @return the UL AMC
      */
     Ptr<const NrAmc> GetUlAmc() const;
 
     /**
-     * \brief Get the AMC for DL
-     * \return the DL AMC
+     * @brief Get the AMC for DL
+     * @return the DL AMC
      */
     Ptr<const NrAmc> GetDlAmc() const;
 
     /**
-     * \brief Point in the Frequency/Time plane
+     * @brief Point in the Frequency/Time plane
      *
      * The first element represents the RBG, and the second element represents the symbol. The
      * struct represents a point in the 2D time frequency space created by having frequencies on the
      * y and time on the x.
      */
-    struct PointInFTPlane
+    struct NR_EXPORT PointInFTPlane
     {
         /**
-         * \brief PointInFTPlane constructor
-         * \param rbg RBG
-         * \param sym Symbol
+         * @brief PointInFTPlane constructor
+         * @param rbg RBG
+         * @param sym Symbol
          */
         PointInFTPlane(uint32_t rbg, uint8_t sym)
             : m_rbg(rbg),
@@ -318,42 +343,42 @@ class NrMacSchedulerNs3 : public NrMacScheduler
         FTResources; //!< Represent an amount of RBG/symbols that can be, or is, assigned
 
     void DoCschedCellConfigReq(
-        const NrMacCschedSapProvider::CschedCellConfigReqParameters& params) override;
+        const NrMacCschedSapProvider::CschedCellConfigReqParameters& params) final;
     void DoCschedUeConfigReq(
-        const NrMacCschedSapProvider::CschedUeConfigReqParameters& params) override;
+        const NrMacCschedSapProvider::CschedUeConfigReqParameters& params) final;
     void DoSchedDlRlcBufferReq(
-        const NrMacSchedSapProvider::SchedDlRlcBufferReqParameters& params) override;
+        const NrMacSchedSapProvider::SchedDlRlcBufferReqParameters& params) final;
     void DoSchedUlMacCtrlInfoReq(
-        const NrMacSchedSapProvider::SchedUlMacCtrlInfoReqParameters& params) override;
+        const NrMacSchedSapProvider::SchedUlMacCtrlInfoReqParameters& params) final;
     void DoSchedDlCqiInfoReq(
-        const NrMacSchedSapProvider::SchedDlCqiInfoReqParameters& params) override;
+        const NrMacSchedSapProvider::SchedDlCqiInfoReqParameters& params) final;
     void DoSchedUlCqiInfoReq(
-        const NrMacSchedSapProvider::SchedUlCqiInfoReqParameters& params) override;
+        const NrMacSchedSapProvider::SchedUlCqiInfoReqParameters& params) final;
     void DoCschedUeReleaseReq(
-        const NrMacCschedSapProvider::CschedUeReleaseReqParameters& params) override;
+        const NrMacCschedSapProvider::CschedUeReleaseReqParameters& params) final;
     void DoCschedLcConfigReq(
-        const NrMacCschedSapProvider::CschedLcConfigReqParameters& params) override;
+        const NrMacCschedSapProvider::CschedLcConfigReqParameters& params) final;
     void DoCschedLcReleaseReq(
-        const NrMacCschedSapProvider::CschedLcReleaseReqParameters& params) override;
+        const NrMacCschedSapProvider::CschedLcReleaseReqParameters& params) final;
     void DoSchedDlTriggerReq(
-        const NrMacSchedSapProvider::SchedDlTriggerReqParameters& params) override;
+        const NrMacSchedSapProvider::SchedDlTriggerReqParameters& params) final;
     void DoSchedUlTriggerReq(
-        const NrMacSchedSapProvider::SchedUlTriggerReqParameters& params) override;
-    void DoSchedUlSrInfoReq(
-        const NrMacSchedSapProvider::SchedUlSrInfoReqParameters& params) override;
-    void DoSchedSetMcs(uint32_t mcs) override;
+        const NrMacSchedSapProvider::SchedUlTriggerReqParameters& params) final;
+    void DoSchedUlSrInfoReq(const NrMacSchedSapProvider::SchedUlSrInfoReqParameters& params) final;
+    void DoSchedSetMcs(uint32_t mcs) final;
     void DoSchedDlRachInfoReq(
-        const NrMacSchedSapProvider::SchedDlRachInfoReqParameters& params) override;
-    uint8_t GetDlCtrlSyms() const override;
-    uint8_t GetUlCtrlSyms() const override;
+        const NrMacSchedSapProvider::SchedDlRachInfoReqParameters& params) final;
+    uint8_t GetDlCtrlSyms() const final;
+    uint8_t GetUlCtrlSyms() const final;
+    bool IsMaxSrsReached() const final;
 
     /**
-     * \brief Assign a fixed random variable stream number to the random variables
+     * @brief Assign a fixed random variable stream number to the random variables
      * used by this model. Return the number of streams (possibly zero) that
      * have been assigned.
      *
-     * \param stream first stream index to use
-     * \return the number of stream indices assigned by this model
+     * @param stream first stream index to use
+     * @return the number of stream indices assigned by this model
      */
     int64_t AssignStreams(int64_t stream) override;
 
@@ -362,65 +387,65 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     using HarqVectorIteratorList = std::vector<HarqVectorIterator>;
 
     /**
-     * \brief Pair between a pointer to NrMacSchedulerUeInfo and its buffer occupancy
+     * @brief Pair between a pointer to NrMacSchedulerUeInfo and its buffer occupancy
      */
     typedef std::pair<UePtr, uint32_t> UePtrAndBufferReq;
     /**
-     * \brief Map between a BeamId and a vector of UE (the UE are in that beam)
+     * @brief Map between a BeamId and a vector of UE (the UE are in that beam)
      */
     typedef std::unordered_map<BeamId, std::vector<UePtrAndBufferReq>, BeamIdHash> ActiveUeMap;
     /**
-     * \brief Map between a BeamId and the symbol assigned to that beam
+     * @brief Map between a BeamId and the symbol assigned to that beam
      */
     typedef std::unordered_map<BeamId, uint32_t, BeamIdHash> BeamSymbolMap;
     /**
-     * \brief Map between a beamID and the HARQ of that beam
+     * @brief Map between a beamID and the HARQ of that beam
      */
     typedef std::unordered_map<BeamId, HarqVectorIteratorList, BeamIdHash> ActiveHarqMap;
 
     /**
-     * \brief Set the CqiTimerThreshold
-     * \param v the value to set
+     * @brief Set the CqiTimerThreshold
+     * @param v the value to set
      */
     void SetCqiTimerThreshold(const Time& v);
     /**
-     * \brief Get the CqiTimerThreshold
-     * \return the value
+     * @brief Get the CqiTimerThreshold
+     * @return the value
      */
     Time GetCqiTimerThreshold() const;
 
     /**
-     * \brief Set if the MCS in DL is fixed (in case, it will take the starting value)
-     * \param v the value
-     * \see SetStartMcsDl
+     * @brief Set if the MCS in DL is fixed (in case, it will take the starting value)
+     * @param v the value
+     * @see SetStartMcsDl
      */
     void SetFixedDlMcs(bool v);
     /**
-     * \brief Check if the MCS in DL is fixed
-     * \return true if the DL MCS is fixed, false otherwise
+     * @brief Check if the MCS in DL is fixed
+     * @return true if the DL MCS is fixed, false otherwise
      */
     bool IsDlMcsFixed() const;
 
     /**
-     * \brief Set if the MCS in UL is fixed (in case, it will take the starting value)
-     * \param v the value
-     * \see SetStartMcsUl
+     * @brief Set if the MCS in UL is fixed (in case, it will take the starting value)
+     * @param v the value
+     * @see SetStartMcsUl
      */
     void SetFixedUlMcs(bool v);
     /**
-     * \brief Check if the MCS in UL is fixed
-     * \return true if the UL MCS is fixed, false otherwise
+     * @brief Check if the MCS in UL is fixed
+     * @return true if the UL MCS is fixed, false otherwise
      */
     bool IsUlMcsFixed() const;
 
     /**
-     * \brief Set the starting value for the DL MCS
-     * \param v the value
+     * @brief Set the starting value for the DL MCS
+     * @param v the value
      */
     void SetStartMcsDl(uint8_t v);
 
     /**
-     * \brief ntn-patch 20: DL MCS for one UE until its first DL CQI in this cell.
+     * @brief ntn-patch 20: DL MCS for one UE until its first DL CQI in this cell.
      *
      * A UE admitted by a handover has sent no CSI to this cell yet (TS 38.214
      * 5.2.2.5: the CSI reference resource is in the serving cell), so the
@@ -428,177 +453,174 @@ class NrMacSchedulerNs3 : public NrMacScheduler
      * handover-time SS-RSRP the UE reported) sets a robust MCS here; it is
      * used, instead of StartingMcsDl, until the first DL CQI of the UE arrives,
      * after which the CQI (and OLLA) take over as usual.
-     * \param rnti the UE's C-RNTI in this cell
-     * \param mcs the MCS (capped at the table maximum)
-     * \return false if the RNTI is unknown or a DL CQI was already received
+     * @param rnti the UE's C-RNTI in this cell
+     * @param mcs the MCS (capped at the table maximum)
+     * @return false if the RNTI is unknown or a DL CQI was already received
      */
     bool SetUeDlMcsUntilCsi(uint16_t rnti, uint8_t mcs);
     /**
-     * \brief Get the DL MCS starting value
-     * \return the value
+     * @brief Get the DL MCS starting value
+     * @return the value
      */
     uint8_t GetStartMcsDl() const;
 
     /**
-     * \brief Set the maximum index for the DL MCS
-     * \param v the value
+     * @brief Set the maximum index for the DL MCS
+     * @param v the value
      */
     void SetMaxDlMcs(int8_t v);
     /**
-     * \brief Get the maximum DL MCS index
-     * \return the value
+     * @brief Get the maximum DL MCS index
+     * @return the value
      */
     int8_t GetMaxDlMcs() const;
 
     /**
-     * \brief Set LC Scheduler Algorithm model type
-     * \param type the LC Scheduler Algorithm Error model type
+     * @brief Set LC Scheduler Algorithm model type
+     * @param type the LC Scheduler Algorithm Error model type
      */
     void SetLcSched(const TypeId& type);
 
     /**
-     * \brief Set the starting value for the UL MCS
-     * \param v the value
+     * @brief Set the starting value for the UL MCS
+     * @param v the value
      */
     void SetStartMcsUl(uint8_t v);
     /**
-     * \brief Get the DL MCS starting value
-     * \return the value
+     * @brief Get the DL MCS starting value
+     * @return the value
      */
     uint8_t GetStartMcsUl() const;
 
     /**
-     * \brief Set the number of DL ctrl symbols
-     * \param v number of DL ctrl symbols
+     * @brief Set the number of DL ctrl symbols
+     * @param v number of DL ctrl symbols
      */
     void SetDlCtrlSyms(uint8_t v);
 
     /**
-     * \brief Set the number of UL ctrl symbols
-     * \param v number of UL ctrl symbols
+     * @brief Set the number of UL ctrl symbols
+     * @param v number of UL ctrl symbols
      */
     void SetUlCtrlSyms(uint8_t v);
 
     /**
-     * \brief Set the notched (blank) RBGs Mask for the DL
-     * \param dlNotchedRbgsMask The mask of notched RBGs
+     * @brief Set the notched (blank) RBGs Mask for the DL
+     * @param dlNotchedRbgsMask The mask of notched RBGs
      */
-    void SetDlNotchedRbgMask(const std::vector<uint8_t>& dlNotchedRbgsMask);
+    void SetDlNotchedRbgMask(const std::vector<bool>& dlNotchedRbgsMask);
 
     /**
-     * \brief Get the notched (blank) RBGs Mask for the DL
-     * \return The mask of notched RBGs
+     * @brief Get the notched (blank) RBGs Mask for the DL
+     * @return The mask of notched RBGs
      */
-    std::vector<uint8_t> GetDlNotchedRbgMask() const;
+    std::vector<bool> GetDlNotchedRbgMask() const;
 
     /**
-     * \brief Set the notched (blank) RBGs Mask for the UL
-     * \param ulNotchedRbgsMask The mask of notched RBGs
+     * @brief Set the notched (blank) RBGs Mask for the UL
+     * @param ulNotchedRbgsMask The mask of notched RBGs
      */
-    void SetUlNotchedRbgMask(const std::vector<uint8_t>& ulNotchedRbgsMask);
+    void SetUlNotchedRbgMask(const std::vector<bool>& ulNotchedRbgsMask);
 
     /**
-     * \brief Get the notched (blank) RBGs Mask for the UL
-     * \return The mask of notched RBGs
+     * @brief Get the notched (blank) RBGs Mask for the UL
+     * @return The mask of notched RBGs
      */
-    std::vector<uint8_t> GetUlNotchedRbgMask() const;
+    std::vector<bool> GetUlNotchedRbgMask() const;
 
     /**
-     * \brief Set the number of UL SRS symbols
-     * \param v number of SRS symbols
+     * @brief Set the number of UL SRS symbols
+     * @param v number of SRS symbols
      */
     void SetSrsCtrlSyms(uint8_t v);
 
     /**
-     * \brief Get the configured value for the SRS symbols
-     * \return the number of SRS symbols that will be allocated
+     * @brief Get the configured value for the SRS symbols
+     * @return the number of SRS symbols that will be allocated
      */
     uint8_t GetSrsCtrlSyms() const;
 
     /**
-     * \brief Set if the UL slots are allowed for SRS transmission (if True, UL
+     * @brief Set if the UL slots are allowed for SRS transmission (if True, UL
      * and F slots may carry SRS, if False, SRS are transmitted only in F slots)
-     * \param v the value
+     * @param v the value
      */
     void SetSrsInUlSlots(bool v);
 
     /**
-     * \brief Check if the UL slots are allowed for SRS transmission
-     * \return true if UL slots are available for SRS (UL and F slots available
+     * @brief Check if the UL slots are allowed for SRS transmission
+     * @return true if UL slots are available for SRS (UL and F slots available
      * for SRS), false otherwise (only F slots available for SRS)
      */
     bool IsSrsInUlSlots() const;
 
     /**
-     * \brief Set if the F slots are allowed for SRS transmission
-     * \param v the value
+     * @brief Set if the F slots are allowed for SRS transmission
+     * @param v the value
      */
     void SetSrsInFSlots(bool v);
 
     /**
-     * \brief Check if the F slots are allowed for SRS transmission
-     * \return true if F slots are available for SRS, false otherwise
+     * @brief Check if the F slots are allowed for SRS transmission
+     * @return true if F slots are available for SRS, false otherwise
      */
     bool IsSrsInFSlots() const;
     /**
-     * \brief Enable HARQ ReTx function
+     * @brief Enable or disable HARQ retransmissions.
      *
-     * Remember we introduced the EnableHarqReTx attribute only
-     * for FB calibration example. We want to disable HARQ ReTx
-     * because ReTx are scheduled in OFDMA fashion. In a TDMA simulation,
-     * such retransmissions change the SINR trends in a scenario. Also,
-     * REMEMBER that this solution of disabling the HARQ ReTx not very
-     * optimized because gNB MAC will still buffer the packet and UE
-     * would still transmit the HARQ feedback for the first transmission.
+     * When enabled, the maximum number of retransmissions is controlled by
+     * MaxHarqReTx. Disabling retransmissions does not disable HARQ processes
+     * or HARQ feedback.
      *
-     * \param enableFlag If true, it would set the max HARQ ReTx to 3; otherwise it set it to 0
+     * @param enableFlag true to enable HARQ retransmissions; false to disable them
      */
     void EnableHarqReTx(bool enableFlag);
-    /**
-     * \brief Is HARQ ReTx enable function
-     *
-     * \return Returns true if HARQ ReTx are enabled; otherwise false
-     */
-    bool IsHarqReTxEnable() const;
 
     /**
-     * \brief Sets the default RACH UL
+     * @brief Is HARQ ReTx enable function
+     *
+     * @return Returns true if HARQ ReTx are enabled; otherwise false
+     */
+    bool IsHarqReTxEnable() const override;
+
+    /**
+     * @brief Sets the default RACH UL
      * grant MCS
-     * \param v the MCS to be used for RACH UL grant
+     * @param v the MCS to be used for RACH UL grant
      */
     void SetRachUlGrantMcs(uint8_t v);
 
   protected:
     /**
-     * \brief Create an UE representation for the scheduler.
+     * @brief Create an UE representation for the scheduler.
      *
      * The representation must save any important UE-specific value, and it is
      * shared across all the subclasses. A scheduler which want to save any
      * additional value per-UE, must subclass the class NrMacSchedulerUeInfo
      * and return a pointer to an instance of the new type.
      *
-     * \param params Configure parameters for the UE
-     * \return a pointer to the UE representation to save in the UE map (m_ueMap).
+     * @param params Configure parameters for the UE
+     * @return a pointer to the UE representation to save in the UE map (m_ueMap).
      */
     virtual std::shared_ptr<NrMacSchedulerUeInfo> CreateUeRepresentation(
         const NrMacCschedSapProvider::CschedUeConfigReqParameters& params) const = 0;
 
     /**
-     * \brief Returns TPC command
+     * @brief Returns TPC command
      */
     virtual uint8_t GetTpc() const = 0;
 
     /**
-     * \brief Giving the input, append to slotAlloc the allocations for the DL HARQ retransmissions
-     * \param startingPoint starting point of the first retransmission.
+     * @brief Giving the input, append to slotAlloc the allocations for the DL HARQ retransmissions
+     * @param startingPoint starting point of the first retransmission.
      * It should be set to the next available starting point
-     * \param symAvail Available symbols
-     * \param activeDlHarq Map of the active HARQ processes
-     * \param ueMap Map of the UEs
-     * \param dlHarqToRetransmit HARQ feedbacks that could not be transmitted (to fill)
-     * \param dlHarqFeedback all the HARQ feedbacks
-     * \param slotAlloc Slot allocation info
-     * \return the VarTtiSlotAlloc ID to use next
+     * @param symAvail Available symbols
+     * @param activeDlHarq Map of the active HARQ processes
+     * @param ueMap Map of the UEs
+     * @param dlHarqToRetransmit HARQ feedbacks that could not be transmitted (to fill)
+     * @param dlHarqFeedback all the HARQ feedbacks
+     * @param slotAlloc Slot allocation info
+     * @return the VarTtiSlotAlloc ID to use next
      */
     virtual uint8_t ScheduleDlHarq(NrMacSchedulerNs3::PointInFTPlane* startingPoint,
                                    uint8_t symAvail,
@@ -608,28 +630,30 @@ class NrMacSchedulerNs3 : public NrMacScheduler
                                    const std::vector<DlHarqInfo>& dlHarqFeedback,
                                    SlotAllocInfo* slotAlloc) const;
     /**
-     * \brief Giving the input, append to slotAlloc the allocations for the DL HARQ retransmissions
-     * \param startingPoint starting point of the first retransmission.
+     * @brief Giving the input, append to slotAlloc the allocations for the DL HARQ retransmissions
+     * @param startingPoint starting point of the first retransmission.
      * It should be set to the next available starting point
-     * \param symAvail Available symbols
-     * \param ueMap Map of the UEs
-     * \param ulHarqToRetransmit HARQ feedbacks that could not be transmitted (to fill)
-     * \param ulHarqFeedback all the HARQ feedbacks
-     * \param slotAlloc Slot allocation info
-     * \return the VarTtiSlotAlloc ID to use next
+     * @param symAvail Available symbols
+     * @param activeUlHarq Map of the active HARQ processes
+     * @param ueMap Map of the UEs
+     * @param ulHarqToRetransmit HARQ feedbacks that could not be transmitted (to fill)
+     * @param ulHarqFeedback all the HARQ feedbacks
+     * @param slotAlloc Slot allocation info
+     * @return the VarTtiSlotAlloc ID to use next
      */
     virtual uint8_t ScheduleUlHarq(NrMacSchedulerNs3::PointInFTPlane* startingPoint,
                                    uint8_t symAvail,
+                                   const ActiveHarqMap& activeUlHarq,
                                    const std::unordered_map<uint16_t, UePtr>& ueMap,
                                    std::vector<UlHarqInfo>* ulHarqToRetransmit,
                                    const std::vector<UlHarqInfo>& ulHarqFeedback,
                                    SlotAllocInfo* slotAlloc) const;
 
     /**
-     * \brief Assign the DL RBG to the active UE, and return the distribution of symbols per beam
-     * \param symAvail available symbols for DL
-     * \param activeDl Map of Beam and active UE per beam
-     * \return a map of symbols dedicated to each beam
+     * @brief Assign the DL RBG to the active UE, and return the distribution of symbols per beam
+     * @param symAvail available symbols for DL
+     * @param activeDl Map of Beam and active UE per beam
+     * @return a map of symbols dedicated to each beam
      *
      * The function should assign RBG to each UE, modifying the value m_dlRBG
      * for each UE in the activeDl map. In doing so, it has to calculate the number
@@ -641,10 +665,10 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     virtual BeamSymbolMap AssignDLRBG(uint32_t symAvail, const ActiveUeMap& activeDl) const = 0;
 
     /**
-     * \brief Assign the UL RBG to the active UE, and return the distribution of symbols per beam
-     * \param symAvail available symbols for UL
-     * \param activeUl Map of Beam and active UE per beam
-     * \return a map of symbols dedicated to each beam
+     * @brief Assign the UL RBG to the active UE, and return the distribution of symbols per beam
+     * @param symAvail available symbols for UL
+     * @param activeUl Map of Beam and active UE per beam
+     * @return a map of symbols dedicated to each beam
      *
      * The function should assign RBG to each UE, modifying the value m_ulRBG
      * for each UE in the activeUl map. In doing so, it has to calculate the number
@@ -656,11 +680,11 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     virtual BeamSymbolMap AssignULRBG(uint32_t symAvail, const ActiveUeMap& activeUl) const = 0;
 
     /**
-     * \brief Create a DCI for the specified UE for DL data
-     * \param spoint Starting point
-     * \param ueInfo UE specified
-     * \param maxSym maximum amount of symbols that can be assigned
-     * \return a pointer to the DciInfoElementTdma
+     * @brief Create a DCI for the specified UE for DL data
+     * @param spoint Starting point
+     * @param ueInfo UE specified
+     * @param maxSym maximum amount of symbols that can be assigned
+     * @return a pointer to the DciInfoElementTdma
      *
      * The function should create a block in the 2D frequency-time plane in
      * which the specified UE will receive the DL data.
@@ -671,11 +695,11 @@ class NrMacSchedulerNs3 : public NrMacScheduler
         uint32_t maxSym) const = 0;
 
     /**
-     * \brief Create a DCI for the specified UE for UL data
-     * \param spoint Starting point
-     * \param ueInfo UE specified
-     * \param maxSym maximum amount of symbols that can be assigned
-     * \return a pointer to the DciInfoElementTdma
+     * @brief Create a DCI for the specified UE for UL data
+     * @param spoint Starting point
+     * @param ueInfo UE specified
+     * @param maxSym maximum amount of symbols that can be assigned
+     * @return a pointer to the DciInfoElementTdma
      *
      * The function should create a block in the 2D frequency-time plane in
      * which the specified UE will receive the UL data.
@@ -686,22 +710,22 @@ class NrMacSchedulerNs3 : public NrMacScheduler
         uint32_t maxSym) const = 0;
 
     /**
-     * \brief Perform a custom operation on the starting point each time all the UE of a DL beam
+     * @brief Perform a custom operation on the starting point each time all the UE of a DL beam
      * have been scheduled \param spoint starting point for the next beam to modify \param symOfBeam
      * number the symbol used for the beam
      */
     virtual void ChangeDlBeam(PointInFTPlane* spoint, uint32_t symOfBeam) const = 0;
 
     /**
-     * \brief Perform a custom operation on the starting point each time all the UE of an UL beam
+     * @brief Perform a custom operation on the starting point each time all the UE of an UL beam
      * have been scheduled \param spoint starting point for the next beam to modify \param symOfBeam
      * number the symbol used for the beam
      */
     virtual void ChangeUlBeam(PointInFTPlane* spoint, uint32_t symOfBeam) const = 0;
 
     /**
-     * \brief Sort the DL HARQ retransmission
-     * \param activeDlHarq HARQ DL to retransmit
+     * @brief Sort the DL HARQ retransmission
+     * @param activeDlHarq HARQ DL to retransmit
      *
      * The HARQ are divided by beams. In each beam, the HARQ should be ordered
      * in a way that the first element should be the first to transmit, and
@@ -710,8 +734,8 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     virtual void SortDlHarq(ActiveHarqMap* activeDlHarq) const;
 
     /**
-     * \brief Sort the UL HARQ retransmission
-     * \param activeUlHarq HARQ UL to retransmit
+     * @brief Sort the UL HARQ retransmission
+     * @param activeUlHarq HARQ UL to retransmit
      *
      * The HARQ are divided by beams. In each beam, the HARQ should be ordered
      * in a way that the first element should be the first to transmit, and
@@ -725,17 +749,16 @@ class NrMacSchedulerNs3 : public NrMacScheduler
 
   public:
     /**
-     * \brief Private function that is used to get the number of resource
+     * @brief Private function that is used to get the number of resource
      * blocks per resource block group and also to check whether this value is
      * configured.
-     * \return Returns the number of RBs per RBG
+     * @return Returns the number of RBs per RBG
      */
     uint64_t GetNumRbPerRbg() const;
 
   protected:
     Ptr<NrAmc> m_dlAmc; //!< AMC pointer
     Ptr<NrAmc> m_ulAmc; //!< AMC pointer
-
     /**
      * \brief UL RBGs per symbol a UE may get in this slot (ntn-patch 16).
      *
@@ -762,29 +785,35 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     /// least 10 bytes (3 MAC subheader, 2 RLC header, 5 data). ntn-patch 16.
     static constexpr uint32_t kMinUlTbWithData = 5 + 3 + 10;
 
+    NrMacSchedulerUeInfo::McsCsiSource
+        m_mcsCsiSource; //!< CSI information source for DL MCS estimation
+
+    bool m_activeDlAi{false}; //!< Flag for activating AI for downlink
+    bool m_activeUlAi{false}; //!< Flag for activating AI for uplink
+
   private:
     /**
-     * \brief Single UL allocation for calculating CQI and the number of reserved UL symbols in
+     * @brief Single UL allocation for calculating CQI and the number of reserved UL symbols in
      * slots.
      */
-    struct AllocElem
+    struct NR_EXPORT AllocElem
     {
         /**
-         * \brief AllocElem empty constructor (deleted)
+         * @brief AllocElem empty constructor (deleted)
          */
         AllocElem() = delete;
         /**
-         * \brief AllocElement default copy constructor
+         * @brief AllocElement default copy constructor
          */
         AllocElem(const AllocElem& o) = default;
 
         /**
-         * \brief AllocElem constructor
-         * \param rnti RNTI
-         * \param tbs Transport Block Size
-         * \param numSym Number of symbols
-         * \param mcs MCS
-         * \param rank rank
+         * @brief AllocElem constructor
+         * @param rnti RNTI
+         * @param tbs Transport Block Size
+         * @param numSym Number of symbols
+         * @param mcs MCS
+         * @param rank rank
          */
         AllocElem(uint16_t rnti,
                   uint32_t tbs,
@@ -792,7 +821,7 @@ class NrMacSchedulerNs3 : public NrMacScheduler
                   uint8_t numSym,
                   uint8_t mcs,
                   uint8_t rank,
-                  const std::vector<uint8_t>& rbgMask)
+                  const std::vector<bool>& rbgMask)
             : m_rnti(rnti),
               m_tbs(tbs),
               m_symStart(symStart),
@@ -803,32 +832,32 @@ class NrMacSchedulerNs3 : public NrMacScheduler
         {
         }
 
-        uint16_t m_rnti{0};             //!< Allocated RNTI
-        uint32_t m_tbs{0};              //!< Allocated TBS
-        uint8_t m_symStart{0};          //!< Sym start
-        uint8_t m_numSym{0};            //!< Allocated symbols
-        uint8_t m_mcs{0};               //!< MCS of the transmission
-        uint8_t m_rank{1};              //!< rank of the transmission
-        std::vector<uint8_t> m_rbgMask; //!< RBG Mask
+        uint16_t m_rnti{0};          //!< Allocated RNTI
+        uint32_t m_tbs{0};           //!< Allocated TBS
+        uint8_t m_symStart{0};       //!< Sym start
+        uint8_t m_numSym{0};         //!< Allocated symbols
+        uint8_t m_mcs{0};            //!< MCS of the transmission
+        uint8_t m_rank{1};           //!< rank of the transmission
+        std::vector<bool> m_rbgMask; //!< RBG Mask
     };
 
     /**
-     * \brief A vector of UL allocations to calculate CQI and symbols reserved.
+     * @brief A vector of UL allocations to calculate CQI and symbols reserved.
      */
-    struct SlotElem
+    struct NR_EXPORT SlotElem
     {
         /**
-         * \brief SlotElem default constructor (deleted)
+         * @brief SlotElem default constructor (deleted)
          */
         SlotElem() = delete;
         /**
-         * \brief SlotElem default copy constructor
+         * @brief SlotElem default copy constructor
          */
         SlotElem(const SlotElem& o) = default;
 
         /**
-         * \brief SlotElem constructor with the number of total symbol used for UL
-         * \param totUlSym symbols used for UL
+         * @brief SlotElem constructor with the number of total symbol used for UL
+         * @param totUlSym symbols used for UL
          */
         SlotElem(uint8_t totUlSym)
             : m_totUlSym(totUlSym)
@@ -892,6 +921,40 @@ class NrMacSchedulerNs3 : public NrMacScheduler
                              const ActiveUeMap& activeUl,
                              SlotAllocInfo* slotAlloc) const;
     uint8_t DoScheduleUlMsg3(PointInFTPlane* sPoint, uint8_t symAvail, SlotAllocInfo* slotAlloc);
+    /**
+     * @brief Schedule msg3 (RRC Connection Request) HARQ retransmissions
+     *
+     * For each TC-RNTI queued in m_msg3RetxList (because its initial msg3 UL
+     * PUSCH failed to decode at the gNB and a UL HARQ NACK was received), this
+     * allocates fresh UL resources and builds a normal UL HARQ retransmission
+     * DCI (m_type=DATA, m_format=UL, m_ndi=0, m_harqProcess=0, m_rv=attempts)
+     * addressed to the TC-RNTI. The UE, which already buffered msg3 at HARQ
+     * process 0, retransmits it upon receiving this DCI.
+     *
+     * @param sPoint Starting point in the FT plane (updated)
+     * @param symAvail Number of available symbols
+     * @param slotAlloc Slot allocation info (updated)
+     * @return The number of symbols used by the msg3 retransmission grants
+     */
+    uint8_t DoScheduleUlMsg3Retx(PointInFTPlane* sPoint,
+                                 uint8_t symAvail,
+                                 SlotAllocInfo* slotAlloc);
+    /**
+     * @brief Find the smallest msg3 UL grant that fits an estimated size
+     *
+     * Computes the lowest number of UL symbols whose TB size (at the RACH UL
+     * grant MCS, over the usable RBGs) fits the estimated msg3 size. Shared by
+     * the initial msg3 grant and the msg3 HARQ retransmission grant so both
+     * always apply the same sizing rule.
+     *
+     * @param estimatedSizeBits Estimated msg3 size in bits
+     * @param symAvail Number of available symbols
+     * @param usableRbgs Number of usable RBGs in the UL bitmask
+     * @return Pair of allocated symbols and the resulting TB size in bits
+     */
+    std::pair<uint8_t, uint16_t> FitMsg3Grant(uint16_t estimatedSizeBits,
+                                              uint8_t symAvail,
+                                              uint16_t usableRbgs) const;
     void DoScheduleUlSr(PointInFTPlane* spoint, const std::list<uint16_t>& rntiList) const;
     uint8_t DoScheduleDl(const std::vector<DlHarqInfo>& dlHarqFeedback,
                          const ActiveHarqMap& activeDlHarq,
@@ -904,46 +967,173 @@ class NrMacSchedulerNs3 : public NrMacScheduler
                          SlotAllocInfo* allocInfo,
                          LteNrTddSlotType type);
     uint8_t DoScheduleSrs(PointInFTPlane* spoint, SlotAllocInfo* allocInfo);
+    /**
+     * @brief Log the UEs with pending downlink signaling traffic.
+     * @param activeDlUe active DL UEs grouped by beam.
+     */
+    void LogUesWithPendingDlSignalingTraffic(const ActiveUeMap& activeDlUe) const;
 
     static const unsigned m_macHdrSize = 0; //!< Mac Header size
-    static const uint32_t m_subHdrSize = 4; //!< Sub Header size (?)
     static const unsigned m_rlcHdrSize = 3; //!< RLC Header size
+    // The MAC sub header size defined in nr-mac-scheduler-lcg.h
 
   protected:
     /**
-     * \brief Get the bwp id of this MAC
-     * \return the bwp id
+     * @brief Get the bwp id of this MAC
+     * @return the bwp id
      */
     uint16_t GetBwpId() const;
 
     /**
-     * \brief Get the cell id of this MAC
-     * \return the cell id
+     * @brief Get the cell id of this MAC
+     * @return the cell id
      */
     uint16_t GetCellId() const;
 
     /**
-     * \return the bandwidth in RBG
+     * @return the bandwidth in RBG
      */
     uint16_t GetBandwidthInRbg() const;
 
     /**
-     * \brief Get the FH Control Method.
-     * \return the FH Control Method (uint8_t)
+     * @brief Get the FH Control Method.
+     * @return the FH Control Method (uint8_t)
      */
     uint8_t GetFhControlMethod() const;
 
     /**
-     * \brief Returns a boolean indicating whether the current allocation can
+     * @brief Returns a boolean indicating whether the current allocation can
      *        fit in the available FH bandwidth (when FH Control is enabled).
      */
-    bool DoesFhAllocationFit(uint16_t bwpId, uint32_t mcs, uint32_t nRegs, uint8_t dlRank) const;
+    bool DoesFhAllocationFit(uint16_t bwpId,
+                             uint32_t mcs,
+                             uint32_t nRegs,
+                             uint8_t dlRank,
+                             uint8_t numSym) const;
 
     // FFR SAPs
     NrFhSchedSapUser* m_nrFhSchedSapUser{nullptr};         //!< FH Control SAP user
     NrFhSchedSapProvider* m_nrFhSchedSapProvider{nullptr}; //!< FH Control SAP provider
 
+    /**
+     * @brief Returns a boolean vector indicating whether a resource is available to be scheduled
+     * (true) or not (false) in the downlink.
+     */
+    std::vector<bool> GetDlBitmask() const;
+    /**
+     * @brief Returns a boolean vector indicating whether a resource is available to be scheduled
+     * (true) or not (false) in the uplink.
+     */
+    std::vector<bool> GetUlBitmask() const;
+    /**
+     * @brief Returns the RBGs that UL data can be assigned to. They are the ones of
+     * GetUlBitmask(), unless the scheduler is filling the RBGs left free by UL HARQ
+     * retransmissions.
+     */
+    std::vector<bool> GetUlDataBitmask() const;
+    /**
+     * @brief Returns the RBGs that DL data can be assigned to. They are the ones of
+     * GetDlBitmask(), unless the scheduler is filling the RBGs left free by DL HARQ
+     * retransmissions.
+     */
+    std::vector<bool> GetDlDataBitmask() const;
+
+    /**
+     * @brief Whether new data can be frequency multiplexed with HARQ retransmissions of other
+     * UEs, on the symbols of the retransmissions
+     *
+     * A UE never gets new data on the symbols of its own retransmission, as it cannot
+     * receive (or transmit) two PDSCHs (or PUSCHs) that overlap in time on a serving cell
+     * (TS 38.214, clauses 5.1 and 6.1).
+     *
+     * @return true if the scheduler can assign part of the band to new data
+     */
+    virtual bool CanShareRetxSymbols() const
+    {
+        return false;
+    }
+
+    // Generic function serves as trampoline to Tdma and Ofdma, plus gives access to ueInfo map
+    std::vector<DciInfoElementTdma> ReshapeAllocation(const std::vector<DciInfoElementTdma>& dcis,
+                                                      uint8_t& startingSymbol,
+                                                      uint8_t& numSymbols,
+                                                      std::vector<bool>& bitmask,
+                                                      const bool isDl);
+
+    // Implementation from Tdma and Ofdma schedulers
+    virtual std::vector<DciInfoElementTdma> DoReshapeAllocation(
+        const std::vector<DciInfoElementTdma>& dcis,
+        uint8_t& startingSymbol,
+        uint8_t& numSymbols,
+        std::vector<bool>& bitmask,
+        const bool isDl,
+        const std::unordered_map<uint16_t, std::shared_ptr<NrMacSchedulerUeInfo>>& ueMap) = 0;
+
   private:
+    /**
+     * @brief Schedule UL data on the RBGs left free by the UL HARQ retransmissions of the slot
+     *
+     * The active UEs of each beam are spread over the spans of symbols holding UL
+     * retransmissions of that beam (see SelectRetxSpanUes()), and scheduled on the RBGs the
+     * retransmissions do not use, over the same symbols.
+     *
+     * @param activeUlUe active UL UEs, from which the UEs scheduled here are removed
+     * @param symAvail UL data symbols left for new data after the retransmissions
+     * @param allocInfo slot allocation, to which the new DCIs are added
+     */
+    void ScheduleUlDataInRetxSpans(ActiveUeMap* activeUlUe,
+                                   uint8_t symAvail,
+                                   SlotAllocInfo* allocInfo) const;
+
+    /**
+     * @brief Schedule DL data on the RBGs left free by the DL HARQ retransmissions of the slot
+     *
+     * The active UEs of a beam are spread over the spans of symbols holding DL
+     * retransmissions of that beam alone (see SelectRetxSpanUes()), and scheduled on the RBGs
+     * that no allocation uses within the span, over all the symbols of the span.
+     *
+     * @param activeDlUe active DL UEs, from which the UEs scheduled here are removed
+     * @param symAvail DL data symbols left for new data after the retransmissions
+     * @param allocInfo slot allocation, to which the new DCIs are added
+     */
+    void ScheduleDlDataInRetxSpans(ActiveUeMap* activeDlUe,
+                                   uint8_t symAvail,
+                                   SlotAllocInfo* allocInfo) const;
+
+    /**
+     * @brief Free resources of a span of symbols holding HARQ retransmissions
+     */
+    struct RetxSpanRoom
+    {
+        uint32_t numRbg; ///< RBGs left free by the retransmissions
+        uint8_t numSym;  ///< Symbols of the span
+    };
+
+    /**
+     * @brief Select the UEs to schedule on the RBGs left free by HARQ retransmissions
+     *
+     * The spans of a beam are filled together. Each UE, smallest buffer first, goes to the
+     * span in which it would get the most RBGs times symbols, assuming the free RBGs of a
+     * span are split evenly among its UEs, as long as that share carries its data and the
+     * data of the UEs already there. A UE gets a single DCI per slot, so a UE scheduled over
+     * the retransmission symbols cannot use the symbols left after them. A UE whose data
+     * fits in no span is still moved to the span with the largest share when the buffers of
+     * the UEs left behind can fill the remaining symbols, or when no symbols remain.
+     *
+     * @param beamUes active UEs in the beam of the retransmissions
+     * @param activeUe active UEs of every beam
+     * @param spans free resources of each retransmission span of the beam
+     * @param symAvail data symbols left for new data after the retransmissions
+     * @param isDl whether the selection is for the DL (true) or the UL (false)
+     * @return the UEs to schedule over the symbols of each span, in the order of spans
+     */
+    std::vector<std::vector<UePtrAndBufferReq>> SelectRetxSpanUes(
+        const std::vector<UePtrAndBufferReq>& beamUes,
+        const ActiveUeMap& activeUe,
+        const std::vector<RetxSpanRoom>& spans,
+        uint8_t symAvail,
+        bool isDl) const;
+
     void CallNrFhControlForMapUpdate(
         const std::deque<VarTtiAllocInfo>& allocation,
         const std::unordered_map<uint16_t, std::shared_ptr<NrMacSchedulerUeInfo>>& ueMap);
@@ -951,18 +1141,25 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     std::unordered_map<uint16_t, std::shared_ptr<NrMacSchedulerUeInfo>>
         m_ueMap; //!< The map of between RNTI and their data
 
+    /// RBGs that UL data is restricted to while filling UL retransmission spans, empty otherwise
+    mutable std::vector<bool> m_ulDataRbgMask;
+    /// RBGs that DL data is restricted to while filling DL retransmission spans, empty otherwise
+    mutable std::vector<bool> m_dlDataRbgMask;
+
     /**
      * Map of previous allocated UE per RBG
      * (used to retrieve info from UL-CQI)
      */
     std::map<uint64_t, SlotElem> m_ulAllocationMap;
 
-    bool m_fixedMcsDl{false};  //!< Fixed MCS for *all* UE in DL
-    bool m_fixedMcsUl{false};  //!< Fixed MCS for *all* UE in UL
-    uint8_t m_startMcsDl{0};   //!< Starting (or fixed) value for DL MCS
-    uint8_t m_startMcsUl{0};   //!< Starting (or fixed) value for UL MCS
-    int8_t m_maxDlMcs{0};      //!< Maximum index for DL MCS
-    Time m_cqiTimersThreshold; //!< The time while a CQI is valid
+    bool m_fixedMcsDl{false};    //!< Fixed MCS for *all* UE in DL
+    bool m_fixedMcsUl{false};    //!< Fixed MCS for *all* UE in UL
+    uint8_t m_startMcsDl{0};     //!< Starting (or fixed) value for DL MCS
+    uint8_t m_startMcsUl{0};     //!< Starting (or fixed) value for UL MCS
+    int8_t m_maxDlMcs{0};        //!< Maximum index for DL MCS
+    Time m_cqiTimersThreshold;   //!< The time while a CQI is valid
+    bool m_enableHarqReTx{true}; //!< Whether HARQ retransmissions are enabled
+    uint8_t m_maxHarqReTx{3};    //!< Maximum number of HARQ retransmissions per TB
 
     uint8_t m_rachUlGrantMcs{0}; //!< The MCS that will be used for UL RACH grant
     uint8_t m_ulRachBwpIndex{
@@ -979,6 +1176,31 @@ class NrMacSchedulerNs3 : public NrMacScheduler
 
     std::vector<struct nr::RachListElement_s> m_rachList; //!< rach list
 
+    /**
+     * @brief Bookkeeping for an in-flight msg3 (RRC Connection Request) awaiting
+     *        HARQ acknowledgement / retransmission.
+     */
+    struct Msg3RetxInfo
+    {
+        uint8_t attempts{0};           //!< Number of retransmissions issued so far
+        uint16_t estimatedSizeBits{0}; //!< Estimated msg3 size in bits, from the RACH request
+    };
+
+    uint8_t m_msg3MaxRetx{0}; //!< Max msg3 HARQ retransmissions (0 disables the feature)
+
+    /**
+     * @brief Pending msg3 transmissions keyed by TC-RNTI. Populated when the
+     *        initial msg3 grant is issued, refreshed/erased on HARQ feedback,
+     *        and cleared once the TC-RNTI becomes a registered UE.
+     */
+    std::map<uint16_t, Msg3RetxInfo> m_msg3Pending;
+
+    /**
+     * @brief TC-RNTIs whose msg3 must be retransmitted in the next UL slot
+     *        (a UL HARQ NACK was received for a pending msg3).
+     */
+    std::vector<uint16_t> m_msg3RetxList;
+
     uint16_t m_bandwidth{0};         //!< Bandwidth in number of RBG
     uint8_t m_dlCtrlSymbols{0};      //!< DL ctrl symbols (attribute)
     uint8_t m_ulCtrlSymbols{0};      //!< UL ctrl symbols (attribute)
@@ -986,10 +1208,10 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     bool m_enableSrsInUlSlots{true}; //!< SRS allowed in UL slots (attribute)
     bool m_enableSrsInFSlots{true};  //!< SRS allowed in F slots (attribute)
 
-    std::vector<uint8_t> m_dlNotchedRbgsMask; //!< The mask of notched (blank) RBGs for the DL
-    std::vector<uint8_t> m_ulNotchedRbgsMask; //!< The mask of notched (blank) RBGs for the UL
+    std::vector<bool> m_dlNotchedRbgsMask; //!< The mask of notched (blank) RBGs for the DL
+    std::vector<bool> m_ulNotchedRbgsMask; //!< The mask of notched (blank) RBGs for the UL
 
-    std::unique_ptr<NrMacSchedulerHarqRr> m_schedHarq; //!< Pointer to the real HARQ scheduler
+    Ptr<NrMacSchedulerHarqRr> m_schedHarq; //!< Pointer to the real HARQ scheduler
 
     Ptr<NrMacSchedulerSrsDefault> m_schedulerSrs; //!< Pointer to the SRS algorithm
     Ptr<NrMacSchedulerLcAlgorithm>
@@ -998,10 +1220,11 @@ class NrMacSchedulerNs3 : public NrMacScheduler
 
     uint32_t m_srsSlotCounter{0}; //!< Counter for UL slots
 
-    friend NrSchedGeneralTestCase;
+    TracedCallback<uint16_t, uint16_t, const std::shared_ptr<NrMacSchedulerUeInfo>&>
+        m_csiFeedbackReceived; //!< Traced callback to access CSI feedback
 
-    bool m_enableHarqReTx{true}; //!< Flag to enable or disable HARQ ReTx (attribute)
-    bool m_ollaEnabled{true};      //!< outer-loop link adaptation on DL (attribute OllaEnabled)
+  private:
+    bool m_ollaEnabled{false};      //!< outer-loop link adaptation on DL (attribute OllaEnabled)
     double m_ollaBlerTarget{0.1};  //!< initial-transmission BLER target (attribute OllaBlerTarget)
     double m_ollaStep{1.0};        //!< MCS-index increase per NACK (attribute OllaStep)
     /// downlinkHARQ-FeedbackDisabled-r17 bitmap over DL HARQ process IDs (attribute).

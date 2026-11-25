@@ -2,10 +2,23 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file power-output-stats.cc
+ *
+ * @brief Implementation of PowerOutputStats, used by the cttc-nr-3gpp-calibration example to
+ * record power measurements into the SQLite output database. Each row stores
+ * frame/subframe/slot, RNTI, IMSI, BWP and cell IDs, the traced power spectral density
+ * integrated into per-RB and total power, and the number of active and total RBs, keyed by RNG
+ * seed and run number. The example instantiates it twice: table "ueTxPower" is fed by the UE
+ * "ReportPowerSpectralDensity" trace and table "gnbRxPower" by the gNB spectrum "RxDataTrace";
+ * samples are cached in memory and flushed to disk in batches.
+ */
+
 #include "power-output-stats.h"
 
-#include <ns3/abort.h>
-#include <ns3/rng-seed-manager.h>
+#include "ns3/abort.h"
+#include "ns3/rng-seed-manager.h"
 
 namespace ns3
 {

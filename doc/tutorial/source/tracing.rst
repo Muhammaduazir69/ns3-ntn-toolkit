@@ -120,24 +120,26 @@ You could simply add one, changing the code.  Here is the original::
     ...
 
     else if (tcpflags == (TcpHeader::SYN | TcpHeader::ACK))
-      { // No action for received SYN+ACK, it is probably a duplicated packet
-      }
+    {
+      // No action for received SYN+ACK, it is probably a duplicated packet
+    }
     ...
 
 To log the SYN+ACK case, you can add a new ``NS_LOG_LOGIC`` in the
 ``if`` statement body::
 
   /* Received a packet upon ESTABLISHED state. This function is mimicking the
-      role of tcp_rcv_established() in tcp_input.c in Linux kernel. */
+     role of tcp_rcv_established() in tcp_input.c in Linux kernel. */
   void
   TcpSocketBase::ProcessEstablished(Ptr<Packet> packet, const TcpHeader& tcpHeader)
   {
     NS_LOG_FUNCTION(this << tcpHeader);
     ...
     else if (tcpflags == (TcpHeader::SYN | TcpHeader::ACK))
-      { // No action for received SYN+ACK, it is probably a duplicated packet
-        NS_LOG_LOGIC("TcpSocketBase " << this << " ignoring SYN+ACK");
-      }
+    {
+      // No action for received SYN+ACK, it is probably a duplicated packet
+      NS_LOG_LOGIC("TcpSocketBase " << this << " ignoring SYN+ACK");
+    }
     ...
 
 This may seem fairly simple and satisfying at first glance, but
@@ -452,7 +454,7 @@ Let's ignore the bit about context for now.
 
 Finally, the line assigning a value to ``m_myInt``::
 
-   myObject->m_myInt = 1234;
+  myObject->m_myInt = 1234;
 
 should be interpreted as an invocation of ``operator=`` on the member
 variable ``m_myInt`` with the integer ``1234`` passed as a parameter.
@@ -712,12 +714,12 @@ you select the "API Documentation" link, you will be taken to the
 
 In the sidebar you should see a hierarchy that begins
 
-*  ns-3
+* ns-3
 
-  *  ns-3 Documentation
-  *  All TraceSources
-  *  All Attributes
-  *  All GlobalValues
+  * ns-3 Documentation
+  * All TraceSources
+  * All Attributes
+  * All GlobalValues
 
 The list of interest to us here is "All TraceSources".  Go ahead and
 select that link.  You will see, perhaps not too surprisingly, a list
@@ -802,7 +804,7 @@ of trace sources.  You will find
   * **CourseChange**: The value of the position and/or velocity vector
     changed.
 
-    Callback signature: ``ns3::MobilityModel::CourseChangeCallback``
+    Callback signature: ``ns3::MobilityModel::TracedCallback``
 
 This is exactly what you need to know.  The trace source of interest
 is found in ``ns3::MobilityModel`` (which you knew anyway).  The
@@ -853,12 +855,12 @@ Repeating the "CourseChange" trace source entry from
   * **CourseChange**: The value of the position and/or velocity vector
     changed.
 
-    Callback signature: ``ns3::MobilityModel::CourseChangeCallback``
+    Callback signature: ``ns3::MobilityModel::TracedCallback``
 
 The callback signature is given as a link to the relevant ``typedef``,
 where we find
 
-  ``typedef void (* CourseChangeCallback)(std::string context, Ptr<const MobilityModel> * model);``
+  ``typedef void (*TracedCallback)(Ptr<const MobilityModel> model);``
 
   **TracedCallback** signature for course change notifications.
 
@@ -1168,23 +1170,23 @@ itself around, rather than passing the address of the object.  We
 extend that requirement to include the full set of assignment-style
 operators that are pre-defined for plain-old-data (POD) types:
 
-  +---------------------+---------------------+
-  | ``operator=`` (assignment)                |
-  +---------------------+---------------------+
-  | ``operator*=``      | ``operator/=``      |
-  +---------------------+---------------------+
-  | ``operator+=``      | ``operator-=``      |
-  +---------------------+---------------------+
-  | ``operator++`` (both prefix and postfix)  |
-  +---------------------+---------------------+
-  | ``operator--`` (both prefix and postfix)  |
-  +---------------------+---------------------+
-  | ``operator<<=``     | ``operator>>=``     |
-  +---------------------+---------------------+
-  | ``operator&=``      | ``operator|=``      |
-  +---------------------+---------------------+
-  | ``operator%=``      | ``operator^=``      |
-  +---------------------+---------------------+
++---------------------+---------------------+
+| ``operator=`` (assignment)                |
++---------------------+---------------------+
+| ``operator*=``      | ``operator/=``      |
++---------------------+---------------------+
+| ``operator+=``      | ``operator-=``      |
++---------------------+---------------------+
+| ``operator++`` (both prefix and postfix)  |
++---------------------+---------------------+
+| ``operator--`` (both prefix and postfix)  |
++---------------------+---------------------+
+| ``operator<<=``     | ``operator>>=``     |
++---------------------+---------------------+
+| ``operator&=``      | ``operator|=``      |
++---------------------+---------------------+
+| ``operator%=``      | ``operator^=``      |
++---------------------+---------------------+
 
 What this all really means is that you will be able to trace all
 changes made using those operators to a C++ object which has value
@@ -1458,17 +1460,17 @@ to be created at configuration time.
 
       /**
        * Register this type.
-       * \return The TypeId.
+       * @return The TypeId.
        */
       static TypeId GetTypeId();
 
       /**
        * Setup the socket.
-       * \param socket The socket.
-       * \param address The destination address.
-       * \param packetSize The packet size to transmit.
-       * \param nPackets The number of packets to transmit.
-       * \param dataRate the data rate to use.
+       * @param socket The socket.
+       * @param address The destination address.
+       * @param packetSize The packet size to transmit.
+       * @param nPackets The number of packets to transmit.
+       * @param dataRate the data rate to use.
        */
       void Setup(Ptr<Socket> socket,
                  Address address,
@@ -1518,8 +1520,8 @@ The most common way to start pumping events is to start an
 (hopefully) familiar lines of an |ns3| script::
 
   ApplicationContainer apps = ...
-  apps.Start(Seconds(1.0));
-  apps.Stop(Seconds(10.0));
+  apps.Start(Seconds(1));
+  apps.Stop(Seconds(10));
 
 The application container code (see
 ``src/network/helper/application-container.h`` if you are interested)
@@ -1620,13 +1622,13 @@ look at ``src/network/model/application.cc`` and you will find::
   void
   Application::DoInitialize()
   {
-    NS_LOG_FUNCTION(this);
-    m_startEvent = Simulator::Schedule(m_startTime, &Application::StartApplication, this);
-    if (m_stopTime != TimeStep(0))
+      NS_LOG_FUNCTION(this);
+      m_startEvent = Simulator::Schedule(m_startTime, &Application::StartApplication, this);
+      if (m_stopTime != TimeStep(0))
       {
-        m_stopEvent = Simulator::Schedule(m_stopTime, &Application::StopApplication, this);
+          m_stopEvent = Simulator::Schedule(m_stopTime, &Application::StopApplication, this);
       }
-    Object::DoInitialize();
+      Object::DoInitialize();
   }
 
 Here, we finally come to the end of the trail.  If you have kept it
@@ -2424,13 +2426,13 @@ behaving identically, but we do strive to make them all work as
 similarly as possible; and whenever possible there are analogs for all
 methods in all classes.
 
-  +-----------------+---------+---------+
-  |                 |  PCAP   |  ASCII  |
-  +=================+=========+=========+
-  | Device Helper   | |check| | |check| |
-  +-----------------+---------+---------+
-  | Protocol Helper | |check| | |check| |
-  +-----------------+---------+---------+
++-----------------+---------+---------+
+|                 |  PCAP   |  ASCII  |
++=================+=========+=========+
+| Device Helper   | |check| | |check| |
++-----------------+---------+---------+
+| Protocol Helper | |check| | |check| |
++-----------------+---------+---------+
 
 We use an approach called a ``mixin`` to add tracing functionality to
 our helper classes.  A ``mixin`` is a class that provides

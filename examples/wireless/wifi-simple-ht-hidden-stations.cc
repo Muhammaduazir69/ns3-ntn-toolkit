@@ -54,9 +54,6 @@ main(int argc, char* argv[])
     double minExpectedThroughput{0};
     double maxExpectedThroughput{0};
 
-    RngSeedManager::SetSeed(1);
-    RngSeedManager::SetRun(7);
-
     CommandLine cmd(__FILE__);
     cmd.AddValue("nMpdus", "Number of aggregated MPDUs", nMpdus);
     cmd.AddValue("payloadSize", "Payload size in bytes", payloadSize);
@@ -127,9 +124,12 @@ main(int argc, char* argv[])
     Config::Set("/NodeList/*/DeviceList/*/$ns3::WifiNetDevice/Mac/BE_MaxAmpduSize",
                 UintegerValue(maxAmpduSize));
 
-    int64_t streamNumber = 20;
-    streamNumber += WifiHelper::AssignStreams(apDevice, streamNumber);
-    streamNumber += WifiHelper::AssignStreams(staDevices, streamNumber);
+    int64_t streamNumber = 1;
+    int64_t streamIncrement = 1000; // large enough to avoid overlap from AssignStreams calls
+    WifiHelper::AssignStreams(apDevice, streamNumber);
+    streamNumber += streamIncrement;
+    WifiHelper::AssignStreams(staDevices, streamNumber);
+    streamNumber += streamIncrement;
 
     // Setting mobility model
     MobilityHelper mobility;
@@ -152,8 +152,10 @@ main(int argc, char* argv[])
     InternetStackHelper stack;
     stack.Install(wifiApNode);
     stack.Install(wifiStaNodes);
-    streamNumber += stack.AssignStreams(wifiApNode, streamNumber);
-    streamNumber += stack.AssignStreams(wifiStaNodes, streamNumber);
+    stack.AssignStreams(wifiApNode, streamNumber);
+    streamNumber += streamIncrement;
+    stack.AssignStreams(wifiStaNodes, streamNumber);
+    streamNumber += streamIncrement;
 
     Ipv4AddressHelper address;
     address.SetBase("192.168.1.0", "255.255.255.0");
@@ -166,9 +168,10 @@ main(int argc, char* argv[])
     uint16_t port = 9;
     UdpServerHelper server(port);
     ApplicationContainer serverApp = server.Install(wifiApNode);
-    serverApp.Start(Seconds(0.0));
-    serverApp.Stop(simulationTime + Seconds(1.0));
-    streamNumber += server.AssignStreams(wifiApNode, streamNumber);
+    serverApp.Start(Seconds(0));
+    serverApp.Stop(simulationTime + Seconds(1));
+    server.AssignStreams(wifiApNode, streamNumber);
+    streamNumber += streamIncrement;
 
     UdpClientHelper client(ApInterface.GetAddress(0), port);
     client.SetAttribute("MaxPackets", UintegerValue(4294967295U));
@@ -177,9 +180,10 @@ main(int argc, char* argv[])
 
     // Saturated UDP traffic from stations to AP
     ApplicationContainer clientApp1 = client.Install(wifiStaNodes);
-    clientApp1.Start(Seconds(1.0));
-    clientApp1.Stop(simulationTime + Seconds(1.0));
-    streamNumber += client.AssignStreams(wifiStaNodes, streamNumber);
+    clientApp1.Start(Seconds(1));
+    clientApp1.Stop(simulationTime + Seconds(1));
+    client.AssignStreams(wifiStaNodes, streamNumber);
+    streamNumber += streamIncrement;
 
     phy.EnablePcap("SimpleHtHiddenStations_Ap", apDevice.Get(0));
     phy.EnablePcap("SimpleHtHiddenStations_Sta1", staDevices.Get(0));
@@ -188,7 +192,7 @@ main(int argc, char* argv[])
     AsciiTraceHelper ascii;
     phy.EnableAsciiAll(ascii.CreateFileStream("SimpleHtHiddenStations.tr"));
 
-    Simulator::Stop(simulationTime + Seconds(1.0));
+    Simulator::Stop(simulationTime + Seconds(1));
 
     Simulator::Run();
 

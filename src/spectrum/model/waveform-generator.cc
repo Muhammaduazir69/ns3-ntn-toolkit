@@ -8,12 +8,12 @@
 
 #include "waveform-generator.h"
 
-#include <ns3/antenna-model.h>
-#include <ns3/double.h>
-#include <ns3/log.h>
-#include <ns3/object-factory.h>
-#include <ns3/packet-burst.h>
-#include <ns3/simulator.h>
+#include "ns3/antenna-model.h"
+#include "ns3/double.h"
+#include "ns3/log.h"
+#include "ns3/object-factory.h"
+#include "ns3/packet-burst.h"
+#include "ns3/simulator.h"
 
 namespace ns3
 {
@@ -27,7 +27,7 @@ WaveformGenerator::WaveformGenerator()
       m_netDevice(nullptr),
       m_channel(nullptr),
       m_txPowerSpectralDensity(nullptr),
-      m_startTime(Seconds(0))
+      m_startTime()
 {
 }
 
@@ -59,7 +59,7 @@ WaveformGenerator::GetTypeId()
             .AddAttribute(
                 "Period",
                 "the period (=1/frequency)",
-                TimeValue(Seconds(1.0)),
+                TimeValue(Seconds(1)),
                 MakeTimeAccessor(&WaveformGenerator::SetPeriod, &WaveformGenerator::GetPeriod),
                 MakeTimeChecker())
             .AddAttribute("DutyCycle",

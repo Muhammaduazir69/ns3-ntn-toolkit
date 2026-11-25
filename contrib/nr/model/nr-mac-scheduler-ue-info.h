@@ -10,9 +10,11 @@
 #include "nr-mac-sched-sap.h"
 #include "nr-mac-scheduler-lcg.h"
 
-#include <ns3/matrix-array.h>
+#include "ns3/matrix-array.h"
+#include "ns3/nr-export.h"
 
 #include <functional>
+#include <optional>
 #include <unordered_map>
 
 namespace ns3
@@ -20,13 +22,13 @@ namespace ns3
 
 class NrMacSchedulerUeInfo;
 /**
- * \brief Shared pointer to an instance of NrMacSchedulerUeInfo
+ * @brief Shared pointer to an instance of NrMacSchedulerUeInfo
  */
 typedef std::shared_ptr<NrMacSchedulerUeInfo> UePtr;
 
 /**
- * \ingroup scheduler
- * \brief The representation of an user for any Mac scheduler
+ * @ingroup scheduler
+ * @brief The representation of an user for any Mac scheduler
  *
  * Basic representation for an UE inside any scheduler. The class is responsible
  * to store all the UE-related field that can be used by any scheduler.
@@ -44,79 +46,93 @@ typedef std::shared_ptr<NrMacSchedulerUeInfo> UePtr;
  * the method UpdateDlMetric() or UpdateUlMetric(). Make sure all the relevant
  * information that should be updated for a correct sorting are updated there.
  *
- * \see NrMacSchedulerUeInfoRR
- * \see NrMacSchedulerUeInfoPF
- * \see NrMacSchedulerUeInfoMR
+ * @see NrMacSchedulerUeInfoRR
+ * @see NrMacSchedulerUeInfoPF
+ * @see NrMacSchedulerUeInfoMR
  */
-class NrMacSchedulerUeInfo
+class NR_EXPORT NrMacSchedulerUeInfo
 {
   public:
     /**
-     * \brief Default Constructor (deleted)
+     * @brief Default Constructor (deleted)
      */
     NrMacSchedulerUeInfo() = delete;
 
     typedef std::function<uint32_t()> GetRbPerRbgFn;
 
     /**
-     * \brief Create a new UE representation
-     * \param rnti the RNTI of the UE
-     * \param beamId the BeamID of the UE (can be updated later)
+     * @brief Create a new UE representation
+     * @param rnti the RNTI of the UE
+     * @param beamId the BeamID of the UE (can be updated later)
      */
     NrMacSchedulerUeInfo(uint16_t rnti, BeamId beamId, const GetRbPerRbgFn& fn);
 
     /**
-     * \brief ~NrMacSchedulerUeInfo deconstructor
+     * @brief ~NrMacSchedulerUeInfo deconstructor
      */
     virtual ~NrMacSchedulerUeInfo();
 
     /**
-     * \brief GetDlRBG
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetDlRBG
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
-    static uint32_t& GetDlRBG(const UePtr& ue);
+    static std::vector<uint16_t>& GetDlRBG(const UePtr& ue);
     /**
-     * \brief GetUlRBG
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetUlRBG
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
-    static uint32_t& GetUlRBG(const UePtr& ue);
+    static std::vector<uint16_t>& GetUlRBG(const UePtr& ue);
     /**
-     * \brief GetDlSym
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetDlSym
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
-    static uint8_t& GetDlSym(const UePtr& ue);
+    static std::vector<uint8_t>& GetDlSym(const UePtr& ue);
     /**
-     * \brief GetUlSym
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetUlSym
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
-    static uint8_t& GetUlSym(const UePtr& ue);
+    static std::vector<uint8_t>& GetUlSym(const UePtr& ue);
+
+    enum class McsCsiSource
+    {
+        AVG_MCS,      //!< Estimate MCS based on the average MCS of allocated RBGs
+        AVG_SPEC_EFF, //!< Estimate MCS based on the average spectral efficiency of allocated RBGs
+        AVG_SINR,     //!< Estimate MCS based on the average SINR of allocated RBGs
+        WIDEBAND_MCS  //!< Wideband MCS
+    };
     /**
-     * \brief GetDlMcs
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief Get the downlink MCS, given by the wideband CQI, or
+     *        the sub-band CQIs of the currently allocated RBGs, if available
+     * @return downlink mcs
+     */
+    uint8_t GetDlMcs() const;
+    /**
+     * @brief GetDlMcs
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
     static uint8_t& GetDlMcs(const UePtr& ue);
     /**
-     * \brief GetUlMcs
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetUlMcs
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
     static uint8_t& GetUlMcs(const UePtr& ue);
     /**
-     * \brief GetDlTBS
-     * \param ue UE pointer from which obtain the value
-     * \return The TB size
+     * @brief GetDlTBS
+     * @param ue UE pointer from which obtain the value
+     * @return The TB size
      */
     static uint32_t& GetDlTBS(const UePtr& ue);
 
     /**
-     * \brief GetUlTBS
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetUlTBS
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
     static uint32_t& GetUlTBS(const UePtr& ue)
     {
@@ -124,43 +140,43 @@ class NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief GetDlLCG
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetDlLCG
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
     static std::unordered_map<uint8_t, LCGPtr>& GetDlLCG(const UePtr& ue);
     /**
-     * \brief GetUlLCG
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetUlLCG
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
     static std::unordered_map<uint8_t, LCGPtr>& GetUlLCG(const UePtr& ue);
     /**
-     * \brief GetDlHarqVector
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetDlHarqVector
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
     static NrMacHarqVector& GetDlHarqVector(const UePtr& ue);
     /**
-     * \brief GetUlHarqVector
-     * \param ue UE pointer from which obtain the value
-     * \return
+     * @brief GetUlHarqVector
+     * @param ue UE pointer from which obtain the value
+     * @return
      */
     static NrMacHarqVector& GetUlHarqVector(const UePtr& ue);
 
     /**
-     * \brief Prints information related to the QCI of a UEs LC
-     * \param ue UE for which we want to print the LC info
-     * \param lcgId The logical channel group ID
-     * \param lcId The logical channel ID
-     * \param qci The QCI of this LC
-     * \param P The priority associated to the QCI of this LC
-     * \return
+     * @brief Prints information related to the 5QI of a UEs LC
+     * @param ue UE for which we want to print the LC info
+     * @param lcgId The logical channel group ID
+     * @param lcId The logical channel ID
+     * @param fiveQi The 5QI of this LC
+     * @param P The priority associated to the 5QI of this LC
+     * @return
      */
     static void PrintLcInfo(uint16_t ue,
                             uint8_t lcgId,
                             uint8_t lcId,
-                            uint8_t cqi,
+                            uint8_t fiveQi,
                             uint8_t P,
                             uint8_t minP);
 
@@ -168,7 +184,7 @@ class NrMacSchedulerUeInfo
     typedef std::function<NrMacHarqVector&(const UePtr& ue)> GetHarqVectorFn;
 
     /**
-     * \brief Reset DL information
+     * @brief Reset DL information
      *
      * Called after each slot. It should reset all the information that are
      * slot-dependent.
@@ -176,7 +192,7 @@ class NrMacSchedulerUeInfo
     virtual void ResetDlSchedInfo();
 
     /**
-     * \brief Reset UL information
+     * @brief Reset UL information
      *
      * Called after each slot. It should reset all the information that are
      * slot-dependent.
@@ -184,14 +200,14 @@ class NrMacSchedulerUeInfo
     virtual void ResetUlSchedInfo();
 
     /**
-     * \brief Update DL metrics after resources have been assigned
+     * @brief Update DL metrics after resources have been assigned
      *
      * The amount of assigned resources is stored inside m_dlRBG by the scheduler.
      */
-    virtual void UpdateDlMetric(const Ptr<const NrAmc>& amc);
+    virtual void UpdateDlMetric();
 
     /**
-     * \brief ResetDlMetric
+     * @brief ResetDlMetric
      *
      * Called when the scheduler has assigned RBGs, but the sum does not arrive
      * to a TBS > 0. The assignation is, therefore, not transformed in DCI.
@@ -200,14 +216,14 @@ class NrMacSchedulerUeInfo
     virtual void ResetDlMetric();
 
     /**
-     * \brief Update UL metrics after resources have been assigned
+     * @brief Update UL metrics after resources have been assigned
      *
      * The amount of assigned resources is stored inside m_ulRBG by the scheduler.
      */
-    virtual void UpdateUlMetric(const Ptr<const NrAmc>& amc);
+    virtual void UpdateUlMetric();
 
     /**
-     * \brief ResetUlMetric
+     * @brief ResetUlMetric
      *
      * Called when the scheduler has assigned RBGs, but the sum does not arrive
      * to a TBS > 0. The assignation is, therefore, not transformed in DCI.
@@ -218,12 +234,69 @@ class NrMacSchedulerUeInfo
     uint32_t GetTotalDlBuffer() const;
 
     /**
-     * \brief Received CQI information
+     * @brief Get the total number of logical channels in the downlink LCG map.
+     *
+     * This method counts all logical channels contained in all downlink logical
+     * channel groups of the UE, regardless of whether they currently have data
+     * pending for transmission.
+     *
+     * @return The total number of downlink logical channels.
      */
-    struct CqiInfo
+    uint32_t GetTotalNumDlLc() const;
+
+    /**
+     * @brief Get the total number of logical channels in the uplink LCG map.
+     *
+     * This method counts all logical channels contained in all uplink logical
+     * channel groups of the UE, regardless of whether they currently have data
+     * pending for transmission.
+     *
+     * @return The total number of uplink logical channels.
+     */
+    uint32_t GetTotalNumUlLc() const;
+
+    /// Outer-loop link adaptation (OLLA) offset in MCS indices, subtracted from the CQI-derived DL
+    /// MCS. Raised on a NACK and lowered on an ACK of a first transmission so the initial BLER
+    /// converges to the target (NrMacSchedulerNs3 OllaEnabled / OllaBlerTarget / OllaStep).
+    double m_dlOllaOffset{0.0};
+    /**
+     * @brief Get the total number of active logical channels in the downlink LCG map.
+     *
+     * An active logical channel is a logical channel whose buffer occupancy is
+     * greater than zero. This method sums the active logical channels across all
+     * downlink logical channel groups of the UE.
+     *
+     * @return The total number of active downlink logical channels.
+     */
+    uint32_t GetTotalNumActiveDlLc() const;
+
+    /**
+     * @brief Get the total number of active logical channels in the uplink LCG map.
+     *
+     * An active logical channel is a logical channel whose buffer occupancy is
+     * greater than zero. This method sums the active logical channels across all
+     * uplink logical channel groups of the UE.
+     *
+     * @return The total number of active uplink logical channels.
+     */
+    uint32_t GetTotalNumActiveUlLc() const;
+
+    /**
+     * @brief Check whether the UE has pending downlink signaling traffic.
+     *
+     * Downlink signaling traffic is carried in logical channel group 0.
+     *
+     * @return true if DL LCG 0 has pending bytes, false otherwise.
+     */
+    bool HasPendingDlSignalingTraffic() const;
+
+    /**
+     * @brief Received CQI information
+     */
+    struct NR_EXPORT CqiInfo
     {
         /**
-         * \brief Type of CQI
+         * @brief Type of CQI
          */
         enum CqiType
         {
@@ -231,10 +304,11 @@ class NrMacSchedulerUeInfo
             SB           //!< Sub-band
         } m_cqiType{WB}; //!< CQI type
 
-        std::vector<double> m_sinr; //!< Vector of SINR for the entire band
-        uint8_t m_wbCqi{0};         //!< CQI reported value
-        uint32_t m_timer{0};        //!< Timer (in slot number).
-                                    //!< When the timer is 0, the value is discarded
+        std::vector<double> m_sinr;   //!< Vector of SINR for the entire band
+        uint8_t m_wbCqi{0};           //!< CQI reported value
+        std::vector<uint8_t> m_sbCqi; //!< Sub-band CQI reported values
+        uint32_t m_timer{0};          //!< Timer (in slot number).
+                                      //!< When the timer is 0, the value is discarded
     };
 
     void ReleaseLC(uint8_t lcid);
@@ -245,28 +319,50 @@ class NrMacSchedulerUeInfo
     std::unordered_map<uint8_t, LCGPtr> m_dlLCG; //!< DL LCG
     std::unordered_map<uint8_t, LCGPtr> m_ulLCG; //!< UL LCG
 
-    uint32_t m_dlMRBRetx{0}; //!< MRB assigned for retx. To update the name,
-                             //!< what is MRB is not defined
-    uint32_t m_ulMRBRetx{0}; //!< MRB assigned for retx. To update the name,
-                             //!< what is MRB is not defined
-    uint32_t m_dlRBG{0};     //!< DL Resource Block Group assigned in this slot
-    uint32_t m_ulRBG{0};     //!< UL Resource Block Group assigned in this slot
-    uint8_t m_dlSym{0};      //!< Number of (new data) symbols assigned in this slot.
-    uint8_t m_ulSym{0};      //!< Number of (new data) symbols assigned in this slot.
+    /**
+     * @brief Size of the uplink grant owed to this UE because it sent a scheduling request.
+     *
+     * A scheduling request carries neither a buffer size nor a logical channel group (3GPP
+     * TS 38.321, clause 5.4.4), so it must not be recorded as buffer in m_ulLCG: only a buffer
+     * status report tells the scheduler what the UE has and where (clause 5.4.5). It is instead
+     * kept here, as the size of the bootstrap grant the UE needs in order to send that buffer
+     * status report, and it makes the UE eligible for uplink scheduling without making any of
+     * its logical channels look active.
+     */
+    uint32_t m_srBytesPending{0};
+
+    uint32_t m_dlMRBRetx{0};       //!< MRB assigned for retx. To update the name,
+                                   //!< what is MRB is not defined
+    uint32_t m_ulMRBRetx{0};       //!< MRB assigned for retx. To update the name,
+                                   //!< what is MRB is not defined
+    std::vector<uint16_t> m_dlRBG; //!< DL Resource Block Group assigned in this slot
+    std::vector<uint16_t> m_ulRBG; //!< UL Resource Block Group assigned in this slot
+    std::vector<uint8_t> m_dlSym;  //!< Corresponding symbol of m_dlRBG in this slot
+    std::vector<uint8_t> m_ulSym;  //!< Corresponding symbol of m_ulRBG in this slot
 
     uint8_t m_dlMcs{0}; //!< DL MCS
-    /// Outer-loop link adaptation (OLLA) offset in MCS indices, subtracted from the CQI-derived DL
-    /// MCS. Raised on a NACK and lowered on an ACK of a first transmission so the initial BLER
-    /// converges to the target (NrMacSchedulerNs3 OllaEnabled / OllaBlerTarget / OllaStep).
-    double m_dlOllaOffset{0.0};
-    uint8_t m_ulMcs{0}; //!< UL MCS
+    std::optional<uint8_t>
+        m_fhMaxMcsAssignable; //!< Maximum DL MCS assignable due to FH limitations
+    uint8_t m_ulMcs{0};       //!< UL MCS
+
+    struct NR_EXPORT SbMcsInfo
+    {
+        uint8_t cqi;
+        uint8_t mcs;
+        float specEff;
+        float sinr;
+    };
+
+    std::vector<SbMcsInfo> m_dlSbMcsInfo; //!< Precomputed MCS, Spectral Efficiency and estimated
+                                          //!< SINR for a sub-band CQI associated with a RBG
+    std::vector<uint8_t> m_rbgToSb;       //!< Precomputed RBG to SB mapping
+
     /// ntn-patch 16: UL PRB limit from the last PHR (UINT32_MAX = none).
     uint32_t m_ulMaxRb{UINT32_MAX};
     /// ntn-patch 16: a PHR has been received from this UE.
     bool m_ulPhrReceived{false};
     /// ntn-patch 16: UL RBGs per symbol of the allocation being built (TDMA).
     uint32_t m_ulRbgPerSym{0};
-
     uint32_t m_dlTbSize{0}; //!< DL Transport Block Size, depends on MCS and RBG,
                             //!< updated in UpdateDlMetric()
     uint32_t m_ulTbSize{0}; //!< UL Transport Block Size, depends on MCS and RBG,
@@ -289,11 +385,16 @@ class NrMacSchedulerUeInfo
     /// holds until the first DL CQI of this UE in this cell.
     bool m_dlMcsUntilCsi{false};
 
+    // Settings from the scheduler, that affects MCS, TBS and throughput computation
+    Ptr<NrAmc> m_dlAmc;          //!< AMC instance of scheduler associated with DL
+    Ptr<NrAmc> m_ulAmc;          //!< AMC instance of scheduler associated with UL
+    McsCsiSource m_mcsCsiSource; //!< Source of MCS computation based on CSI feedback
+
   protected:
     /**
-     * \brief Retrieve the number of RB per RBG
+     * @brief Retrieve the number of RB per RBG
      *
-     * \return numRbPerRbg. Calls the MAC.
+     * @return numRbPerRbg. Calls the MAC.
      */
     uint32_t GetNumRbPerRbg() const;
 

@@ -61,7 +61,7 @@ Neighbors::GetExpireTime(Ipv4Address addr)
             return (i->m_expireTime - Simulator::Now());
         }
     }
-    return Seconds(0);
+    return Time(0);
 }
 
 void
@@ -87,15 +87,15 @@ Neighbors::Update(Ipv4Address addr, Time expire)
 }
 
 /**
- * \brief CloseNeighbor structure
+ * @brief CloseNeighbor structure
  */
 struct CloseNeighbor
 {
     /**
      * Check if the entry is expired
      *
-     * \param nb Neighbors::Neighbor entry
-     * \return true if expired, false otherwise
+     * @param nb Neighbors::Neighbor entry
+     * @return true if expired, false otherwise
      */
     bool operator()(const Neighbors::Neighbor& nb) const
     {

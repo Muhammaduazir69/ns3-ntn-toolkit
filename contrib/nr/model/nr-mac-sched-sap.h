@@ -8,25 +8,27 @@
 #include "nr-control-messages.h"
 #include "nr-phy-mac-common.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 class SpectrumModel;
 
 /**
- * \ingroup scheduler
- * \brief The SAP interface between MAC and scheduler
+ * @ingroup scheduler
+ * @brief The SAP interface between MAC and scheduler
  */
-class NrMacSchedSapProvider
+class NR_EXPORT NrMacSchedSapProvider
 {
   public:
     /**
-     * \brief constructor
+     * @brief constructor
      */
     NrMacSchedSapProvider() = default;
     /**
-     * \brief NrMacSchedSapProvider copy constructor (deleted)
-     * \param o other instance
+     * @brief NrMacSchedSapProvider copy constructor (deleted)
+     * @param o other instance
      */
     NrMacSchedSapProvider(const NrMacSchedSapProvider& o) = delete;
 
@@ -36,9 +38,9 @@ class NrMacSchedSapProvider
     virtual ~NrMacSchedSapProvider() = default;
 
     /**
-     * \brief RLC buffer status.
+     * @brief RLC buffer status.
      */
-    struct SchedDlRlcBufferReqParameters
+    struct NR_EXPORT SchedDlRlcBufferReqParameters
     {
         uint16_t m_rnti;                  //!< The RNTI identifying the UE.
         uint8_t m_logicalChannelIdentity; //!< The logical channel ID, range: 0..10
@@ -52,27 +54,27 @@ class NrMacSchedSapProvider
     };
 
     /**
-     * \brief The SchedDlCqiInfoReqParameters struct
+     * @brief The SchedDlCqiInfoReqParameters struct
      */
-    struct SchedDlCqiInfoReqParameters
+    struct NR_EXPORT SchedDlCqiInfoReqParameters
     {
         SfnSf m_sfnsf;                           //!< SfnSf
         std::vector<struct DlCqiInfo> m_cqiList; //!< cqi list
     };
 
     /**
-     * \brief The SchedUlMacCtrlInfoReqParameters struct
+     * @brief The SchedUlMacCtrlInfoReqParameters struct
      */
-    struct SchedUlMacCtrlInfoReqParameters
+    struct NR_EXPORT SchedUlMacCtrlInfoReqParameters
     {
         SfnSf m_sfnSf;                                //!< SfnSf
         std::vector<struct MacCeElement> m_macCeList; //!< MacCeElement list
     };
 
     /**
-     * \brief The SchedUlCqiInfoReqParameters struct
+     * @brief The SchedUlCqiInfoReqParameters struct
      */
-    struct SchedUlCqiInfoReqParameters
+    struct NR_EXPORT SchedUlCqiInfoReqParameters
     {
         SfnSf m_sfnSf;            //!< SfnSf
         uint8_t m_symStart;       //!< Sym start of the transmission to which this CQI refers to
@@ -80,9 +82,9 @@ class NrMacSchedSapProvider
     };
 
     /**
-     * \brief UL HARQ information to be used when scheduling UL data.
+     * @brief UL HARQ information to be used when scheduling UL data.
      */
-    struct SchedUlTriggerReqParameters
+    struct NR_EXPORT SchedUlTriggerReqParameters
     {
         SfnSf m_snfSf;                                   //!< SfnSf
         std::vector<struct UlHarqInfo> m_ulHarqInfoList; //!< UL HARQ info list
@@ -90,9 +92,9 @@ class NrMacSchedSapProvider
     };
 
     /**
-     * \brief DL HARQ information to be used when scheduling UL data.
+     * @brief DL HARQ information to be used when scheduling UL data.
      */
-    struct SchedDlTriggerReqParameters
+    struct NR_EXPORT SchedDlTriggerReqParameters
     {
         SfnSf m_snfSf;                                   //!< SfnSf
         std::vector<struct DlHarqInfo> m_dlHarqInfoList; //!< DL HARQ info list
@@ -100,13 +102,13 @@ class NrMacSchedSapProvider
     };
 
     /**
-     * \brief SR received from MAC, to pass to schedulers
+     * @brief SR received from MAC, to pass to schedulers
      *
      * Scheduling request information.
      *
      * http://www.eurecom.fr/~kaltenbe/fapi-2.0/structSchedUlSrInfoReqParameters.html
      */
-    struct SchedUlSrInfoReqParameters
+    struct NR_EXPORT SchedUlSrInfoReqParameters
     {
         SfnSf m_snfSf;                  //!< SnfSf in which the sr where received
         std::vector<uint16_t> m_srList; //!< List of RNTI which asked for a SR
@@ -116,7 +118,7 @@ class NrMacSchedSapProvider
      * Parameters of the SCHED_DL_RACH_INFO_REQ primitive.
      * See section 4.2.5 for a detailed description of the parameters.
      */
-    struct SchedDlRachInfoReqParameters
+    struct NR_EXPORT SchedDlRachInfoReqParameters
     {
         uint16_t m_sfnSf;                                     //!< sfn SF
         std::vector<struct nr::RachListElement_s> m_rachList; //!< RACH list
@@ -130,22 +132,22 @@ class NrMacSchedSapProvider
     virtual void SchedDlCqiInfoReq(const SchedDlCqiInfoReqParameters& params) = 0;
 
     /**
-     * \brief Starts the DL MAC scheduler for this subframe.
-     * \param params      DL HARQ information
+     * @brief Starts the DL MAC scheduler for this subframe.
+     * @param params      DL HARQ information
      */
     virtual void SchedDlTriggerReq(const struct SchedDlTriggerReqParameters& params) = 0;
 
     virtual void SchedUlCqiInfoReq(const struct SchedUlCqiInfoReqParameters& params) = 0;
 
     /**
-     * \brief Starts the UL MAC scheduler for this subframe.
-     * \param params      UL HARQ information
+     * @brief Starts the UL MAC scheduler for this subframe.
+     * @param params      UL HARQ information
      */
     virtual void SchedUlTriggerReq(const struct SchedUlTriggerReqParameters& params) = 0;
 
     /**
-     * \brief Provides scheduling request reception information to the scheduler.
-     * \param params Scheduling request information.
+     * @brief Provides scheduling request reception information to the scheduler.
+     * @param params Scheduling request information.
      */
     virtual void SchedUlSrInfoReq(const SchedUlSrInfoReqParameters& params) = 0;
 
@@ -154,47 +156,51 @@ class NrMacSchedSapProvider
     virtual void SchedSetMcs(uint32_t mcs) = 0;
 
     /**
-     * \brief SCHED_DL_RACH_INFO_REQ
+     * @brief SCHED_DL_RACH_INFO_REQ
      *
-     * \param params SchedDlRachInfoReqParameters
+     * @param params SchedDlRachInfoReqParameters
      */
     virtual void SchedDlRachInfoReq(const SchedDlRachInfoReqParameters& params) = 0;
 
     /**
-     * \brief Retrieve the number of DL ctrl symbols configured in the scheduler
-     * \return the number of DL ctrl symbols
+     * @brief Retrieve the number of DL ctrl symbols configured in the scheduler
+     * @return the number of DL ctrl symbols
      */
     virtual uint8_t GetDlCtrlSyms() const = 0;
 
     /**
-     * \brief Retrieve the number of UL ctrl symbols configured in the scheduler
-     * \return the number of UL ctrl symbols
+     * @brief Retrieve the number of UL ctrl symbols configured in the scheduler
+     * @return the number of UL ctrl symbols
      */
     virtual uint8_t GetUlCtrlSyms() const = 0;
+
+    virtual bool IsHarqReTxEnable() const = 0;
+
+    virtual bool IsMaxSrsReached() const = 0;
 
   private:
 };
 
 /**
- * \ingroup scheduler
- * \brief The Interface between Scheduler and MAC
+ * @ingroup scheduler
+ * @brief The Interface between Scheduler and MAC
  */
-class NrMacSchedSapUser
+class NR_EXPORT NrMacSchedSapUser
 {
   public:
     /**
-     * \brief ~NrMacSchedSapUser
+     * @brief ~NrMacSchedSapUser
      */
     virtual ~NrMacSchedSapUser() = default;
 
     /**
-     * \brief The SchedConfigIndParameters struct
+     * @brief The SchedConfigIndParameters struct
      */
-    struct SchedConfigIndParameters
+    struct NR_EXPORT SchedConfigIndParameters
     {
         /**
-         * \brief SchedConfigIndParameters
-         * \param sfnSf sfnSf
+         * @brief SchedConfigIndParameters
+         * @param sfnSf sfnSf
          */
         SchedConfigIndParameters(const SfnSf sfnSf)
             : m_sfnSf(sfnSf),
@@ -207,55 +213,55 @@ class NrMacSchedSapUser
     };
 
     /**
-     * \brief Install a scheduling decision
-     * \param params the scheduling decision
+     * @brief Install a scheduling decision
+     * @param params the scheduling decision
      */
     virtual void SchedConfigInd(const struct SchedConfigIndParameters& params) = 0;
 
     /**
-     * \brief Get the SpectrumModel
-     * \return the spectrum model
+     * @brief Get the SpectrumModel
+     * @return the spectrum model
      */
     virtual Ptr<const SpectrumModel> GetSpectrumModel() const = 0;
 
     /**
-     * \brief Get the number of RB per RBG
-     * \return Number of RB per RBG
+     * @brief Get the number of RB per RBG
+     * @return Number of RB per RBG
      */
     virtual uint32_t GetNumRbPerRbg() const = 0;
 
     /**
-     * \brief Get the number of HARQ process
-     * \return the number of HARQ processes
+     * @brief Get the number of HARQ process
+     * @return the number of HARQ processes
      */
     virtual uint8_t GetNumHarqProcess() const = 0;
 
     /**
-     * \brief Get the BWP ID
-     * \return the BWP ID
+     * @brief Get the BWP ID
+     * @return the BWP ID
      */
     virtual uint16_t GetBwpId() const = 0;
 
     /**
-     * \brief Get the Cell ID
-     * \return the Cell ID
+     * @brief Get the Cell ID
+     * @return the Cell ID
      */
     virtual uint16_t GetCellId() const = 0;
 
     /**
-     * \brief Get the Symbol per slot
-     * \return the symbol per slot
+     * @brief Get the Symbol per slot
+     * @return the symbol per slot
      */
     virtual uint32_t GetSymbolsPerSlot() const = 0;
 
     /**
-     * \brief Get the slot period
-     * \return the slot period
+     * @brief Get the slot period
+     * @return the slot period
      */
     virtual Time GetSlotPeriod() const = 0;
 
     /**
-     * \brief Build RAR list from allocations and assign preamble IDs
+     * @brief Build RAR list from allocations and assign preamble IDs
      * @param slotAllocInfo Allocations
      */
     virtual void BuildRarList(SlotAllocInfo& slotAllocInfo) = 0;

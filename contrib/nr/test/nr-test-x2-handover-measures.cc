@@ -5,25 +5,41 @@
 // Author: Nicola Baldo <nbaldo@cttc.es>
 //         Manuel Requena <manuel.requena@cttc.es>/
 
-#include <ns3/bulk-send-helper.h>
-#include <ns3/core-module.h>
-#include <ns3/internet-module.h>
-#include <ns3/mobility-module.h>
-#include <ns3/network-module.h>
-#include <ns3/nr-module.h>
-#include <ns3/packet-sink-helper.h>
-#include <ns3/packet-sink.h>
-#include <ns3/point-to-point-module.h>
-#include <ns3/udp-client-server-helper.h>
+/**
+ * @ingroup test
+ * @file nr-test-x2-handover-measures.cc
+ *
+ * @brief Test suite `nr-x2-handover-measures`: measurement-driven X2 handovers along a row of
+ * gNBs. Each case deploys two to four gNBs on a line and one UE crossing them at 150 m/s with
+ * dedicated UDP or TCP bearers, using NrA2A4RsrpHandoverAlgorithm or NrA3RsrpHandoverAlgorithm to
+ * trigger handovers from UE measurement reports. A list of checkpoint events states which gNB
+ * must be serving the UE during each time window; at every checkpoint the test verifies
+ * consistent UE/gNB RRC state, cell identity, ARFCNs, bandwidths and bearer setup, and that each
+ * bearer delivered at least half the bytes expected in the preceding stats interval. Cases span
+ * both handover algorithms, ideal and real RRC, UDP and TCP traffic, and several topologies.
+ */
+
+#include "ns3/bulk-send-helper.h"
+#include "ns3/core-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/isotropic-antenna-model.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/nr-module.h"
+#include "ns3/packet-sink-helper.h"
+#include "ns3/packet-sink.h"
+#include "ns3/point-to-point-module.h"
+#include "ns3/rng-seed-manager.h"
+#include "ns3/udp-client-server-helper.h"
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("NrX2HandoverMeasuresTest");
 
 /**
- * \ingroup nr-test
+ * @ingroup nr-test
  *
- * \brief CheckPointEvent structure
+ * @brief CheckPointEvent structure
  */
 struct CheckPointEvent
 {
@@ -36,11 +52,11 @@ struct CheckPointEvent
     /**
      *  Constructor
      *
-     * \param start the start time
-     * \param stop the stop time
-     * \param interval the interval time
-     * \param ueIndex the UE index
-     * \param gnbIndex the gNB index
+     * @param start the start time
+     * @param stop the stop time
+     * @param interval the interval time
+     * @param ueIndex the UE index
+     * @param gnbIndex the gNB index
      */
     CheckPointEvent(Time start, Time stop, Time interval, uint32_t ueIndex, uint32_t gnbIndex)
         : checkStartTime(start),
@@ -53,9 +69,9 @@ struct CheckPointEvent
 };
 
 /**
- * \ingroup lte-test
+ * @ingroup nr-test
  *
- * \brief Test different X2 handover measures and algorithms, e.g. NrA2A4RsrqHandoverAlgorithm and
+ * @brief Test different X2 handover measures and algorithms, e.g. NrA2A4RsrpHandoverAlgorithm and
  * NrA3RsrpHandoverAlgorithm. Test defines different handover parameters and scenario
  * configurations.
  */
@@ -65,17 +81,17 @@ class NrX2HandoverMeasuresTestCase : public TestCase
     /**
      * Constructor.
      *
-     * \param nGnbs number of gNBs in the test
-     * \param nUes number of UEs in the test
-     * \param nDedicatedBearers number of bearers to be activated per UE
-     * \param checkPointEventList list of check point events
-     * \param checkPointEventListName name of check point event list
-     * \param useUdp true if UDP is to be used, false if TCP is to be used
-     * \param schedulerType type of scheduler to be used (e.g. "ns3::NrMacSchedulerTdmaPF")
-     * \param handoverAlgorithmType type of handover algorithm to be used (e.g.
+     * @param nGnbs number of gNBs in the test
+     * @param nUes number of UEs in the test
+     * @param nDedicatedBearers number of bearers to be activated per UE
+     * @param checkPointEventList list of check point events
+     * @param checkPointEventListName name of check point event list
+     * @param useUdp true if UDP is to be used, false if TCP is to be used
+     * @param schedulerType type of scheduler to be used (e.g. "ns3::NrMacSchedulerTdmaPF")
+     * @param handoverAlgorithmType type of handover algorithm to be used (e.g.
      * "ns3::NrA3RsrpHandoverAlgorithm")
-     * \param admitHo true if Ho is admitted, false if it is not admitted
-     * \param useIdealRrc true if ideal RRC is to be used, false if real RRC is to be used
+     * @param admitHo true if Ho is admitted, false if it is not admitted
+     * @param useIdealRrc true if ideal RRC is to be used, false if real RRC is to be used
      */
     NrX2HandoverMeasuresTestCase(uint32_t nGnbs,
                                  uint32_t nUes,
@@ -91,17 +107,17 @@ class NrX2HandoverMeasuresTestCase : public TestCase
   private:
     /**
      * Build name string
-     * \param nGnbs number of gNBs in the test
-     * \param nUes number of UEs in the test
-     * \param nDedicatedBearers number of bearers to be activated per UE
-     * \param checkPointEventListName name of check point event list
-     * \param useUdp true if UDP is to be used, false if TCP is to be used
-     * \param schedulerType the scheduler type
-     * \param handoverAlgorithmType type of handover algorithm to be used (e.g.
+     * @param nGnbs number of gNBs in the test
+     * @param nUes number of UEs in the test
+     * @param nDedicatedBearers number of bearers to be activated per UE
+     * @param checkPointEventListName name of check point event list
+     * @param useUdp true if UDP is to be used, false if TCP is to be used
+     * @param schedulerType the scheduler type
+     * @param handoverAlgorithmType type of handover algorithm to be used (e.g.
      * "ns3::NrA3RsrpHandoverAlgorithm")
-     * \param admitHo true if Ho is admitted, false if it is not admitted
-     * \param useIdealRrc true if the ideal RRC should be used
-     * \returns the name string
+     * @param admitHo true if Ho is admitted, false if it is not admitted
+     * @param useIdealRrc true if the ideal RRC should be used
+     * @returns the name string
      */
     static std::string BuildNameString(uint32_t nGnbs,
                                        uint32_t nUes,
@@ -115,8 +131,8 @@ class NrX2HandoverMeasuresTestCase : public TestCase
     void DoRun() override;
     /**
      * Check connected function
-     * \param ueDevice the UE device
-     * \param gnbDevice the gNB device
+     * @param ueDevice the UE device
+     * @param gnbDevice the gNB device
      */
     void CheckConnected(Ptr<NetDevice> ueDevice, Ptr<NetDevice> gnbDevice);
 
@@ -135,9 +151,9 @@ class NrX2HandoverMeasuresTestCase : public TestCase
     Ptr<NrPointToPointEpcHelper> m_epcHelper;         ///< EPC helper
 
     /**
-     * \ingroup lte-test
+     * @ingroup nr-test
      *
-     * \brief BearerData structure
+     * @brief BearerData structure
      */
     struct BearerData
     {
@@ -149,9 +165,9 @@ class NrX2HandoverMeasuresTestCase : public TestCase
     };
 
     /**
-     * \ingroup lte-test
+     * @ingroup nr-test
      *
-     * \brief UeData structure
+     * @brief UeData structure
      */
     struct UeData
     {
@@ -160,13 +176,13 @@ class NrX2HandoverMeasuresTestCase : public TestCase
     };
 
     /**
-     * \brief Save stats  function
-     * \param ueIndex the index of the UE
+     * @brief Save stats  function
+     * @param ueIndex the index of the UE
      */
     void SaveStats(uint32_t ueIndex);
     /**
-     * \brief Check stats  function
-     * \param ueIndex the index of the UE
+     * @brief Check stats  function
+     * @param ueIndex the index of the UE
      */
     void CheckStats(uint32_t ueIndex);
 
@@ -266,16 +282,17 @@ NrX2HandoverMeasuresTestCase::DoRun()
     // Disable Uplink Power Control
     Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
 
-    int64_t stream = 1;
+    RngSeedManager::SetSeed(1);
+    RngSeedManager::SetRun(1);
 
     m_nrHelper = CreateObject<NrHelper>();
     m_nrHelper->SetAttribute("UseIdealRrc", BooleanValue(m_useIdealRrc));
     m_nrHelper->SetSchedulerTypeId(TypeId::LookupByName(m_schedulerType));
 
-    if (m_handoverAlgorithmType == "ns3::NrA2A4RsrqHandoverAlgorithm")
+    if (m_handoverAlgorithmType == "ns3::NrA2A4RsrpHandoverAlgorithm")
     {
-        m_nrHelper->SetHandoverAlgorithmType("ns3::NrA2A4RsrqHandoverAlgorithm");
-        m_nrHelper->SetHandoverAlgorithmAttribute("ServingCellThreshold", UintegerValue(30));
+        m_nrHelper->SetHandoverAlgorithmType("ns3::NrA2A4RsrpHandoverAlgorithm");
+        m_nrHelper->SetHandoverAlgorithmAttribute("ServingCellThreshold", UintegerValue(53));
         m_nrHelper->SetHandoverAlgorithmAttribute("NeighbourCellOffset", UintegerValue(1));
     }
     else if (m_handoverAlgorithmType == "ns3::NrA3RsrpHandoverAlgorithm")
@@ -328,12 +345,27 @@ NrX2HandoverMeasuresTestCase::DoRun()
             Vector(speed, 0, 0));
     }
 
-    auto bandwidthAndBWPPair =
-        m_nrHelper->CreateBandwidthParts({{2.8e9, 5e6, 1, BandwidthPartInfo::UMa}});
+    // Override the default antenna model with IsotropicAntennaModel
+    m_nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+    m_nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+
+    // Configure Friis propagation loss model before assign it to band
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
+
+    // Create and set the channel with the band
+    CcBwpCreator ccBwpCreator;
+    CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 10e6, static_cast<uint8_t>(1));
+    OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+    channelHelper->AssignChannelsToBands({band});
+
+    // Create bandwidth part from band
+    BandwidthPartInfoPtrVector allBwps;
+    allBwps = CcBwpCreator::GetAllBwps({band});
 
     NetDeviceContainer gnbDevices;
-    gnbDevices = m_nrHelper->InstallGnbDevice(gnbNodes, bandwidthAndBWPPair.second);
-    stream += m_nrHelper->AssignStreams(gnbDevices, stream);
+    gnbDevices = m_nrHelper->InstallGnbDevice(gnbNodes, allBwps);
+    m_nrHelper->AssignStreams({.gnbDevs = gnbDevices});
     for (auto it = gnbDevices.Begin(); it != gnbDevices.End(); ++it)
     {
         Ptr<NrGnbRrc> gnbRrc = (*it)->GetObject<NrGnbNetDevice>()->GetRrc();
@@ -341,11 +373,8 @@ NrX2HandoverMeasuresTestCase::DoRun()
     }
 
     NetDeviceContainer ueDevices;
-    ueDevices = m_nrHelper->InstallUeDevice(ueNodes, bandwidthAndBWPPair.second);
-    stream += m_nrHelper->AssignStreams(ueDevices, stream);
-
-    m_nrHelper->UpdateDeviceConfigs(gnbDevices);
-    m_nrHelper->UpdateDeviceConfigs(ueDevices);
+    ueDevices = m_nrHelper->InstallUeDevice(ueNodes, allBwps);
+    m_nrHelper->AssignStreams({.ueDevs = ueDevices});
 
     Ipv4Address remoteHostAddr;
     Ipv4StaticRoutingHelper ipv4RoutingHelper;
@@ -373,7 +402,6 @@ NrX2HandoverMeasuresTestCase::DoRun()
         // in this container, interface 0 is the pgw, 1 is the remoteHost
         remoteHostAddr = internetIpIfaces.GetAddress(1);
 
-        Ipv4StaticRoutingHelper ipv4RoutingHelper;
         Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
             ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
         remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"),
@@ -383,6 +411,13 @@ NrX2HandoverMeasuresTestCase::DoRun()
         // Install the IP stack on the UEs
         internet.Install(ueNodes);
         ueIpIfaces = m_epcHelper->AssignUeIpv4Address(NetDeviceContainer(ueDevices));
+
+        m_nrHelper->AssignStreams({.assignEpc = true,
+                                   .remoteHostNodes = remoteHostContainer,
+                                   .ueNodes = ueNodes,
+                                   .gnbNodes = gnbNodes,
+                                   .ueNodeStream = 3000,
+                                   .gnbNodeStream = 2000});
     }
 
     // attachment (needs to be done after IP stack configuration)
@@ -408,16 +443,11 @@ NrX2HandoverMeasuresTestCase::DoRun()
         Ptr<UniformRandomVariable> startTimeSeconds = CreateObject<UniformRandomVariable>();
         startTimeSeconds->SetAttribute("Min", DoubleValue(0));
         startTimeSeconds->SetAttribute("Max", DoubleValue(0.010));
-        startTimeSeconds->SetStream(stream++);
+        startTimeSeconds->SetStream(7000);
 
         for (uint32_t u = 0; u < ueNodes.GetN(); ++u)
         {
             Ptr<Node> ue = ueNodes.Get(u);
-            // Set the default gateway for the UE
-            Ptr<Ipv4StaticRouting> ueStaticRouting =
-                ipv4RoutingHelper.GetStaticRouting(ue->GetObject<Ipv4>());
-            ueStaticRouting->SetDefaultRoute(m_epcHelper->GetUeDefaultGatewayAddress(), 1);
-
             UeData ueData;
 
             for (uint32_t b = 0; b < m_nDedicatedBearers; ++b)
@@ -485,26 +515,26 @@ NrX2HandoverMeasuresTestCase::DoRun()
                     }
                 } // end if (useUdp)
 
-                Ptr<NrEpcTft> tft = Create<NrEpcTft>();
+                Ptr<NrQosRule> rule = Create<NrQosRule>();
                 if (epcDl)
                 {
-                    NrEpcTft::PacketFilter dlpf;
+                    NrQosRule::PacketFilter dlpf;
                     dlpf.localPortStart = dlPort;
                     dlpf.localPortEnd = dlPort;
-                    tft->Add(dlpf);
+                    rule->Add(dlpf);
                 }
                 if (epcUl)
                 {
-                    NrEpcTft::PacketFilter ulpf;
+                    NrQosRule::PacketFilter ulpf;
                     ulpf.remotePortStart = ulPort;
                     ulpf.remotePortEnd = ulPort;
-                    tft->Add(ulpf);
+                    rule->Add(ulpf);
                 }
 
                 if (epcDl || epcUl)
                 {
-                    NrEpsBearer bearer(NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT);
-                    m_nrHelper->ActivateDedicatedEpsBearer(ueDevices.Get(u), bearer, tft);
+                    NrQosFlow flow(NrQosFlow::NGBR_VIDEO_TCP_DEFAULT);
+                    m_nrHelper->ActivateDedicatedQosFlow(ueDevices.Get(u), flow, rule);
                 }
                 Time startTime = Seconds(startTimeSeconds->GetValue());
                 serverApps.Start(startTime);
@@ -525,8 +555,8 @@ NrX2HandoverMeasuresTestCase::DoRun()
             Ptr<NetDevice> ueDev = ueDevices.Get(u);
             for (uint32_t b = 0; b < m_nDedicatedBearers; ++b)
             {
-                NrEpsBearer::Qci q = NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT;
-                NrEpsBearer bearer(q);
+                NrQosFlow::FiveQi q = NrQosFlow::NGBR_VIDEO_TCP_DEFAULT;
+                NrQosFlow bearer(q);
                 m_nrHelper->ActivateDataRadioBearer(ueDev, bearer);
             }
         }
@@ -591,44 +621,59 @@ NrX2HandoverMeasuresTestCase::CheckConnected(Ptr<NetDevice> ueDevice, Ptr<NetDev
 {
     NS_LOG_FUNCTION(ueDevice << gnbDevice);
 
-    Ptr<NrUeNetDevice> ueLteDevice = ueDevice->GetObject<NrUeNetDevice>();
-    Ptr<NrUeRrc> ueRrc = ueLteDevice->GetRrc();
+    Ptr<NrUeNetDevice> nrUeDevice = ueDevice->GetObject<NrUeNetDevice>();
+    Ptr<NrUeRrc> ueRrc = nrUeDevice->GetRrc();
     NS_TEST_ASSERT_MSG_EQ(ueRrc->GetState(), NrUeRrc::CONNECTED_NORMALLY, "Wrong NrUeRrc state!");
-
-    Ptr<NrGnbNetDevice> gnbLteDevice = gnbDevice->GetObject<NrGnbNetDevice>();
-    Ptr<NrGnbRrc> gnbRrc = gnbLteDevice->GetRrc();
     uint16_t rnti = ueRrc->GetRnti();
-    Ptr<NrUeManager> NrUeManager = gnbRrc->GetUeManager(rnti);
-    NS_TEST_ASSERT_MSG_NE(NrUeManager, nullptr, "RNTI " << rnti << " not found in gNB");
 
-    NrUeManager::State ueManagerState = NrUeManager->GetState();
+    Ptr<NrGnbNetDevice> nrGnbDevice = gnbDevice->GetObject<NrGnbNetDevice>();
+    NS_TEST_ASSERT_MSG_EQ(ueRrc->GetCellId(),
+                          nrGnbDevice->GetCellId(),
+                          "IMSI " << ueRrc->GetImsi() << " connected to CellId "
+                                  << ueRrc->GetCellId() << " instead of expected "
+                                  << nrGnbDevice->GetCellId());
+    Ptr<NrGnbRrc> gnbRrc = nrGnbDevice->GetRrc();
+    Ptr<NrUeManager> nrUeManager = gnbRrc->GetUeManager(rnti);
+    NS_TEST_ASSERT_MSG_NE(nrUeManager, nullptr, "RNTI " << rnti << " not found in gNB");
+
+    NrUeManager::State ueManagerState = nrUeManager->GetState();
     NS_TEST_ASSERT_MSG_EQ(ueManagerState,
                           NrUeManager::CONNECTED_NORMALLY,
                           "Wrong NrUeManager state!");
     NS_ASSERT_MSG(ueManagerState == NrUeManager::CONNECTED_NORMALLY, "Wrong NrUeManager state!");
 
-    uint16_t ueCellId = ueRrc->GetCellId();
-    uint16_t gnbCellId = gnbLteDevice->GetCellId();
-    uint8_t ueDlBandwidth = ueRrc->GetDlBandwidth();
-    uint8_t gnbDlBandwidth = gnbLteDevice->GetCellIdDlBandwidth(gnbCellId);
-    uint8_t ueUlBandwidth = ueRrc->GetUlBandwidth();
-    uint8_t gnbUlBandwidth = gnbLteDevice->GetCellIdUlBandwidth(gnbCellId);
-    uint8_t ueDlEarfcn = ueRrc->GetDlEarfcn();
-    uint8_t gnbDlEarfcn = gnbLteDevice->GetCellIdDlEarfcn(gnbCellId);
-    uint8_t ueUlEarfcn = ueRrc->GetUlEarfcn();
-    uint8_t gnbUlEarfcn = gnbLteDevice->GetCellIdUlEarfcn(gnbCellId);
-    uint64_t ueImsi = ueLteDevice->GetImsi();
-    uint64_t gnbImsi = NrUeManager->GetImsi();
+    uint64_t ueImsi = nrUeDevice->GetImsi();
+    uint64_t gnbImsi = nrUeManager->GetImsi();
 
     NS_TEST_ASSERT_MSG_EQ(ueImsi, gnbImsi, "inconsistent IMSI");
-    NS_TEST_ASSERT_MSG_EQ(ueCellId, gnbCellId, "inconsistent CellId");
+
+    uint16_t ueCellId = ueRrc->GetCellId();
+    uint16_t gnbCellId = nrGnbDevice->GetCellId();
+    NS_TEST_ASSERT_MSG_EQ(ueCellId, gnbCellId, "gNB does not contain UE cellId");
+
+    // Verifying other attributes on both sides.
+    uint16_t ueDlBwp = ueRrc->GetPrimaryDlIndex();
+    uint16_t ueUlBwp = ueRrc->GetPrimaryUlIndex();
+    uint32_t ueDlArfcn = nrUeDevice->GetBwpArfcn(ueDlBwp);
+    uint32_t ueUlArfcn = nrUeDevice->GetBwpArfcn(ueUlBwp);
+    uint8_t ueDlBandwidth = ueRrc->GetDlBandwidth();
+    uint8_t ueUlBandwidth = ueRrc->GetUlBandwidth();
+
+    uint16_t gnbDlBwp = nrGnbDevice->GetArfcnBwpId(ueDlArfcn);
+    uint16_t gnbUlBwp = nrGnbDevice->GetArfcnBwpId(ueUlArfcn);
+    uint8_t gnbDlBandwidth = nrGnbDevice->GetBwpDlBandwidth(gnbDlBwp);
+    uint8_t gnbUlBandwidth = nrGnbDevice->GetBwpUlBandwidth(gnbUlBwp);
+    uint32_t gnbDlArfcn = nrGnbDevice->GetBwpArfcn(gnbDlBwp);
+    uint32_t gnbUlArfcn = nrGnbDevice->GetBwpArfcn(gnbUlBwp);
+
+    NS_TEST_ASSERT_MSG_EQ(gnbRrc->HasCellId(ueCellId), true, "inconsistent CellId");
     NS_TEST_ASSERT_MSG_EQ(ueDlBandwidth, gnbDlBandwidth, "inconsistent DlBandwidth");
     NS_TEST_ASSERT_MSG_EQ(ueUlBandwidth, gnbUlBandwidth, "inconsistent UlBandwidth");
-    NS_TEST_ASSERT_MSG_EQ(ueDlEarfcn, gnbDlEarfcn, "inconsistent DlEarfcn");
-    NS_TEST_ASSERT_MSG_EQ(ueUlEarfcn, gnbUlEarfcn, "inconsistent UlEarfcn");
+    NS_TEST_ASSERT_MSG_EQ(ueDlArfcn, gnbDlArfcn, "inconsistent DlArfcn");
+    NS_TEST_ASSERT_MSG_EQ(ueUlArfcn, gnbUlArfcn, "inconsistent UlArfcn");
 
     ObjectMapValue gnbDataRadioBearerMapValue;
-    NrUeManager->GetAttribute("DataRadioBearerMap", gnbDataRadioBearerMapValue);
+    nrUeManager->GetAttribute("DataRadioBearerMap", gnbDataRadioBearerMapValue);
     NS_TEST_ASSERT_MSG_EQ(gnbDataRadioBearerMapValue.GetN(),
                           m_nDedicatedBearers + 1,
                           "wrong num bearers at gNB");
@@ -648,14 +693,14 @@ NrX2HandoverMeasuresTestCase::CheckConnected(Ptr<NetDevice> ueDevice, Ptr<NetDev
             gnbBearerIt->second->GetObject<NrDataRadioBearerInfo>();
         Ptr<NrDataRadioBearerInfo> ueDrbInfo =
             ueBearerIt->second->GetObject<NrDataRadioBearerInfo>();
-        // NS_TEST_ASSERT_MSG_EQ (gnbDrbInfo->m_epsBearer, ueDrbInfo->m_epsBearer, "NrEpsBearer
+        // NS_TEST_ASSERT_MSG_EQ (gnbDrbInfo->m_qosFlow, ueDrbInfo->m_qosFlow, "NrQosFlow
         // differs");
-        NS_TEST_ASSERT_MSG_EQ((uint32_t)gnbDrbInfo->m_epsBearerIdentity,
-                              (uint32_t)ueDrbInfo->m_epsBearerIdentity,
-                              "epsBearerIdentity differs");
+        NS_TEST_ASSERT_MSG_EQ((uint32_t)gnbDrbInfo->m_qosFlowIdentity,
+                              (uint32_t)ueDrbInfo->m_qosFlowIdentity,
+                              "qosFlowIdentity differs");
         NS_TEST_ASSERT_MSG_EQ((uint32_t)gnbDrbInfo->m_drbIdentity,
                               (uint32_t)ueDrbInfo->m_drbIdentity,
-                              "drbIdentity differs");
+                              "qosFlowIdentity differs");
         // NS_TEST_ASSERT_MSG_EQ (gnbDrbInfo->m_rlcConfig, ueDrbInfo->m_rlcConfig, "rlcConfig
         // differs");
         NS_TEST_ASSERT_MSG_EQ((uint32_t)gnbDrbInfo->m_logicalChannelIdentity,
@@ -734,9 +779,9 @@ NrX2HandoverMeasuresTestCase::CheckStats(uint32_t ueIndex)
 }
 
 /**
- * \ingroup lte-test
+ * @ingroup nr-test
  *
- * \brief NR X2 Handover Measures Test Suite
+ * @brief NR X2 Handover Measures Test Suite
  */
 class NrX2HandoverMeasuresTestSuite : public TestSuite
 {
@@ -771,7 +816,7 @@ NrX2HandoverMeasuresTestSuite::NrX2HandoverMeasuresTestSuite()
     };
 
     std::string sched = "ns3::NrMacSchedulerTdmaPF";
-    std::string ho = "ns3::NrA2A4RsrqHandoverAlgorithm";
+    std::string ho = "ns3::NrA2A4RsrpHandoverAlgorithm";
     for (auto useIdealRrc : {true, false})
     {
         // nGnbs, nUes, nDBearers, celist, name, useUdp, sched, ho, admitHo, idealRrc
@@ -997,7 +1042,7 @@ NrX2HandoverMeasuresTestSuite::NrX2HandoverMeasuresTestSuite()
 } // end of NrX2HandoverMeasuresTestSuite ()
 
 /**
- * \ingroup lte-test
+ * @ingroup nr-test
  * Static variable for test initialization
  */
 static NrX2HandoverMeasuresTestSuite g_NrX2HandoverMeasuresTestSuiteInstance;

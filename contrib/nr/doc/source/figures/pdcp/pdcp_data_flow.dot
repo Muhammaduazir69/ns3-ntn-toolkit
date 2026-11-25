@@ -1,0 +1,17 @@
+digraph NrPdcpDataFlow {
+
+    rankdir=TB;
+    node [shape="box", style="filled", fillcolor="lightblue", fontname="Helvetica", fontsize=10];
+    edge [fontname="Helvetica", fontsize=9];
+
+    upper [shape="ellipse", fillcolor="white", label="RRC / EPC bearer"]
+    lower [shape="ellipse", fillcolor="white", label="RLC entity"]
+
+    tx [label="TX: DoTransmitPdcpSdu\ntag NrPdcpTag(now); SN = m_txSequenceNumber++ (mod 4096);\nadd 2-byte header (D/C=DATA, 12-bit SN); fire TxPDU trace"]
+    rx [label="RX: DoReceivePdu\nNrPdcpTag -> delay; fire RxPDU trace; remove header;\nm_rxSequenceNumber = SN+1; deliver in arrival order (no reordering)"]
+
+    upper -> tx    [label="TransmitPdcpSdu (NrPdcpSapProvider)"]
+    tx -> lower    [label="TransmitPdcpPdu (NrRlcSapProvider)"]
+    lower -> rx    [label="ReceivePdcpPdu (NrRlcSapUser)"]
+    rx -> upper    [label="ReceivePdcpSdu (NrPdcpSapUser)"]
+}

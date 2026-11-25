@@ -4,45 +4,57 @@
 
 #include "nr-helper.h"
 
+#include "node-distribution-scenario-interface.h"
 #include "nr-bearer-stats-calculator.h"
+#include "nr-channel-helper.h"
 #include "nr-epc-helper.h"
 #include "nr-mac-rx-trace.h"
 #include "nr-phy-rx-trace.h"
+#include "realistic-beamforming-helper.h"
 
-#include <ns3/bandwidth-part-gnb.h>
-#include <ns3/bandwidth-part-ue.h>
-#include <ns3/beam-manager.h>
-#include <ns3/buildings-channel-condition-model.h>
-#include <ns3/bwp-manager-algorithm.h>
-#include <ns3/bwp-manager-gnb.h>
-#include <ns3/bwp-manager-ue.h>
-#include <ns3/config.h>
-#include <ns3/multi-model-spectrum-channel.h>
-#include <ns3/names.h>
-#include <ns3/nr-ch-access-manager.h>
-#include <ns3/nr-chunk-processor.h>
-#include <ns3/nr-epc-gnb-application.h>
-#include <ns3/nr-epc-ue-nas.h>
-#include <ns3/nr-epc-x2.h>
-#include <ns3/nr-fh-control.h>
-#include <ns3/nr-gnb-mac.h>
-#include <ns3/nr-gnb-net-device.h>
-#include <ns3/nr-gnb-phy.h>
-#include <ns3/nr-mac-scheduler-tdma-rr.h>
-#include <ns3/nr-pm-search-full.h>
-#include <ns3/nr-rrc-protocol-ideal.h>
-#include <ns3/nr-rrc-protocol-real.h>
-#include <ns3/nr-ue-mac.h>
-#include <ns3/nr-ue-net-device.h>
-#include <ns3/nr-ue-phy.h>
-#include <ns3/nr-ue-rrc.h>
-#include <ns3/pointer.h>
-#include <ns3/three-gpp-channel-model.h>
-#include <ns3/three-gpp-propagation-loss-model.h>
-#include <ns3/three-gpp-spectrum-propagation-loss-model.h>
-#include <ns3/three-gpp-v2v-channel-condition-model.h>
-#include <ns3/three-gpp-v2v-propagation-loss-model.h>
-#include <ns3/uniform-planar-array.h>
+#include "ns3/bandwidth-part-gnb.h"
+#include "ns3/bandwidth-part-ue.h"
+#include "ns3/beam-manager.h"
+#include "ns3/buildings-channel-condition-model.h"
+#include "ns3/bwp-manager-algorithm.h"
+#include "ns3/bwp-manager-gnb.h"
+#include "ns3/bwp-manager-ue.h"
+#include "ns3/config.h"
+#include "ns3/deprecated.h"
+#include "ns3/internet-stack-helper.h"
+#include "ns3/multi-model-spectrum-channel.h"
+#include "ns3/names.h"
+#include "ns3/nr-ch-access-manager.h"
+#include "ns3/nr-chunk-processor.h"
+#include "ns3/nr-epc-ue-nas.h"
+#include "ns3/nr-fh-control.h"
+#include "ns3/nr-gnb-mac.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/nr-gnb-phy.h"
+#include "ns3/nr-handover-algorithm.h"
+#include "ns3/nr-initial-association.h"
+#include "ns3/nr-mac-scheduler-tdma-rr.h"
+#include "ns3/nr-pm-search-full.h"
+#include "ns3/nr-rrc-protocol-ideal.h"
+#include "ns3/nr-rrc-protocol-real-gnb.h"
+#include "ns3/nr-rrc-protocol-real-ue.h"
+#include "ns3/nr-ue-mac.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-ue-phy.h"
+#include "ns3/nr-ue-rrc.h"
+#include "ns3/nr-wraparound-utils.h"
+#include "ns3/nyu-channel-model.h"
+#include "ns3/nyu-propagation-loss-model.h"
+#include "ns3/nyu-spectrum-propagation-loss-model.h"
+#include "ns3/pointer.h"
+#include "ns3/spectrum-channel.h"
+#include "ns3/three-gpp-channel-model.h"
+#include "ns3/three-gpp-propagation-loss-model.h"
+#include "ns3/three-gpp-spectrum-propagation-loss-model.h"
+#include "ns3/three-gpp-v2v-channel-condition-model.h"
+#include "ns3/three-gpp-v2v-propagation-loss-model.h"
+#include "ns3/two-ray-spectrum-propagation-loss-model.h"
+#include "ns3/uniform-planar-array.h"
 
 #include <algorithm>
 
@@ -78,6 +90,7 @@ NrHelper::NrHelper()
     m_gnbBeamManagerFactory.SetTypeId(BeamManager::GetTypeId());
     m_ueBeamManagerFactory.SetTypeId(BeamManager::GetTypeId());
     m_spectrumPropagationFactory.SetTypeId(ThreeGppSpectrumPropagationLossModel::GetTypeId());
+    m_initialAttachmentFactory.SetTypeId(NrInitialAssociation::GetTypeId());
 
     // Initialization that is there just because the user can configure attribute
     // through the helper methods without making it sad that no TypeId is set.
@@ -85,8 +98,6 @@ NrHelper::NrHelper()
     m_pathlossModelFactory.SetTypeId(ThreeGppPropagationLossModel::GetTypeId());
     m_channelConditionModelFactory.SetTypeId(ThreeGppChannelConditionModel::GetTypeId());
     m_fhControlFactory.SetTypeId(NrFhControl::GetTypeId());
-
-    Config::SetDefault("ns3::NrEpsBearer::Release", UintegerValue(18));
 }
 
 NrHelper::~NrHelper()
@@ -97,6 +108,16 @@ NrHelper::~NrHelper()
         m_beamformingHelper->Dispose();
     }
     m_beamformingHelper = nullptr;
+    for (const auto& [imsi, ueNetDev] : m_ueDevices)
+    {
+        if (auto rrc = ueNetDev->GetRrc())
+        {
+            rrc->TraceDisconnectWithoutContext("ConnectionEstablished",
+                                               MakeCallback(&NrHelper::UeConnectedToCell, this));
+            rrc->TraceDisconnectWithoutContext("HandoverEndOk",
+                                               MakeCallback(&NrHelper::UeConnectedToCell, this));
+        }
+    }
 }
 
 TypeId
@@ -106,11 +127,18 @@ NrHelper::GetTypeId()
         TypeId("ns3::NrHelper")
             .SetParent<Object>()
             .AddConstructor<NrHelper>()
-            .AddAttribute("EnableMimoFeedback",
-                          "Generate CQI feedback with RI and PMI for MIMO support",
-                          BooleanValue(false),
-                          MakeBooleanAccessor(&NrHelper::m_enableMimoFeedback),
-                          MakeBooleanChecker())
+            .AddAttribute(
+                "CsiFeedbackFlags",
+                "Signals and measurements that will be used for CQI feedback if available."
+                "CQI_PDSCH_SISO imply SISO feedback."
+                "CQI_PSDCH_MIMO and CQI_CSI_IM imply MIMO feedback."
+                "Supported configurations are: CQI_PDSCH_MIMO = 1, CQI_CSI_RS = 2, "
+                "CQI_PDSCH_MIMO|CQI_CSI_RS = 3, "
+                "CQI_CSI_RS|CQI_CSI_IM = 6, CQI_PDSCH_MIMO|CQI_CSI_RS|CQI_CSI_IM = 7, and "
+                "CQI_PDSCH_SISO = 8.",
+                UintegerValue(CQI_PDSCH_SISO),
+                MakeUintegerAccessor(&NrHelper::m_csiFeedbackFlags),
+                MakeUintegerChecker<uint8_t>(0x0, 0x08))
             .AddAttribute("PmSearchMethod",
                           "Type of the precoding matrix search method.",
                           TypeIdValue(NrPmSearchFull::GetTypeId()),
@@ -129,258 +157,49 @@ NrHelper::GetTypeId()
                           StringValue("ns3::NrNoOpHandoverAlgorithm"),
                           MakeStringAccessor(&NrHelper::SetHandoverAlgorithmType,
                                              &NrHelper::GetHandoverAlgorithmType),
-                          MakeStringChecker());
+                          MakeStringChecker())
+            .AddAttribute("RbOverhead",
+                          "Overhead when calculating the usable RB number",
+                          DoubleValue(0.04),
+                          MakeDoubleAccessor(&NrHelper::m_rbOverhead),
+                          MakeDoubleChecker<double>(0, 0.5))
+            .AddAttribute("NumRbPerRbg",
+                          "Number of resource blocks per resource block group.",
+                          UintegerValue(1),
+                          MakeUintegerAccessor(&NrHelper::m_numRbPerRbg),
+                          MakeUintegerChecker<uint32_t>(1, 16))
+            .AddAttribute("AttachWindow",
+                          "If non-zero, initial UE attachment is spread deterministically "
+                          "over this time window instead of every UE attaching at once: the "
+                          "k-th call to AttachToGnb() is deferred by AttachWindow times the "
+                          "radical inverse of k in base 2. De-synchronises the "
+                          "RACH/connection-setup thundering herd at initial association.",
+                          TimeValue(Seconds(0)),
+                          MakeTimeAccessor(&NrHelper::m_attachWindow),
+                          MakeTimeChecker());
     return tid;
 }
 
-typedef std::function<void(ObjectFactory*, ObjectFactory*)> InitPathLossFn;
-
-static void
-InitRma(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppRmaPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(ThreeGppRmaChannelConditionModel::GetTypeId());
-}
-
-static void
-InitRma_LoS(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppRmaPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(AlwaysLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitRma_nLoS(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppRmaPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(NeverLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitUma(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppUmaPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(ThreeGppUmaChannelConditionModel::GetTypeId());
-}
-
-static void
-InitUma_LoS(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppUmaPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(AlwaysLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitUma_nLoS(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppUmaPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(NeverLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitUmi(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppUmiStreetCanyonPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(
-        ThreeGppUmiStreetCanyonChannelConditionModel::GetTypeId());
-}
-
-static void
-InitUmi_LoS(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppUmiStreetCanyonPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(AlwaysLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitUmi_nLoS(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppUmiStreetCanyonPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(NeverLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitIndoorOpen(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppIndoorOfficePropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(
-        ThreeGppIndoorOpenOfficeChannelConditionModel::GetTypeId());
-}
-
-static void
-InitIndoorOpen_LoS(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppIndoorOfficePropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(AlwaysLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitIndoorOpen_nLoS(ObjectFactory* pathlossModelFactory,
-                    ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppIndoorOfficePropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(NeverLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitIndoorMixed(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppIndoorOfficePropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(
-        ThreeGppIndoorMixedOfficeChannelConditionModel::GetTypeId());
-}
-
-static void
-InitIndoorMixed_LoS(ObjectFactory* pathlossModelFactory,
-                    ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppIndoorOfficePropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(AlwaysLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitIndoorMixed_nLoS(ObjectFactory* pathlossModelFactory,
-                     ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppIndoorOfficePropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(NeverLosChannelConditionModel::GetTypeId());
-}
-
-static void
-InitUmaBuildings(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppUmaPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(BuildingsChannelConditionModel::GetTypeId());
-}
-
-static void
-InitUmiBuildings(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppUmiStreetCanyonPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(BuildingsChannelConditionModel::GetTypeId());
-}
-
-static void
-InitV2VHighway(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppV2vHighwayPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(ThreeGppV2vHighwayChannelConditionModel::GetTypeId());
-}
-
-static void
-InitV2VUrban(ObjectFactory* pathlossModelFactory, ObjectFactory* channelConditionModelFactory)
-{
-    pathlossModelFactory->SetTypeId(ThreeGppV2vUrbanPropagationLossModel::GetTypeId());
-    channelConditionModelFactory->SetTypeId(ThreeGppV2vUrbanChannelConditionModel::GetTypeId());
-}
-
-void
-NrHelper::InitializeOperationBand(OperationBandInfo* band, uint8_t flags)
-{
-    NS_LOG_FUNCTION(this);
-
-    static std::unordered_map<BandwidthPartInfo::Scenario, InitPathLossFn, std::hash<int>>
-        initLookupTable{
-            {BandwidthPartInfo::RMa,
-             std::bind(&InitRma, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::RMa_LoS,
-             std::bind(&InitRma_LoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::RMa_nLoS,
-             std::bind(&InitRma_nLoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::UMa,
-             std::bind(&InitUma, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::UMa_LoS,
-             std::bind(&InitUma_LoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::UMa_nLoS,
-             std::bind(&InitUma_nLoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::UMi_StreetCanyon,
-             std::bind(&InitUmi, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::UMi_StreetCanyon_LoS,
-             std::bind(&InitUmi_LoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::UMi_StreetCanyon_nLoS,
-             std::bind(&InitUmi_nLoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::InH_OfficeOpen,
-             std::bind(&InitIndoorOpen, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::InH_OfficeOpen_LoS,
-             std::bind(&InitIndoorOpen_LoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::InH_OfficeOpen_nLoS,
-             std::bind(&InitIndoorOpen_nLoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::InH_OfficeMixed,
-             std::bind(&InitIndoorMixed, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::InH_OfficeMixed_LoS,
-             std::bind(&InitIndoorMixed_LoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::InH_OfficeMixed_nLoS,
-             std::bind(&InitIndoorMixed_nLoS, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::UMa_Buildings,
-             std::bind(&InitUmaBuildings, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::UMi_Buildings,
-             std::bind(&InitUmiBuildings, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::V2V_Highway,
-             std::bind(&InitV2VHighway, std::placeholders::_1, std::placeholders::_2)},
-            {BandwidthPartInfo::V2V_Urban,
-             std::bind(&InitV2VUrban, std::placeholders::_1, std::placeholders::_2)},
-        };
-
-    // Iterate over all CCs, and instantiate the channel and propagation model
-    for (const auto& cc : band->m_cc)
-    {
-        for (const auto& bwp : cc->m_bwp)
-        {
-            // Initialize the type ID of the factories by calling the relevant
-            // static function defined above and stored inside the lookup table
-            initLookupTable.at(bwp->m_scenario)(&m_pathlossModelFactory,
-                                                &m_channelConditionModelFactory);
-
-            auto channelConditionModel =
-                m_channelConditionModelFactory.Create<ChannelConditionModel>();
-
-            if (bwp->m_propagation == nullptr && flags & INIT_PROPAGATION)
-            {
-                bwp->m_propagation = m_pathlossModelFactory.Create<ThreeGppPropagationLossModel>();
-                bwp->m_propagation->SetAttributeFailSafe("Frequency",
-                                                         DoubleValue(bwp->m_centralFrequency));
-                DynamicCast<ThreeGppPropagationLossModel>(bwp->m_propagation)
-                    ->SetChannelConditionModel(channelConditionModel);
-            }
-
-            if (bwp->m_3gppChannel == nullptr && flags & INIT_FADING)
-            {
-                bwp->m_3gppChannel =
-                    m_spectrumPropagationFactory.Create<ThreeGppSpectrumPropagationLossModel>();
-                DynamicCast<ThreeGppSpectrumPropagationLossModel>(bwp->m_3gppChannel)
-                    ->SetChannelModelAttribute("Frequency", DoubleValue(bwp->m_centralFrequency));
-                DynamicCast<ThreeGppSpectrumPropagationLossModel>(bwp->m_3gppChannel)
-                    ->SetChannelModelAttribute("Scenario", StringValue(bwp->GetScenario()));
-                DynamicCast<ThreeGppSpectrumPropagationLossModel>(bwp->m_3gppChannel)
-                    ->SetChannelModelAttribute("ChannelConditionModel",
-                                               PointerValue(channelConditionModel));
-            }
-
-            if (bwp->m_channel == nullptr && flags & INIT_CHANNEL)
-            {
-                bwp->m_channel = m_channelFactory.Create<SpectrumChannel>();
-                bwp->m_channel->AddPropagationLossModel(bwp->m_propagation);
-                bwp->m_channel->AddPhasedArraySpectrumPropagationLossModel(bwp->m_3gppChannel);
-            }
-        }
-    }
-}
-
 std::pair<double, BandwidthPartInfoPtrVector>
-NrHelper::CreateBandwidthParts(std::vector<CcBwpCreator::SimpleOperationBandConf> bandConfs)
+NrHelper::CreateBandwidthParts(std::vector<CcBwpCreator::SimpleOperationBandConf> bandConfs,
+                               const std::string& scenario,
+                               const std::string& channelCondition,
+                               const std::string& channelModel)
 {
     CcBwpCreator ccBwpCreator;
     double totalBandwidth = 0.0;
+    auto channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigureFactories(scenario, channelCondition, channelModel);
     for (auto& bandConf : bandConfs)
     {
         m_bands.push_back(ccBwpCreator.CreateOperationBandContiguousCc(bandConf));
-        InitializeOperationBand(&m_bands.back());
         totalBandwidth += bandConf.m_channelBandwidth;
     }
     std::vector<std::reference_wrapper<OperationBandInfo>> bandsRefs(m_bands.rbegin(),
                                                                      m_bands.rbegin() +
                                                                          bandConfs.size());
 
+    channelHelper->AssignChannelsToBands(bandsRefs);
     return std::make_pair(totalBandwidth, CcBwpCreator::GetAllBwps(bandsRefs));
 }
 
@@ -507,9 +326,8 @@ NrHelper::InstallUeDevice(const NodeContainer& c,
                           const std::vector<std::reference_wrapper<BandwidthPartInfoPtr>>& allBwps)
 {
     NS_LOG_FUNCTION(this);
-    Initialize(); // Run DoInitialize (), if necessary
     NetDeviceContainer devices;
-    for (NodeContainer::Iterator i = c.Begin(); i != c.End(); ++i)
+    for (auto i = c.Begin(); i != c.End(); ++i)
     {
         Ptr<Node> node = *i;
         Ptr<NetDevice> device = InstallSingleUeDevice(node, allBwps);
@@ -524,9 +342,8 @@ NrHelper::InstallGnbDevice(const NodeContainer& c,
                            const std::vector<std::reference_wrapper<BandwidthPartInfoPtr>> allBwps)
 {
     NS_LOG_FUNCTION(this);
-    Initialize(); // Run DoInitialize (), if necessary
     NetDeviceContainer devices;
-    for (NodeContainer::Iterator i = c.Begin(); i != c.End(); ++i)
+    for (auto i = c.Begin(); i != c.End(); ++i)
     {
         Ptr<Node> node = *i;
         Ptr<NetDevice> device = InstallSingleGnbDevice(node, allBwps);
@@ -545,11 +362,14 @@ NrHelper::UpdateDeviceConfigs(const NetDeviceContainer& netDevs)
         auto gnbNetDev = DynamicCast<NrGnbNetDevice>(netDevs.Get(i));
         if (ueNetDev)
         {
-            ueNetDev->UpdateConfig();
+            std::cerr << "Deprecation warning: UpdateConfig is no longer needed for UE device types"
+                      << std::endl;
         }
         if (gnbNetDev)
         {
-            gnbNetDev->UpdateConfig();
+            std::cerr
+                << "Deprecation warning: UpdateConfig is no longer needed for gNB device types"
+                << std::endl;
         }
     }
 }
@@ -564,7 +384,7 @@ NrHelper::CreateUeMac() const
 
 Ptr<NrUePhy>
 NrHelper::CreateUePhy(const Ptr<Node>& n,
-                      const std::unique_ptr<BandwidthPartInfo>& bwp,
+                      const BandwidthPartInfoPtr& bwp,
                       const Ptr<NrUeNetDevice>& dev,
                       const NrSpectrumPhy::NrPhyDlHarqFeedbackCallback& dlHarqCallback,
                       const NrSpectrumPhy::NrPhyRxCtrlEndOkCallback& phyRxCtrlCallback)
@@ -573,7 +393,7 @@ NrHelper::CreateUePhy(const Ptr<Node>& n,
 
     Ptr<NrUePhy> phy = m_uePhyFactory.Create<NrUePhy>();
 
-    NS_ASSERT(bwp->m_channel != nullptr);
+    NS_ASSERT(bwp->GetChannel() != nullptr);
 
     phy->InstallCentralFrequency(bwp->m_centralFrequency);
 
@@ -585,6 +405,8 @@ NrHelper::CreateUePhy(const Ptr<Node>& n,
     phy->SetCam(cam);
     // set device
     phy->SetDevice(dev);
+    // Set CSI feedback type to UE device
+    phy->SetCsiFeedbackType(m_csiFeedbackFlags);
 
     Ptr<MobilityModel> mm = n->GetObject<MobilityModel>();
     NS_ASSERT_MSG(
@@ -594,16 +416,32 @@ NrHelper::CreateUePhy(const Ptr<Node>& n,
     Ptr<NrSpectrumPhy> channelPhy =
         m_ueSpectrumFactory.Create<NrSpectrumPhy>(); // Create NrSpectrumPhy
 
-    Ptr<NrHarqPhy> harq = Create<NrHarqPhy>(); // Create HARQ instance
-    channelPhy->InstallHarqPhyModule(harq);
     channelPhy->SetPhyDlHarqFeedbackCallback(dlHarqCallback);
 
     channelPhy->SetIsGnb(false);
     channelPhy->SetDevice(dev); // each NrSpectrumPhy should have a pointer to device
 
-    Ptr<UniformPlanarArray> antenna =
-        m_ueAntennaFactory.Create<UniformPlanarArray>(); // Create antenna per panel
-    channelPhy->SetAntenna(antenna);
+    bool usingUniformPlanarArray =
+        m_ueAntennaFactory.GetTypeId() == UniformPlanarArray::GetTypeId();
+    // Create n antenna panels and beam manager for Ue
+    for (auto i = 0; i < channelPhy->GetNumPanels(); i++)
+    {
+        auto antenna = m_ueAntennaFactory.Create(); // Create antenna object per panel
+        channelPhy->AddPanel(antenna);
+        // Check if the antenna is a uniform planar array type
+        if (usingUniformPlanarArray)
+        {
+            Ptr<BeamManager> beamManager = m_ueBeamManagerFactory.Create<BeamManager>();
+            auto uniformPlanarArray = DynamicCast<UniformPlanarArray>(antenna);
+            beamManager->Configure(uniformPlanarArray);
+            channelPhy->AddBeamManager(beamManager);
+        }
+    }
+    if (usingUniformPlanarArray)
+    {
+        // Config bearing angles for all panels installed in NrSpectrumPhy
+        channelPhy->ConfigPanelsBearingAngles();
+    }
 
     cam->SetNrSpectrumPhy(channelPhy); // connect CAM
 
@@ -612,18 +450,34 @@ NrHelper::CreateUePhy(const Ptr<Node>& n,
     channelPhy->AddDataSinrChunkProcessor(pData);
 
     Ptr<NrMimoChunkProcessor> pDataMimo{nullptr};
-    if (bwp->m_3gppChannel)
+    auto phasedChannel = bwp->GetChannel()->GetPhasedArraySpectrumPropagationLossModel();
+    if (phasedChannel)
     {
         pDataMimo = Create<NrMimoChunkProcessor>();
         pDataMimo->AddCallback(MakeCallback(&NrSpectrumPhy::UpdateMimoSinrPerceived, channelPhy));
         channelPhy->AddDataMimoChunkProcessor(pDataMimo);
+
+        if (m_csiFeedbackFlags & CQI_PDSCH_MIMO)
+        {
+            // Report DL CQI, PMI, RI (channel quality, MIMO precoding matrix and rank indicators)
+            pDataMimo->AddCallback(MakeCallback(&NrUePhy::PdschMimoReceived, phy));
+        }
+
+        if (m_csiFeedbackFlags & CQI_CSI_RS)
+        {
+            Ptr<NrMimoChunkProcessor> pCsiRs = Create<NrMimoChunkProcessor>();
+            pCsiRs->AddCallback(MakeCallback(&NrUePhy::CsiRsReceived, phy));
+            channelPhy->AddCsiRsMimoChunkProcessor(pCsiRs);
+            // currently, CSI_IM can be enabled only if CSI-RS is enabled
+            if (m_csiFeedbackFlags & CQI_CSI_IM)
+            {
+                Ptr<NrMimoChunkProcessor> pCsiIm = Create<NrMimoChunkProcessor>();
+                pCsiIm->AddCallback(MakeCallback(&NrUePhy::CsiImEnded, phy));
+                channelPhy->AddCsiImMimoChunkProcessor(pCsiIm);
+            }
+        }
     }
-    if (bwp->m_3gppChannel && m_enableMimoFeedback)
-    {
-        // Report DL CQI, PMI, RI (channel quality, MIMO precoding matrix and rank indicators)
-        pDataMimo->AddCallback(MakeCallback(&NrUePhy::GenerateDlCqiReportMimo, phy));
-    }
-    else
+    if (!phasedChannel || (m_csiFeedbackFlags == CQI_PDSCH_SISO))
     {
         // SISO CQI feedback
         pData->AddCallback(MakeCallback(&NrUePhy::GenerateDlCqiReport, phy));
@@ -637,16 +491,12 @@ NrHelper::CreateUePhy(const Ptr<Node>& n,
     pSinr->AddCallback(MakeCallback(&NrSpectrumPhy::ReportDlCtrlSinr, channelPhy));
     channelPhy->AddDlCtrlSinrChunkProcessor(pSinr);
 
-    channelPhy->SetChannel(bwp->m_channel);
+    channelPhy->SetChannel(bwp->GetChannel());
     channelPhy->InstallPhy(phy);
     channelPhy->SetMobility(mm);
     channelPhy->SetPhyRxDataEndOkCallback(MakeCallback(&NrUePhy::PhyDataPacketReceived, phy));
     channelPhy->SetPhyRxCtrlEndOkCallback(phyRxCtrlCallback);
     channelPhy->SetPhyRxPssCallback(MakeCallback(&NrUePhy::ReceivePss, phy));
-
-    Ptr<BeamManager> beamManager = m_ueBeamManagerFactory.Create<BeamManager>();
-    beamManager->Configure(antenna);
-    channelPhy->SetBeamManager(beamManager);
     phy->InstallSpectrumPhy(channelPhy);
     return phy;
 }
@@ -672,18 +522,19 @@ NrHelper::InstallSingleUeDevice(
                         "A bandwidth of " << bwInKhz / 100.0 << " kHz cannot be represented");
         cc->SetUlBandwidth(static_cast<uint16_t>(bwInKhz / 100));
         cc->SetDlBandwidth(static_cast<uint16_t>(bwInKhz / 100));
-        cc->SetDlEarfcn(0); // Used for nothing..
-        cc->SetUlEarfcn(0); // Used for nothing..
+        cc->SetArfcn(NrPhy::FrequencyHzToArfcn(allBwps[bwpId].get()->m_centralFrequency));
 
         auto mac = CreateUeMac();
         cc->SetMac(mac);
 
-        auto phy = CreateUePhy(
-            n,
-            allBwps[bwpId].get(),
-            dev,
-            MakeCallback(&NrUeNetDevice::EnqueueDlHarqFeedback, dev),
-            std::bind(&NrUeNetDevice::RouteIngoingCtrlMsgs, dev, std::placeholders::_1, bwpId));
+        auto phy = CreateUePhy(n,
+                               allBwps[bwpId].get(),
+                               dev,
+                               MakeCallback(&NrUeNetDevice::EnqueueDlHarqFeedback, dev),
+                               std::bind(&NrUeNetDevice::RouteIngoingCtrlMsgs,
+                                         dev,
+                                         std::placeholders::_1,
+                                         cc->GetArfcn()));
 
         phy->SetBwpId(bwpId);
         cc->SetPhy(phy);
@@ -696,7 +547,8 @@ NrHelper::InstallSingleUeDevice(
         {
             cc->SetAsPrimary(false);
         }
-
+        phy->SetDlAmc(m_gnbDlAmcFactory.Create<NrAmc>());
+        phy->SetRbOverhead(m_rbOverhead);
         ueCcMap.insert(std::make_pair(bwpId, cc));
     }
 
@@ -721,6 +573,16 @@ NrHelper::InstallSingleUeDevice(
     rrc->SetNrCcmRrcSapProvider(ccmUe->GetNrCcmRrcSapProvider());
     ccmUe->SetNrCcmRrcSapUser(rrc->GetNrCcmRrcSapUser());
     ccmUe->SetNumberOfComponentCarriers(ueCcMap.size());
+    DynamicCast<BwpManagerUe>(ccmUe)->SetGetPrimaryUlFn(
+        [rrc]() { return rrc->GetPrimaryUlIndex(); });
+    Ptr<BwpManagerUe> bwpManagerUe = DynamicCast<BwpManagerUe>(ccmUe);
+    rrc->SetUpdateBwpOutputLinkFn([bwpManagerUe](uint32_t sourceBwp, uint32_t outputBwp) {
+        bwpManagerUe->SetDefaultOutputLink(sourceBwp, outputBwp);
+    });
+    rrc->SetUpdateQosFlowBwpFn([bwpManagerUe](uint8_t fiveQi, uint8_t bwpIndex) {
+        bwpManagerUe->SetBwpForQosFlow(fiveQi, bwpIndex);
+    });
+    rrc->SetClearBwpOutputLinksFn([bwpManagerUe]() { bwpManagerUe->ClearOutputLinks(); });
 
     if (m_useIdealRrc)
     {
@@ -776,27 +638,33 @@ NrHelper::InstallSingleUeDevice(
         }
     }
 
-    dev->SetAttribute("Imsi", UintegerValue(n->GetId()));
     dev->SetCcMap(ueCcMap);
     dev->SetAttribute("nrUeRrc", PointerValue(rrc));
     dev->SetAttribute("NrEpcUeNas", PointerValue(nas));
     dev->SetAttribute("NrUeComponentCarrierManager", PointerValue(ccmUe));
+    dev->SetAttribute("Imsi", UintegerValue(n->GetId()));
 
     n->AddDevice(dev);
 
     if (m_nrEpcHelper != nullptr)
     {
         m_nrEpcHelper->AddUe(dev, dev->GetImsi());
+        m_ueEpcHelpers[dev] = m_nrEpcHelper;
     }
 
-    dev->Initialize();
+    rrc->InitializeSrb0();
 
+    m_ueDevices[dev->GetImsi()] = dev;
+    rrc->TraceConnectWithoutContext("ConnectionEstablished",
+                                    MakeCallback(&NrHelper::UeConnectedToCell, this));
+    rrc->TraceConnectWithoutContext("HandoverEndOk",
+                                    MakeCallback(&NrHelper::UeConnectedToCell, this));
     return dev;
 }
 
 Ptr<NrGnbPhy>
 NrHelper::CreateGnbPhy(const Ptr<Node>& n,
-                       const std::unique_ptr<BandwidthPartInfo>& bwp,
+                       const BandwidthPartInfoPtr& bwp,
                        const Ptr<NrGnbNetDevice>& dev,
                        const NrSpectrumPhy::NrPhyRxCtrlEndOkCallback& phyEndCtrlCallback)
 {
@@ -805,6 +673,7 @@ NrHelper::CreateGnbPhy(const Ptr<Node>& n,
     Ptr<NrGnbPhy> phy = m_gnbPhyFactory.Create<NrGnbPhy>();
 
     DoubleValue frequency;
+    phy->SetRbOverhead(m_rbOverhead);
     phy->InstallCentralFrequency(bwp->m_centralFrequency);
 
     phy->ScheduleStartEventLoop(n->GetId(), 0, 0, 0);
@@ -821,16 +690,14 @@ NrHelper::CreateGnbPhy(const Ptr<Node>& n,
         "MobilityModel needs to be set on node before calling NrHelper::InstallGnbDevice ()");
 
     Ptr<NrSpectrumPhy> channelPhy = m_gnbSpectrumFactory.Create<NrSpectrumPhy>();
-    Ptr<UniformPlanarArray> antenna = m_gnbAntennaFactory.Create<UniformPlanarArray>();
+    auto antenna = m_gnbAntennaFactory.Create();
     channelPhy->SetAntenna(antenna);
     cam->SetNrSpectrumPhy(channelPhy);
 
-    channelPhy->InstallHarqPhyModule(
-        Create<NrHarqPhy>()); // there should be one HARQ instance per NrSpectrumPhy
     channelPhy->SetIsGnb(true);
     channelPhy->SetDevice(dev); // each NrSpectrumPhy should have a pointer to device
     channelPhy->SetChannel(
-        bwp->m_channel); // each NrSpectrumPhy needs to have a pointer to the SpectrumChannel
+        bwp->GetChannel()); // each NrSpectrumPhy needs to have a pointer to the SpectrumChannel
     // object of the corresponding spectrum part
     channelPhy->InstallPhy(phy); // each NrSpectrumPhy should have a pointer to its NrPhy
 
@@ -838,23 +705,27 @@ NrHelper::CreateGnbPhy(const Ptr<Node>& n,
         Create<NrChunkProcessor>(); // create pData chunk processor per NrSpectrumPhy
     Ptr<NrChunkProcessor> pSrs =
         Create<NrChunkProcessor>(); // create pSrs per processor per NrSpectrumPhy
+    auto phasedChannel = bwp->GetChannel()->GetPhasedArraySpectrumPropagationLossModel();
     if (!m_snrTest)
     {
-        // TODO: rename to GeneratePuschCqiReport, replace when enabling uplink MIMO
-        pData->AddCallback(MakeCallback(&NrGnbPhy::GenerateDataCqiReport,
-                                        phy)); // connect DATA chunk processor that will
-        // call GenerateDataCqiReport function
+        if (!phasedChannel)
+        {
+            // Without a MIMO channel, the PUSCH CQI comes from the SISO SINR
+            pData->AddCallback(MakeCallback(&NrGnbPhy::GenerateDataCqiReport, phy));
+        }
         pData->AddCallback(MakeCallback(&NrSpectrumPhy::UpdateSinrPerceived,
                                         channelPhy)); // connect DATA chunk processor that will
         // call UpdateSinrPerceived function
         pSrs->AddCallback(MakeCallback(&NrSpectrumPhy::UpdateSrsSinrPerceived,
                                        channelPhy)); // connect SRS chunk processor that will
                                                      // call UpdateSrsSinrPerceived function
-        if (bwp->m_3gppChannel)
+        if (phasedChannel)
         {
             auto pDataMimo = Create<NrMimoChunkProcessor>();
             pDataMimo->AddCallback(
                 MakeCallback(&NrSpectrumPhy::UpdateMimoSinrPerceived, channelPhy));
+            // Use the post-MMSE SINR used for decoding as the PUSCH CQI
+            pDataMimo->AddCallback(MakeCallback(&NrGnbPhy::GenerateMimoDataCqiReport, phy));
             channelPhy->AddDataMimoChunkProcessor(pDataMimo);
         }
     }
@@ -867,12 +738,19 @@ NrHelper::CreateGnbPhy(const Ptr<Node>& n,
                                                                // callback
     channelPhy->SetPhyUlHarqFeedbackCallback(
         MakeCallback(&NrGnbPhy::ReportUlHarqFeedback, phy)); // PhyUlHarqFeedback callback
-
-    Ptr<BeamManager> beamManager = m_gnbBeamManagerFactory.Create<BeamManager>();
-    beamManager->Configure(antenna);
-    channelPhy->SetBeamManager(beamManager);
+    // Check if the antenna is a uniform planar array type
+    auto uniformPlanarArray = DynamicCast<UniformPlanarArray>(antenna);
+    if (uniformPlanarArray)
+    {
+        Ptr<BeamManager> beamManager = m_gnbBeamManagerFactory.Create<BeamManager>();
+        beamManager->Configure(uniformPlanarArray);
+        channelPhy->SetBeamManager(beamManager);
+    }
     phy->InstallSpectrumPhy(channelPhy); // finally let know phy that there is this spectrum phy
-
+    if ((m_csiFeedbackFlags & CQI_CSI_RS) && phasedChannel)
+    {
+        phy->EnableCsiRs();
+    }
     return phy;
 }
 
@@ -928,11 +806,14 @@ NrHelper::InstallSingleGnbDevice(
     NS_ABORT_MSG_IF(m_cellIdCounter == 65535, "max num gNBs exceeded");
 
     Ptr<NrGnbNetDevice> dev = m_gnbNetDeviceFactory.Create<NrGnbNetDevice>();
+    Ptr<NrHandoverAlgorithm> handoverAlgorithm =
+        m_handoverAlgorithmFactory.Create<NrHandoverAlgorithm>();
 
     NS_LOG_DEBUG("Creating gNB, cellId = " << m_cellIdCounter);
     uint16_t cellId = m_cellIdCounter++; // New cellId
     dev->SetCellId(cellId);
     dev->SetNode(n);
+    m_gnbDevices[cellId] = dev;
 
     // create component carrier map for this gNB device
     std::map<uint8_t, Ptr<BandwidthPartGnb>> ccMap;
@@ -955,10 +836,10 @@ NrHelper::InstallSingleGnbDevice(
 
         cc->SetUlBandwidth(static_cast<uint16_t>(bwInKhz / 100));
         cc->SetDlBandwidth(static_cast<uint16_t>(bwInKhz / 100));
-        cc->SetDlEarfcn(0);              // Argh... handover not working
-        cc->SetUlEarfcn(0);              // Argh... handover not working
-        cc->SetCellId(cellId);           // All CCs have the same cellId
-        cc->SetCsgId(m_cellIdCounter++); // CSG IDs starts matching cellId, then gets incremented
+        cc->SetArfcn(NrPhy::FrequencyHzToArfcn(allBwps[bwpId].get()->m_centralFrequency));
+        cc->SetCellId(cellId); // CellId is set just for easier debugging
+        cc->SetBwpId(bwpId);   // CC BwpId is used to map BWPs to the correct CC PHY/MAC
+        cc->SetCsgId(0);       // Assume single group
 
         auto phy = CreateGnbPhy(
             n,
@@ -969,6 +850,8 @@ NrHelper::InstallSingleGnbDevice(
         cc->SetPhy(phy);
 
         auto mac = CreateGnbMac();
+        mac->SetNumRbPerRbg(m_numRbPerRbg);
+
         cc->SetMac(mac);
         phy->GetCam()->SetNrGnbMac(mac);
 
@@ -992,6 +875,10 @@ NrHelper::InstallSingleGnbDevice(
         DynamicCast<NrGnbComponentCarrierManager>(CreateObject<BwpManagerGnb>());
     DynamicCast<BwpManagerGnb>(ccmGnbManager)
         ->SetBwpManagerAlgorithm(m_gnbBwpManagerAlgoFactory.Create<BwpManagerAlgorithm>());
+
+    rrc->SetNrHandoverManagementSapProvider(
+        handoverAlgorithm->GetNrHandoverManagementSapProvider());
+    handoverAlgorithm->SetNrHandoverManagementSapUser(rrc->GetNrHandoverManagementSapUser());
 
     // Convert Gnb carrier map to only PhyConf map
     // we want to make RRC to be generic, to be able to work with any type of carriers, not only
@@ -1030,17 +917,17 @@ NrHelper::InstallSingleGnbDevice(
 
     if (m_nrEpcHelper != nullptr)
     {
-        EnumValue<NrGnbRrc::NrEpsBearerToRlcMapping_t> epsBearerToRlcMapping;
-        rrc->GetAttribute("EpsBearerToRlcMapping", epsBearerToRlcMapping);
+        EnumValue<NrGnbRrc::NrQosFlowToRlcMapping_t> qosFlowToRlcMapping;
+        rrc->GetAttribute("QosFlowToRlcMapping", qosFlowToRlcMapping);
         // it does not make sense to use RLC/SM when also using the EPC
-        if (epsBearerToRlcMapping.Get() == NrGnbRrc::RLC_SM_ALWAYS)
+        if (qosFlowToRlcMapping.Get() == NrGnbRrc::RLC_SM_ALWAYS)
         {
-            rrc->SetAttribute("EpsBearerToRlcMapping", EnumValue(NrGnbRrc::RLC_UM_ALWAYS));
+            rrc->SetAttribute("QosFlowToRlcMapping", EnumValue(NrGnbRrc::RLC_UM_ALWAYS));
         }
     }
 
     // This RRC attribute is used to connect each new RLC instance with the MAC layer
-    // (for function such as TransmitPdu, ReportBufferStatusReport).
+    // (for function such as TransmitPdu, BufferStatusReportReport).
     // Since in this new architecture, the component carrier manager acts a proxy, it
     // will have its own NrMacSapProvider interface, RLC will see it as through original MAC
     // interface NrMacSapProvider, but the function call will go now through
@@ -1102,25 +989,14 @@ NrHelper::InstallSingleGnbDevice(
     dev->SetAttribute("NrGnbComponentCarrierManager", PointerValue(ccmGnbManager));
     dev->SetCcMap(ccMap);
     dev->SetAttribute("NrGnbRrc", PointerValue(rrc));
-    dev->Initialize();
+    dev->SetAttribute("NrHandoverAlgorithm", PointerValue(handoverAlgorithm));
 
     n->AddDevice(dev);
 
     if (m_nrEpcHelper != nullptr)
     {
         NS_LOG_INFO("adding this gNB to the EPC");
-        m_nrEpcHelper->AddGnb(n, dev, dev->GetCellIds());
-        Ptr<NrEpcGnbApplication> gnbApp = n->GetApplication(0)->GetObject<NrEpcGnbApplication>();
-        NS_ASSERT_MSG(gnbApp != nullptr, "cannot retrieve NrEpcGnbApplication");
-
-        // S1 SAPs
-        rrc->SetS1SapProvider(gnbApp->GetS1SapProvider());
-        gnbApp->SetS1SapUser(rrc->GetS1SapUser());
-
-        // X2 SAPs
-        Ptr<NrEpcX2> x2 = n->GetObject<NrEpcX2>();
-        x2->SetEpcX2SapUser(rrc->GetEpcX2SapUser());
-        rrc->SetEpcX2SapProvider(x2->GetEpcX2SapProvider());
+        m_nrEpcHelper->AddGnb(n, dev, cellId);
     }
     return dev;
 }
@@ -1221,27 +1097,79 @@ NrHelper::DoHandoverRequest(Ptr<NetDevice> ueDev,
 }
 
 void
-NrHelper::AttachToClosestGnb(NetDeviceContainer ueDevices, NetDeviceContainer gnbDevices)
+NrHelper::AttachToMaxRsrpGnb(const NetDeviceContainer& ueDevices,
+                             const NetDeviceContainer& gnbDevices)
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT_MSG(gnbDevices.GetN() > 0, "gNB container should not be empty");
+    for (auto i = ueDevices.Begin(); i != ueDevices.End(); i++)
+    {
+        // Since UE may not be attached to any gNB, it won't be properly configured via MIB
+        // so we configure its numerology manually here. All gNBs numerology must match.
+        {
+            auto ueNetDevCast = DynamicCast<NrUeNetDevice>(*i);
+            auto gnbNetDevCast = DynamicCast<NrGnbNetDevice>(gnbDevices.Get(0));
+            ueNetDevCast->GetPhy(0)->SetNumerology(gnbNetDevCast->GetPhy(0)->GetNumerology());
+        }
+
+        // attach the UE to the highest RSRP gNB (this will change with active panel).
+        // Any AttachWindow staggering is applied by AttachToGnb, which this path reaches
+        // through AttachToMaxRsrpGnb.
+        Simulator::ScheduleNow([=, this]() { AttachToMaxRsrpGnb(*i, gnbDevices); });
+    }
+}
+
+void
+NrHelper::AttachToMaxRsrpGnb(const Ptr<NetDevice>& ueDevice, const NetDeviceContainer& gnbDevices)
 {
     NS_LOG_FUNCTION(this);
 
-    for (NetDeviceContainer::Iterator i = ueDevices.Begin(); i != ueDevices.End(); i++)
+    NS_ASSERT_MSG(gnbDevices.GetN() > 0, "empty gNB device container");
+
+    auto nrInitAssoc = m_initialAttachmentFactory.Create<NrInitialAssociation>();
+    ueDevice->GetObject<NrUeNetDevice>()->SetInitAssoc(nrInitAssoc);
+
+    nrInitAssoc->AssignStreams(INIT_ASSOC_STREAM_BASE + ueDevice->GetNode()->GetId());
+
+    nrInitAssoc->SetUeDevice(ueDevice);
+    nrInitAssoc->SetGnbDevices(gnbDevices);
+    nrInitAssoc->SetColBeamAngles(m_initialParams.colAngles);
+    nrInitAssoc->SetRowBeamAngles(m_initialParams.rowAngles);
+    nrInitAssoc->FindAssociatedGnb();
+    auto maxRsrpGnbDevice = nrInitAssoc->GetAssociatedGnb();
+    NS_ASSERT(maxRsrpGnbDevice);
+
+    AttachToGnb(ueDevice, maxRsrpGnbDevice);
+}
+
+void
+NrHelper::AttachToClosestGnb(const NetDeviceContainer& ueDevices,
+                             const NetDeviceContainer& gnbDevices)
+{
+    NS_LOG_FUNCTION(this);
+
+    for (auto i = ueDevices.Begin(); i != ueDevices.End(); i++)
     {
         AttachToClosestGnb(*i, gnbDevices);
     }
 }
 
 void
-NrHelper::AttachToClosestGnb(Ptr<NetDevice> ueDevice, NetDeviceContainer gnbDevices)
+NrHelper::AttachToClosestGnb(const Ptr<NetDevice>& ueDevice, const NetDeviceContainer& gnbDevices)
 {
     NS_LOG_FUNCTION(this);
     NS_ASSERT_MSG(gnbDevices.GetN() > 0, "empty gnb device container");
-    Vector uepos = ueDevice->GetNode()->GetObject<MobilityModel>()->GetPosition();
     double minDistance = std::numeric_limits<double>::infinity();
     Ptr<NetDevice> closestGnbDevice;
-    for (NetDeviceContainer::Iterator i = gnbDevices.Begin(); i != gnbDevices.End(); ++i)
+    Ptr<MobilityModel> ueMm = ueDevice->GetNode()->GetObject<MobilityModel>();
+    Ptr<SpectrumChannel> channel = GetUePhy(ueDevice, 0)->GetSpectrumPhy()->GetSpectrumChannel();
+    for (auto i = gnbDevices.Begin(); i != gnbDevices.End(); ++i)
     {
-        Vector gnbpos = (*i)->GetNode()->GetObject<MobilityModel>()->GetPosition();
+        auto gnbMm =
+            GetVirtualMobilityModel(channel, (*i)->GetNode()->GetObject<MobilityModel>(), ueMm);
+        Vector gnbpos = gnbMm->GetPosition();
+        Vector uepos = ueDevice->GetNode()->GetObject<MobilityModel>()->GetPosition();
+
         double distance = CalculateDistance(uepos, gnbpos);
         if (distance < minDistance)
         {
@@ -1257,31 +1185,143 @@ NrHelper::AttachToClosestGnb(Ptr<NetDevice> ueDevice, NetDeviceContainer gnbDevi
 void
 NrHelper::AttachToGnb(const Ptr<NetDevice>& ueDevice, const Ptr<NetDevice>& gnbDevice)
 {
+    const uint32_t index = m_attachCount++;
+
+    if (m_attachWindow.IsZero())
+    {
+        DoAttachToGnb(ueDevice, gnbDevice);
+        return;
+    }
+
+    // Spread this attachment across the window by its position in the call sequence, using the
+    // radical inverse of the index in base 2 (the van der Corput sequence): 0, 1/2, 1/4, 3/4,
+    // 1/8, ... Any prefix of that sequence covers the window roughly uniformly, so a handful of
+    // UEs is spread just as well as a large deployment and the helper never needs to know the
+    // total number of UEs in advance.
+    double fraction = 0.0;
+    double weight = 0.5;
+    for (uint32_t v = index; v != 0; v >>= 1)
+    {
+        if (v & 1u)
+        {
+            fraction += weight;
+        }
+        weight *= 0.5;
+    }
+
+    // The whole attachment is deferred as one unit rather than just the connection trigger,
+    // because a UE that has registered but not started random access would receive a random
+    // access response for a procedure it never began.
+    Simulator::Schedule(m_attachWindow * fraction,
+                        &NrHelper::DoAttachToGnb,
+                        this,
+                        ueDevice,
+                        gnbDevice);
+}
+
+void
+NrHelper::DoAttachToGnb(const Ptr<NetDevice>& ueDevice, const Ptr<NetDevice>& gnbDevice)
+{
     Ptr<NrGnbNetDevice> gnbNetDev = gnbDevice->GetObject<NrGnbNetDevice>();
     Ptr<NrUeNetDevice> ueNetDev = ueDevice->GetObject<NrUeNetDevice>();
 
     NS_ABORT_IF(gnbNetDev == nullptr || ueNetDev == nullptr);
 
+    if (!gnbNetDev->IsCellConfigured())
+    {
+        gnbNetDev->ConfigureCell();
+    }
+
+    // Derive the UE primary DL/UL BWP pair from the gNB configuration. The DL
+    // is the gNB's primary carrier (the one broadcasting MIB/SIB); for an FDD
+    // cell (DL-only primary) the UL is the cell's dedicated UL-only carrier,
+    // matching what SIB1 advertises in ulCarrierFreq.
+    if (!gnbNetDev->GetPhy(0)->HasDlSlot())
+    {
+        NS_FATAL_ERROR("The gNB primary carrier (CC0) cannot be UL-only: it broadcasts MIB/SIB");
+    }
+    ueNetDev->GetRrc()->SetPrimaryDlIndex(ueNetDev->GetArfcnBwpId(gnbNetDev->GetBwpArfcn(0)));
+    if (!gnbNetDev->GetPhy(0)->HasUlSlot())
+    {
+        for (uint32_t i = 0; i < gnbNetDev->GetCcMapSize(); ++i)
+        {
+            if (!gnbNetDev->GetPhy(i)->HasDlSlot())
+            {
+                ueNetDev->GetRrc()->SetPrimaryUlIndex(
+                    ueNetDev->GetArfcnBwpId(gnbNetDev->GetBwpArfcn(i)));
+                break;
+            }
+        }
+    }
+
+    for (uint32_t i = 0; i < gnbNetDev->GetCcMapSize(); ++i)
+    {
+        ueNetDev->GetPhy(i)->RegisterToGnb(gnbNetDev->GetCellId());
+        const auto& gnbSched = gnbNetDev->GetScheduler(i);
+        const auto& gnbPhy = gnbNetDev->GetPhy(i);
+
+        // Search BWP (j) with equivalent frequency on UE that of the configured gNB (i)
+        auto gnbArfcn = gnbNetDev->GetBwpArfcn(i);
+        auto ueBwpId = ueNetDev->GetArfcnBwpId(gnbArfcn);
+
+        ueNetDev->GetRrc()->ReconfigureFromSib1(ueBwpId,
+                                                gnbNetDev->GetCellId(),
+                                                gnbSched->GetDlCtrlSyms(),
+                                                gnbSched->GetUlCtrlSyms(),
+                                                gnbPhy->GetSymbolsPerSlot(),
+                                                gnbPhy->GetNumerology(),
+                                                gnbPhy->GetPattern(),
+                                                gnbPhy->GetNumRbPerRbg());
+
+        Ptr<NrEpcUeNas> ueNas = ueNetDev->GetNas();
+        ueNas->Connect(gnbNetDev->GetCellId(), gnbNetDev->GetBwpArfcn(i));
+    }
+
+    // The default QoS flow is an IP PDU session, whose rule classifies packets by
+    // their IP headers, so it is activated only for a UE that has an IP stack. A UE
+    // reaching the network over an unstructured session alone has none.
+    Ptr<Node> ueNode = ueDevice->GetNode();
+    if (m_nrEpcHelper && (ueNode->GetObject<Ipv4>() || ueNode->GetObject<Ipv6>()))
+    {
+        // activate default QoS flow, in the home network of the UE
+        m_ueEpcHelpers.at(ueDevice)->ActivateQosFlow(ueDevice,
+                                                     ueNetDev->GetImsi(),
+                                                     NrQosRule::Default(),
+                                                     NrQosFlow(NrQosFlow::NGBR_VIDEO_TCP_DEFAULT));
+    }
+
+    RegisterUeAtGnb(ueNetDev, gnbNetDev);
+}
+
+void
+NrHelper::RegisterUeAtGnb(const Ptr<NrUeNetDevice>& ueNetDev, const Ptr<NrGnbNetDevice>& gnbNetDev)
+{
+    NS_LOG_FUNCTION(this << ueNetDev->GetImsi() << gnbNetDev->GetCellId());
+
     for (uint32_t i = 0; i < gnbNetDev->GetCcMapSize(); ++i)
     {
         gnbNetDev->GetPhy(i)->RegisterUe(ueNetDev->GetImsi(), ueNetDev);
-        ueNetDev->GetPhy(i)->RegisterToGnb(gnbNetDev->GetBwpId(i));
-        ueNetDev->GetPhy(i)->SetDlAmc(
-            DynamicCast<NrMacSchedulerNs3>(gnbNetDev->GetScheduler(i))->GetDlAmc());
-        ueNetDev->GetPhy(i)->SetDlCtrlSyms(gnbNetDev->GetMac(i)->GetDlCtrlSyms());
-        ueNetDev->GetPhy(i)->SetUlCtrlSyms(gnbNetDev->GetMac(i)->GetUlCtrlSyms());
-        ueNetDev->GetPhy(i)->SetNumRbPerRbg(gnbNetDev->GetMac(i)->GetNumRbPerRbg());
-        ueNetDev->GetPhy(i)->SetRbOverhead(gnbNetDev->GetPhy(i)->GetRbOverhead());
-        ueNetDev->GetPhy(i)->SetSymbolsPerSlot(gnbNetDev->GetPhy(i)->GetSymbolsPerSlot());
-        ueNetDev->GetPhy(i)->SetNumerology(gnbNetDev->GetPhy(i)->GetNumerology());
-        ueNetDev->GetPhy(i)->SetPattern(gnbNetDev->GetPhy(i)->GetPattern());
-        Ptr<NrEpcUeNas> ueNas = ueNetDev->GetNas();
-        ueNas->Connect(gnbNetDev->GetBwpId(i), gnbNetDev->GetEarfcn(i));
-
-        if (m_enableMimoFeedback)
+        if (IsMimoFeedbackEnabled())
         {
             // Initialize parameters for MIMO precoding matrix search (PMI feedback)
             auto pmSearch = m_pmSearchFactory.Create<NrPmSearch>();
+            // ntn-patch 25: TS 38.214 Table 5.2.1.4-2 ties the CSI subband size to the BWP
+            // width, and one helper-wide SubbandSize cannot fit BWPs of different widths (e.g. a
+            // wide primary BWP next to narrow per-slice BWPs). Keep the configured size where it
+            // is allowed, otherwise take the largest size this BWP allows.
+            {
+                const uint32_t prbs = gnbNetDev->GetPhy(i)->GetRbNum();
+                const size_t sb = pmSearch->GetSubbandSize();
+                const auto allowed = prbs < 24    ? std::vector<size_t>{1}
+                                     : prbs <= 72  ? std::vector<size_t>{4, 8}
+                                     : prbs <= 144 ? std::vector<size_t>{8, 16}
+                                     : prbs <= 275 ? std::vector<size_t>{16, 32}
+                                                   : std::vector<size_t>{32};
+                if (prbs > 0 && std::find(allowed.begin(), allowed.end(), sb) == allowed.end())
+                {
+                    pmSearch->SetAttribute("SubbandSize", UintegerValue(allowed.back()));
+                }
+            }
             ueNetDev->GetPhy(i)->SetPmSearch(pmSearch);
             auto gnbAnt =
                 gnbNetDev->GetPhy(i)->GetSpectrumPhy()->GetAntenna()->GetObject<PhasedArrayModel>();
@@ -1295,65 +1335,109 @@ NrHelper::AttachToGnb(const Ptr<NetDevice>& ueDevice, const Ptr<NetDevice>& gnbD
         }
     }
 
-    if (m_nrEpcHelper)
-    {
-        // activate default EPS bearer
-        m_nrEpcHelper->ActivateEpsBearer(ueDevice,
-                                         ueNetDev->GetImsi(),
-                                         NrEpcTft::Default(),
-                                         NrEpsBearer(NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT));
-    }
-
     // tricks needed for the simplified LTE-only simulations
     // if (m_nrEpcHelper == 0)
     //{
     ueNetDev->SetTargetGnb(gnbNetDev);
     //}
+    m_ueRegistrations[ueNetDev->GetImsi()] = gnbNetDev;
 
-    if (m_beamformingHelper)
+    // A UE returning to a cell keeps the beamforming task of its earlier connection
+    if (m_beamformingHelper && m_beamformingTasks.emplace(gnbNetDev, ueNetDev).second)
     {
         m_beamformingHelper->AddBeamformingTask(gnbNetDev, ueNetDev);
     }
 }
 
+void
+NrHelper::UeConnectedToCell(uint64_t imsi, uint16_t cellId, uint16_t rnti)
+{
+    NS_LOG_FUNCTION(this << imsi << cellId << rnti);
+
+    auto itUe = m_ueDevices.find(imsi);
+    auto itGnb = m_gnbDevices.find(cellId);
+    if (itUe == m_ueDevices.end() || itGnb == m_gnbDevices.end())
+    {
+        return;
+    }
+    const auto& ueNetDev = itUe->second;
+    const auto& gnbNetDev = itGnb->second;
+    // The UE RRC updates the target gNB of the UE device itself, so the cell where the
+    // UE is registered is tracked here
+    auto itRegistered = m_ueRegistrations.find(imsi);
+    if (itRegistered != m_ueRegistrations.end())
+    {
+        if (itRegistered->second == gnbNetDev)
+        {
+            return;
+        }
+        for (uint32_t i = 0; i < itRegistered->second->GetCcMapSize(); ++i)
+        {
+            itRegistered->second->GetPhy(i)->DeregisterUe(imsi);
+        }
+    }
+    NS_LOG_INFO("UE " << imsi << " connected to cell " << cellId << " with RNTI " << rnti
+                      << ", registering it at its gNB");
+    RegisterUeAtGnb(ueNetDev, gnbNetDev);
+}
+
 uint8_t
-NrHelper::ActivateDedicatedEpsBearer(NetDeviceContainer ueDevices,
-                                     NrEpsBearer bearer,
-                                     Ptr<NrEpcTft> tft)
+NrHelper::ActivateDedicatedQosFlow(NetDeviceContainer ueDevices,
+                                   NrQosFlow flow,
+                                   Ptr<NrQosRule> rule)
 {
     NS_LOG_FUNCTION(this);
-    for (NetDeviceContainer::Iterator i = ueDevices.Begin(); i != ueDevices.End(); ++i)
+    for (auto i = ueDevices.Begin(); i != ueDevices.End(); ++i)
     {
-        uint8_t bearerId = ActivateDedicatedEpsBearer(*i, bearer, tft);
-        return bearerId;
+        uint8_t qosFlowId = ActivateDedicatedQosFlow(*i, flow, rule);
+
+        return qosFlowId;
     }
     return 0;
 }
 
 uint8_t
-NrHelper::ActivateDedicatedEpsBearer(Ptr<NetDevice> ueDevice, NrEpsBearer bearer, Ptr<NrEpcTft> tft)
+NrHelper::ActivateDedicatedQosFlow(Ptr<NetDevice> ueDevice, NrQosFlow flow, Ptr<NrQosRule> rule)
 {
     NS_LOG_FUNCTION(this);
 
-    NS_ASSERT_MSG(m_nrEpcHelper, "dedicated EPS bearers cannot be set up when the EPC is not used");
+    NS_ASSERT_MSG(m_nrEpcHelper, "dedicated QoS flows cannot be set up when the EPC is not used");
 
     uint64_t imsi = ueDevice->GetObject<NrUeNetDevice>()->GetImsi();
-    uint8_t bearerId = m_nrEpcHelper->ActivateEpsBearer(ueDevice, imsi, tft, bearer);
-    return bearerId;
+    uint8_t qosFlowId = m_ueEpcHelpers.at(ueDevice)->ActivateQosFlow(ueDevice, imsi, rule, flow);
+    return qosFlowId;
+}
+
+uint8_t
+NrHelper::ActivateUnstructuredQosFlow(Ptr<NetDevice> ueDevice,
+                                      uint16_t protocolNumber,
+                                      NrQosFlow flow)
+{
+    NS_LOG_FUNCTION(this << ueDevice << protocolNumber);
+
+    NS_ASSERT_MSG(m_nrEpcHelper,
+                  "unstructured PDU sessions cannot be set up when the EPC is not used");
+
+    // in the home network of the UE, as the other QoS flows
+    uint64_t imsi = ueDevice->GetObject<NrUeNetDevice>()->GetImsi();
+    return m_ueEpcHelpers.at(ueDevice)->ActivateUnstructuredQosFlow(ueDevice,
+                                                                    imsi,
+                                                                    protocolNumber,
+                                                                    flow);
 }
 
 void
-NrHelper::DeActivateDedicatedEpsBearer(Ptr<NetDevice> ueDevice,
-                                       Ptr<NetDevice> gnbDevice,
-                                       uint8_t bearerId)
+NrHelper::DeActivateDedicatedQosFlow(Ptr<NetDevice> ueDevice,
+                                     Ptr<NetDevice> gnbDevice,
+                                     uint8_t qosFlowId)
 {
-    NS_LOG_FUNCTION(this << ueDevice << bearerId);
+    NS_LOG_FUNCTION(this << ueDevice << qosFlowId);
     NS_ASSERT_MSG(m_nrEpcHelper != nullptr,
-                  "Dedicated EPS bearers cannot be de-activated when the EPC is not used");
-    NS_ASSERT_MSG(bearerId != 1,
-                  "Default bearer cannot be de-activated until and unless and UE is released");
+                  "Dedicated QoS flows cannot be de-activated when the EPC is not used");
+    NS_ASSERT_MSG(qosFlowId != 1,
+                  "Default QoS flow cannot be de-activated until and unless and UE is released");
 
-    DoDeActivateDedicatedEpsBearer(ueDevice, gnbDevice, bearerId);
+    DoDeActivateDedicatedQosFlow(ueDevice, gnbDevice, qosFlowId);
 }
 
 void
@@ -1434,6 +1518,20 @@ NrHelper::SetGnbAntennaAttribute(const std::string& n, const AttributeValue& v)
 }
 
 void
+NrHelper::SetUeAntennaTypeId(const std::string& typeId)
+{
+    NS_LOG_FUNCTION(this);
+    m_ueAntennaFactory.SetTypeId(typeId);
+}
+
+void
+NrHelper::SetGnbAntennaTypeId(const std::string& typeId)
+{
+    NS_LOG_FUNCTION(this);
+    m_gnbAntennaFactory.SetTypeId(typeId);
+}
+
+void
 NrHelper::SetUeChannelAccessManagerTypeId(const TypeId& typeId)
 {
     NS_LOG_FUNCTION(this);
@@ -1469,39 +1567,10 @@ NrHelper::SetUeBwpManagerAlgorithmTypeId(const TypeId& typeId)
 }
 
 void
-NrHelper::SetPhasedArraySpectrumPropagationLossModelTypeId(const TypeId& typeId)
-{
-    NS_LOG_FUNCTION(this);
-    m_spectrumPropagationFactory.SetTypeId(typeId);
-}
-
-void
 NrHelper::SetUeBwpManagerAlgorithmAttribute(const std::string& n, const AttributeValue& v)
 {
     NS_LOG_FUNCTION(this);
     m_ueBwpManagerAlgoFactory.Set(n, v);
-}
-
-void
-NrHelper::SetPhasedArraySpectrumPropagationLossModelAttribute(const std::string& n,
-                                                              const AttributeValue& v)
-{
-    NS_LOG_FUNCTION(this);
-    m_spectrumPropagationFactory.Set(n, v);
-}
-
-void
-NrHelper::SetChannelConditionModelAttribute(const std::string& n, const AttributeValue& v)
-{
-    NS_LOG_FUNCTION(this);
-    m_channelConditionModelFactory.Set(n, v);
-}
-
-void
-NrHelper::SetPathlossAttribute(const std::string& n, const AttributeValue& v)
-{
-    NS_LOG_FUNCTION(this);
-    m_pathlossModelFactory.Set(n, v);
 }
 
 void
@@ -1566,7 +1635,7 @@ NrHelper::EnableFhControl()
 void
 NrHelper::ConfigureFhControl(NetDeviceContainer gnbNetDevices)
 {
-    for (NetDeviceContainer::Iterator i = gnbNetDevices.Begin(); i != gnbNetDevices.End(); ++i)
+    for (auto i = gnbNetDevices.Begin(); i != gnbNetDevices.End(); ++i)
     {
         Ptr<NrGnbNetDevice> gnbNetDev = DynamicCast<NrGnbNetDevice>(*i);
 
@@ -1588,7 +1657,7 @@ NrHelper::AssignStreams(NetDeviceContainer c, int64_t stream)
 {
     int64_t currentStream = stream;
     Ptr<NetDevice> netDevice;
-    for (NetDeviceContainer::Iterator i = c.Begin(); i != c.End(); ++i)
+    for (auto i = c.Begin(); i != c.End(); ++i)
     {
         netDevice = (*i);
         Ptr<NrGnbNetDevice> nrGnb = DynamicCast<NrGnbNetDevice>(netDevice);
@@ -1596,7 +1665,7 @@ NrHelper::AssignStreams(NetDeviceContainer c, int64_t stream)
         {
             for (uint32_t bwp = 0; bwp < nrGnb->GetCcMapSize(); bwp++)
             {
-                currentStream += nrGnb->GetPhy(bwp)->GetSpectrumPhy()->AssignStreams(currentStream);
+                currentStream += nrGnb->GetPhy(bwp)->AssignStreams(currentStream);
                 currentStream += nrGnb->GetScheduler(bwp)->AssignStreams(currentStream);
                 currentStream +=
                     DoAssignStreamsToChannelObjects(nrGnb->GetPhy(bwp)->GetSpectrumPhy(),
@@ -1609,6 +1678,11 @@ NrHelper::AssignStreams(NetDeviceContainer c, int64_t stream)
         {
             for (uint32_t bwp = 0; bwp < nrUe->GetCcMapSize(); bwp++)
             {
+                Ptr<NrPmSearch> pmSearch = nrUe->GetPhy(bwp)->GetPmSearch();
+                if (pmSearch)
+                {
+                    currentStream += nrUe->GetPhy(bwp)->GetPmSearch()->AssignStreams(currentStream);
+                }
                 currentStream += nrUe->GetPhy(bwp)->GetSpectrumPhy()->AssignStreams(currentStream);
                 currentStream += nrUe->GetMac(bwp)->AssignStreams(currentStream);
                 currentStream +=
@@ -1622,42 +1696,103 @@ NrHelper::AssignStreams(NetDeviceContainer c, int64_t stream)
 }
 
 int64_t
+NrHelper::AssignStreams(const StreamAssignmentParams& params)
+{
+    int64_t assigned = 0;
+
+    if (params.assignEpc)
+    {
+        NS_ABORT_MSG_UNLESS(m_nrEpcHelper,
+                            "AssignStreams: assignEpc requested but no EPC helper was set");
+        assigned += m_nrEpcHelper->AssignStreams(params.epcStream);
+    }
+
+    // InternetStackHelper holds no relevant state for AssignStreams; it merely
+    // walks the IPv4/IPv6 protocols installed on the given nodes.
+    InternetStackHelper internet;
+    if (params.remoteHostNodes.GetN() > 0)
+    {
+        assigned += internet.AssignStreams(params.remoteHostNodes, params.remoteHostStream);
+    }
+    if (params.ueNodes.GetN() > 0)
+    {
+        assigned += internet.AssignStreams(params.ueNodes, params.ueNodeStream);
+    }
+    if (params.gnbNodes.GetN() > 0)
+    {
+        assigned += internet.AssignStreams(params.gnbNodes, params.gnbNodeStream);
+    }
+
+    if (params.scenario)
+    {
+        assigned += params.scenario->AssignStreams(params.scenarioStream);
+    }
+
+    if (params.beamformingHelper)
+    {
+        // Only the realistic beamforming helper draws random variables.
+        if (auto realisticBf = DynamicCast<RealisticBeamformingHelper>(params.beamformingHelper))
+        {
+            assigned += realisticBf->AssignStreams(params.beamformingStream);
+        }
+    }
+
+    if (params.gnbDevs.GetN() > 0)
+    {
+        assigned += AssignStreams(params.gnbDevs, params.gnbDevStream);
+    }
+    if (params.ueDevs.GetN() > 0)
+    {
+        assigned += AssignStreams(params.ueDevs, params.ueDevStream);
+    }
+
+    return assigned;
+}
+
+int64_t
 NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t currentStream)
 {
     int64_t initialStream = currentStream;
 
-    Ptr<ThreeGppPropagationLossModel> propagationLossModel =
-        DynamicCast<ThreeGppPropagationLossModel>(
-            phy->GetSpectrumChannel()->GetPropagationLossModel());
-    if (!propagationLossModel)
-    {
-        currentStream +=
-            phy->GetSpectrumChannel()->GetPropagationLossModel()->AssignStreams(currentStream);
-        return currentStream - initialStream;
-    }
+    auto assignConditionModelStreams = [&](Ptr<ChannelConditionModel> channelConditionModel) {
+        if (channelConditionModel &&
+            std::find(m_channelObjectsWithAssignedStreams.begin(),
+                      m_channelObjectsWithAssignedStreams.end(),
+                      channelConditionModel) == m_channelObjectsWithAssignedStreams.end())
+        {
+            currentStream += channelConditionModel->AssignStreams(currentStream);
+            m_channelObjectsWithAssignedStreams.emplace_back(channelConditionModel);
+        }
+    };
 
-    if (std::find(m_channelObjectsWithAssignedStreams.begin(),
+    auto propagationLossModel = phy->GetSpectrumChannel()->GetPropagationLossModel();
+    Ptr<ChannelConditionModel> channelConditionModel;
+    if (propagationLossModel &&
+        std::find(m_channelObjectsWithAssignedStreams.begin(),
                   m_channelObjectsWithAssignedStreams.end(),
                   propagationLossModel) == m_channelObjectsWithAssignedStreams.end())
     {
+        auto prop3gppModel = DynamicCast<ThreeGppPropagationLossModel>(propagationLossModel);
+        auto propNyuModel = DynamicCast<NYUPropagationLossModel>(propagationLossModel);
+        if (prop3gppModel)
+        {
+            channelConditionModel = prop3gppModel->GetChannelConditionModel();
+        }
+        else if (propNyuModel)
+        {
+            channelConditionModel = propNyuModel->GetChannelConditionModel();
+        }
+        else
+        {
+            channelConditionModel = nullptr;
+        }
         currentStream += propagationLossModel->AssignStreams(currentStream);
         m_channelObjectsWithAssignedStreams.emplace_back(propagationLossModel);
     }
+    assignConditionModelStreams(channelConditionModel);
 
-    Ptr<ChannelConditionModel> channelConditionModel =
-        propagationLossModel->GetChannelConditionModel();
-
-    if (std::find(m_channelObjectsWithAssignedStreams.begin(),
-                  m_channelObjectsWithAssignedStreams.end(),
-                  channelConditionModel) == m_channelObjectsWithAssignedStreams.end())
-    {
-        currentStream += channelConditionModel->AssignStreams(currentStream);
-        m_channelObjectsWithAssignedStreams.emplace_back(channelConditionModel);
-    }
-
-    Ptr<ThreeGppSpectrumPropagationLossModel> spectrumLossModel =
-        DynamicCast<ThreeGppSpectrumPropagationLossModel>(
-            phy->GetSpectrumChannel()->GetPhasedArraySpectrumPropagationLossModel());
+    auto spectrumLossModel =
+        phy->GetSpectrumChannel()->GetPhasedArraySpectrumPropagationLossModel();
 
     if (spectrumLossModel)
     {
@@ -1665,15 +1800,41 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
                       m_channelObjectsWithAssignedStreams.end(),
                       spectrumLossModel) == m_channelObjectsWithAssignedStreams.end())
         {
-            Ptr<ThreeGppChannelModel> channel =
-                DynamicCast<ThreeGppChannelModel>(spectrumLossModel->GetChannelModel());
-            // ntn-patch 09: another MatrixBasedChannelModel (e.g. a deterministic
-            // LOS model) may be plugged in; it has no random streams to assign.
-            if (channel)
+            auto tgppSpecModel =
+                DynamicCast<ThreeGppSpectrumPropagationLossModel>(spectrumLossModel);
+            auto nyuSpecModel = DynamicCast<NYUSpectrumPropagationLossModel>(spectrumLossModel);
+            auto twoRaySpectrumModel =
+                DynamicCast<TwoRaySpectrumPropagationLossModel>(spectrumLossModel);
+            Ptr<Object> fadingModel = spectrumLossModel;
+            if (twoRaySpectrumModel)
             {
-                currentStream += channel->AssignStreams(currentStream);
+                currentStream += twoRaySpectrumModel->AssignStreams(currentStream);
+            }
+            else if (tgppSpecModel)
+            {
+                fadingModel = tgppSpecModel->GetChannelModel();
+                // ntn-patch 09: another MatrixBasedChannelModel (e.g. a deterministic
+                // LOS model) may be plugged in; it has no random streams to assign.
+                if (auto channel = DynamicCast<ThreeGppChannelModel>(fadingModel))
+                {
+                    currentStream += channel->AssignStreams(currentStream);
+                }
+            }
+            else if (nyuSpecModel)
+            {
+                fadingModel = nyuSpecModel->GetChannelModel();
+                currentStream +=
+                    StaticCast<NYUChannelModel>(fadingModel)->AssignStreams(currentStream);
             }
             m_channelObjectsWithAssignedStreams.emplace_back(spectrumLossModel);
+
+            // The fading model shares the channel condition model of the propagation loss model,
+            // but it is the only way to reach it when no propagation loss model is installed
+            PointerValue fadingConditionModel;
+            if (fadingModel->GetAttributeFailSafe("ChannelConditionModel", fadingConditionModel))
+            {
+                assignConditionModelStreams(fadingConditionModel.Get<ChannelConditionModel>());
+            }
         }
     }
 
@@ -1695,11 +1856,11 @@ NrHelper::SetGnbBwpManagerAlgorithmAttribute(const std::string& n, const Attribu
 }
 
 void
-NrHelper::DoDeActivateDedicatedEpsBearer(Ptr<NetDevice> ueDevice,
-                                         Ptr<NetDevice> gnbDevice,
-                                         uint8_t bearerId)
+NrHelper::DoDeActivateDedicatedQosFlow(Ptr<NetDevice> ueDevice,
+                                       Ptr<NetDevice> gnbDevice,
+                                       uint8_t qosFlowId)
 {
-    NS_LOG_FUNCTION(this << ueDevice << bearerId);
+    NS_LOG_FUNCTION(this << ueDevice << qosFlowId);
 
     // Extract IMSI and rnti
     uint64_t imsi = ueDevice->GetObject<NrUeNetDevice>()->GetImsi();
@@ -1707,7 +1868,7 @@ NrHelper::DoDeActivateDedicatedEpsBearer(Ptr<NetDevice> ueDevice,
 
     Ptr<NrGnbRrc> gnbRrc = gnbDevice->GetObject<NrGnbNetDevice>()->GetRrc();
 
-    gnbRrc->DoSendReleaseDataRadioBearer(imsi, rnti, bearerId);
+    gnbRrc->DoSendReleaseQosFlow(imsi, rnti, qosFlowId);
 }
 
 void
@@ -1726,7 +1887,7 @@ NrHelper::SetBeamformingHelper(Ptr<BeamformingHelperBase> beamformingHelper)
 class NrDrbActivator : public SimpleRefCount<NrDrbActivator>
 {
   public:
-    NrDrbActivator(Ptr<NetDevice> ueDevice, NrEpsBearer bearer);
+    NrDrbActivator(Ptr<NetDevice> ueDevice, NrQosFlow flow);
     static void ActivateCallback(Ptr<NrDrbActivator> a,
                                  std::string context,
                                  uint64_t imsi,
@@ -1737,14 +1898,14 @@ class NrDrbActivator : public SimpleRefCount<NrDrbActivator>
   private:
     bool m_active;
     Ptr<NetDevice> m_ueDevice;
-    NrEpsBearer m_bearer;
+    NrQosFlow m_flow;
     uint64_t m_imsi;
 };
 
-NrDrbActivator::NrDrbActivator(Ptr<NetDevice> ueDevice, NrEpsBearer bearer)
+NrDrbActivator::NrDrbActivator(Ptr<NetDevice> ueDevice, NrQosFlow flow)
     : m_active(false),
       m_ueDevice(ueDevice),
-      m_bearer(bearer),
+      m_flow(flow),
       m_imsi(m_ueDevice->GetObject<NrUeNetDevice>()->GetImsi())
 {
 }
@@ -1768,7 +1929,7 @@ NrDrbActivator::ActivateDrb(uint64_t imsi, uint16_t cellId, uint16_t rnti)
     {
         Ptr<NrUeRrc> ueRrc = m_ueDevice->GetObject<NrUeNetDevice>()->GetRrc();
         NS_ASSERT(ueRrc->GetState() == NrUeRrc::CONNECTED_NORMALLY);
-        uint16_t rnti = ueRrc->GetRnti();
+        NS_ASSERT(rnti == ueRrc->GetRnti());
         Ptr<const NrGnbNetDevice> nrGnbDevice =
             m_ueDevice->GetObject<NrUeNetDevice>()->GetTargetGnb();
         Ptr<NrGnbRrc> gnbRrc = nrGnbDevice->GetObject<NrGnbNetDevice>()->GetRrc();
@@ -1778,8 +1939,8 @@ NrDrbActivator::ActivateDrb(uint64_t imsi, uint16_t cellId, uint16_t rnti)
                   ueManager->GetState() == NrUeManager::CONNECTION_RECONFIGURATION);
         NrEpcGnbS1SapUser::DataRadioBearerSetupRequestParameters params;
         params.rnti = rnti;
-        params.bearer = m_bearer;
-        params.bearerId = 0;
+        params.flow = m_flow;
+        params.qfi = 0;
         params.gtpTeid = 0; // don't care
         gnbRrc->GetS1SapUser()->DataRadioBearerSetupRequest(params);
         m_active = true;
@@ -1787,17 +1948,17 @@ NrDrbActivator::ActivateDrb(uint64_t imsi, uint16_t cellId, uint16_t rnti)
 }
 
 void
-NrHelper::ActivateDataRadioBearer(NetDeviceContainer ueDevices, NrEpsBearer bearer)
+NrHelper::ActivateDataRadioBearer(NetDeviceContainer ueDevices, NrQosFlow flow)
 {
     NS_LOG_FUNCTION(this);
-    for (NetDeviceContainer::Iterator i = ueDevices.Begin(); i != ueDevices.End(); ++i)
+    for (auto i = ueDevices.Begin(); i != ueDevices.End(); ++i)
     {
-        ActivateDataRadioBearer(*i, bearer);
+        ActivateDataRadioBearer(*i, flow);
     }
 }
 
 void
-NrHelper::ActivateDataRadioBearer(Ptr<NetDevice> ueDevice, NrEpsBearer bearer)
+NrHelper::ActivateDataRadioBearer(Ptr<NetDevice> ueDevice, NrQosFlow flow)
 {
     NS_LOG_FUNCTION(this << ueDevice);
     NS_ASSERT_MSG(!m_nrEpcHelper, "this method must not be used when the EPC is being used");
@@ -1812,7 +1973,7 @@ NrHelper::ActivateDataRadioBearer(Ptr<NetDevice> ueDevice, NrEpsBearer bearer)
     std::ostringstream path;
     path << "/NodeList/" << nrGnbDevice->GetNode()->GetId() << "/DeviceList/"
          << nrGnbDevice->GetIfIndex() << "/NrGnbRrc/ConnectionEstablished";
-    Ptr<NrDrbActivator> arg = Create<NrDrbActivator>(ueDevice, bearer);
+    Ptr<NrDrbActivator> arg = Create<NrDrbActivator>(ueDevice, flow);
     Config::Connect(path.str(), MakeBoundCallback(&NrDrbActivator::ActivateCallback, arg));
 }
 
@@ -2100,10 +2261,23 @@ NrHelper::SetPmSearchTypeId(const TypeId& typeId)
 }
 
 void
+NrHelper::SetInitialAssocTypeId(const TypeId& typeId)
+{
+    m_initialAttachmentFactory.SetTypeId(typeId);
+}
+
+void
 NrHelper::SetPmSearchAttribute(const std::string& name, const AttributeValue& value)
 {
     NS_LOG_FUNCTION(this);
     m_pmSearchFactory.Set(name, value);
+}
+
+void
+NrHelper::SetInitialAssocAttribute(const std::string& name, const AttributeValue& value)
+{
+    NS_LOG_FUNCTION(this);
+    m_initialAttachmentFactory.Set(name, value);
 }
 
 void
@@ -2124,6 +2298,7 @@ NrHelper::SetupGnbAntennas(const NrHelper::AntennaParams& ap)
     SetGnbAntennaAttribute("NumVerticalPorts", UintegerValue(ap.nVertPorts));
     SetGnbAntennaAttribute("BearingAngle", DoubleValue(ap.bearingAngle));
     SetGnbAntennaAttribute("PolSlantAngle", DoubleValue(ap.polSlantAngle));
+    SetGnbAntennaAttribute("DowntiltAngle", DoubleValue(ap.downtiltAngle));
 }
 
 void
@@ -2144,22 +2319,57 @@ NrHelper::SetupUeAntennas(const NrHelper::AntennaParams& ap)
     SetUeAntennaAttribute("NumVerticalPorts", UintegerValue(ap.nVertPorts));
     SetUeAntennaAttribute("BearingAngle", DoubleValue(ap.bearingAngle));
     SetUeAntennaAttribute("PolSlantAngle", DoubleValue(ap.polSlantAngle));
+    SetUeAntennaAttribute("DowntiltAngle", DoubleValue(ap.downtiltAngle));
 }
 
 void
 NrHelper::SetupMimoPmi(const NrHelper::MimoPmiParams& mp)
 {
+    // If NrHelper is using default PDSCH_SISO CSI feedback flag,
+    // replace it with PDSCH_MIMO to implicitly enable MIMO feedback
+    if (m_csiFeedbackFlags == CQI_PDSCH_SISO)
+    {
+        SetAttribute("CsiFeedbackFlags", UintegerValue(CQI_PDSCH_MIMO));
+    }
     // Set parameters for MIMO precoding matrix search
-    SetAttribute("EnableMimoFeedback", BooleanValue(true));
     auto searchTypeId = TypeId::LookupByName(mp.pmSearchMethod);
     SetPmSearchTypeId(searchTypeId);
     SetPmSearchAttribute("RankLimit", UintegerValue(mp.rankLimit));
+    SetPmSearchAttribute("RankThreshold", DoubleValue(mp.rankThreshold));
+    SetPmSearchAttribute("RankTechnique", StringValue(mp.rankTechnique));
     SetPmSearchAttribute("SubbandSize", UintegerValue(mp.subbandSize));
     SetPmSearchAttribute("DownsamplingTechnique", StringValue(mp.downsamplingTechnique));
-    if (searchTypeId == NrPmSearchFull::GetTypeId())
+    if (searchTypeId == NrPmSearchFull::GetTypeId() ||
+        searchTypeId.GetParent() == NrPmSearchFull::GetTypeId())
     {
         SetPmSearchAttribute("CodebookType", TypeIdValue(TypeId::LookupByName(mp.fullSearchCb)));
     }
+}
+
+void
+NrHelper::SetupInitialAssoc(const NrHelper::InitialAssocParams& params)
+{
+    // Set parameters for Initial Association Params
+    m_initialParams = params;
+    SetInitialAssocAttribute("HandoffMargin", DoubleValue(params.handoffMargin));
+    SetInitialAssocAttribute("PrimaryCarrierIndex", UintegerValue(params.primaryCarrierIndex));
+}
+
+bool
+NrHelper::IsMimoFeedbackEnabled() const
+{
+    if (m_csiFeedbackFlags == CQI_PDSCH_SISO)
+    {
+        return false;
+    }
+    if ((m_csiFeedbackFlags == CQI_PDSCH_MIMO) || (m_csiFeedbackFlags == CQI_CSI_RS) ||
+        (m_csiFeedbackFlags == (CQI_PDSCH_MIMO | CQI_CSI_RS)) ||
+        (m_csiFeedbackFlags == (CQI_PDSCH_MIMO | CQI_CSI_RS | CQI_CSI_IM)) ||
+        (m_csiFeedbackFlags == (CQI_CSI_RS | CQI_CSI_IM)))
+    {
+        return true;
+    }
+    NS_ABORT_MSG("Unsupported NrHelper::CsiFeedbackFlags combination");
 }
 
 } // namespace ns3

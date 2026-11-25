@@ -1,19 +1,19 @@
 # ##############################################################################
 # Required CMake version            #
 # ##############################################################################
-cmake_minimum_required(VERSION 3.13..3.13)
+cmake_minimum_required(VERSION 3.25..3.25)
 
 # ##############################################################################
 # Project name                        #
 # ##############################################################################
-project(NS3 CXX C)
+project(NS3 CXX)
 
 file(STRINGS VERSION NS3_VER)
 
 # minimum compiler versions
-set(AppleClang_MinVersion 13.1.6)
-set(Clang_MinVersion 11.0.0)
-set(GNU_MinVersion 10.1.0)
+set(AppleClang_MinVersion 17.0.0)
+set(Clang_MinVersion 17.0.0)
+set(GNU_MinVersion 11.0.0)
 
 # common options
 option(NS3_ASSERT "Enable assert on failure" OFF)
@@ -30,8 +30,16 @@ option(NS3_DPDK "Enable fd-net-device DPDK features" OFF)
 # maintenance and documentation
 option(NS3_CLANG_FORMAT "Enforce cody style with clang-format" OFF)
 option(NS3_CLANG_TIDY "Use clang-tidy static analysis" OFF)
+option(NS3_CLANG_TIDY_FIX
+       "Use clang-tidy static analysis and apply automatic fixes" OFF
+)
 option(NS3_CLANG_TIMETRACE
        "Collect compilation statistics to analyze the build process" OFF
+)
+option(
+  NS3_CLANGCL_STLCHECKS
+  "Redirect MSVC CRT debug reports (e.g. checked-iterator assertions) to stderr with a stack trace instead of a message box; only effective in debug builds with MSVC-compatible toolchains (cl, clang-cl)"
+  OFF
 )
 option(NS3_COLORED_OUTPUT "Colorize CMake messages" OFF)
 option(NS3_COVERAGE "Enable code coverage measurements and report generation"
@@ -101,7 +109,7 @@ set(NS3_ENABLED_MODULES ""
     CACHE STRING "List of modules to enable (e.g. core;network;internet)"
 )
 set(NS3_DISABLED_MODULES "" CACHE STRING
-                                  "List of modules to disable (e.g. lte;wimax)"
+                                  "List of modules to disable (e.g. lte;wifi)"
 )
 
 # Filter in the modules from which examples and tests will be built
@@ -120,6 +128,18 @@ subdirlist(libs_to_build ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # Scan contribution libraries
 subdirlist(contrib_libs_to_build ${CMAKE_CURRENT_SOURCE_DIR}/contrib)
+
+# Scan for additional contribution libraries OUTSIDE the ns-3 source directory,
+# in the ns-3-external-contrib directory
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../ns-3-external-contrib)
+  subdirlist(
+    external_contrib_libs_to_build
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ns-3-external-contrib
+  )
+  set(contrib_libs_to_build ${contrib_libs_to_build}
+                            ${external_contrib_libs_to_build}
+  )
+endif()
 
 # Before filtering, we need to load settings from .ns3rc
 parse_ns3rc(
@@ -145,6 +165,18 @@ if(${NS3_CCACHE})
         ${CCACHE} --set-config
         sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
     )
+    if(DEFINED MSVC)
+      if(MSVC)
+        file(COPY_FILE ${CCACHE} ${CMAKE_BINARY_DIR}/clang-cl.exe
+             ONLY_IF_DIFFERENT
+        )
+        set(CMAKE_VS_GLOBALS
+            "CLToolExe=clang-cl.exe" "CLToolPath=${CMAKE_BINARY_DIR}"
+            "TrackFileAccess=false" "UseMultiToolTask=true"
+            "DebugInformationFormat=OldStyle"
+        )
+      endif()
+    endif()
   endif()
 endif()
 

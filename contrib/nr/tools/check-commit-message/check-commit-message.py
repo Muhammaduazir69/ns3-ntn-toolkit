@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import sys
+from collections import defaultdict
 
 # Check for dependencies that are not in the standard Python libraries
 try:
@@ -25,6 +26,8 @@ if shutil.which("git") is None:
 # Define global variables
 CTTC_LENA_NR_REPOSITORY = "https://gitlab.com/cttc-lena/nr"
 COMMIT_STYLE_REGEX = r"^([a-z0-9\-\*]+(?:, [a-z0-9\-\*]+)*):((?: \(\w+ #\d+\))?) ([A-Z][^\n]*$)"
+# Files ignored when deriving the expected commit prefix
+PREFIX_EXEMPT_FILES = {"CHANGES.md"}
 
 
 # Get all file names without extension
@@ -209,7 +212,7 @@ class MatchesFormatCheck(BaseCheck):
                 errors.append("mismatching parenthesis")
 
             # If there is a closing parenthesis, get the commit description after it
-            if message.count(")"):
+            if "(fixes" in message and message.count(")"):
                 message = message[message.index(")") + 1 :]
 
             # Remove whitespaces and newlines
@@ -224,119 +227,186 @@ class MatchesFormatCheck(BaseCheck):
 
 
 class CheckPrefix(BaseCheck):
+    def _parse_components(self, commit_info):
+        raw = commit_info.matches.group(1)
+        return [c.strip() for c in raw.split(",") if c.strip()]
+
+    def _changed_paths(self, commit_info):
+        paths = list(commit_info.commit.stats.files.keys())
+        # CHANGES.md entries accompany code changes, so they do not count
+        # towards the prefix unless CHANGES.md is the only file touched
+        other_paths = [p for p in paths if p not in PREFIX_EXEMPT_FILES]
+        return other_paths if other_paths else paths
+
+    @staticmethod
+    def _basename_without_ext(path):
+        base = os.path.basename(path)
+        name, _ = os.path.splitext(base)
+        return name.lstrip(".").lower()
+
+    @staticmethod
+    def _common_parent_dir(paths):
+        # Fallback when stats are empty (e.g., merge or empty commit)
+        if not paths:
+            return "nr"
+        dirs = [os.path.dirname(p) or "." for p in paths]
+        common = os.path.commonpath(dirs)
+        if common in ("", "."):
+            return "nr"
+        return os.path.basename(common)
+
+    def _unique_basenames(self, paths):
+        basenames = {self._basename_without_ext(p) for p in paths}
+        return sorted(basenames)
+
+    @staticmethod
+    def _longest_common_prefix(strings):
+        if not strings:
+            return ""
+        prefix = strings[0]
+        for s in strings[1:]:
+            i = 0
+            max_i = min(len(prefix), len(s))
+            while i < max_i and prefix[i] == s[i]:
+                i += 1
+            prefix = prefix[:i]
+            if not prefix:
+                break
+        return prefix
+
+    def _valid_prefix_representations(self, paths):
+        basenames = self._unique_basenames(paths)
+        n_unique = len(basenames)
+
+        if n_unique == 0:
+            return []
+
+        if n_unique <= 3:
+            canonical = basenames
+            canonical_prefix_str = ", ".join(canonical)
+            canonical_valid = len(canonical_prefix_str) <= 40
+
+            # Hyphen-aware wildcard when filenames share a prefix
+            lcp = self._longest_common_prefix(basenames)
+            wildcard = None
+            if lcp:
+                # Truncate LCP back to last '-' so we only keep full segments
+                last_dash = lcp.rfind("-")
+                if last_dash > 0:
+                    common_segment = lcp[:last_dash]  # e.g., "nr-epc"
+                    # Collapse the bare "nr-*" wildcard to the module prefix "nr".
+                    candidate = "nr" if common_segment == "nr" else common_segment + "-*"
+                    if len(candidate) <= 40:
+                        wildcard = [candidate]
+
+            representations = []
+            if canonical_valid:
+                representations.append(canonical)
+            if wildcard is not None:
+                representations.append(wildcard)
+
+            return representations
+
+        # More than 3 distinct filenames: only directory fallback is allowed
+        return []
+
     def check(self, commit_info):
-        # Can't check prefix if it doesn't match the expected format
         if commit_info.matches is None:
             return False
 
-        # Extract changed files in the commit
-        changed_files = get_files_dictionary(list(commit_info.commit.stats.files.keys()))
+        paths = self._changed_paths(commit_info)
+        given_components = self._parse_components(commit_info)
 
-        # Extract the components from the first regex group (list of files before ':')
-        components = commit_info.matches.group(1).split(", ")
+        # First, try filename-based prefixes (≤ 3 distinct basenames)
+        valid_sets = self._valid_prefix_representations(paths)
 
-        if len(changed_files) < 4:
-            # Test the case with less than 4 modified files
-            for component in components:
-                if component.endswith("*"):
-                    matching_files = list(filter(lambda x: component[:-1] in x, FILES))
-                    if len(matching_files) == 0:
-                        return False
-                    matching_changed_files = list(
-                        filter(lambda x: x in changed_files, matching_files)
-                    )
-                    if len(matching_changed_files) == 0:
-                        return False
-                else:
-                    if component not in FILES:
-                        return False
-                    if component not in changed_files:
-                        return False
-            return True
-        else:
-            # Test the case with more than 3 modified files
-            # There should be a single component
-            if len(components) != 1:
-                return False
+        if valid_sets:
+            sorted_given = sorted(given_components)
+            for allowed in valid_sets:
+                if sorted_given == sorted(allowed):
+                    return True
+            # There *was* a valid filename-based representation, but the user
+            # did not use any of them.
+            return False
 
-            # Get the common path between the changed files
-            parent_dir = os.path.commonpath(
-                list(map(lambda x: os.path.join("nr", x), changed_files.values()))
-            )
-            parent_dir = os.path.basename(parent_dir)
-
-            # Check if that path matches the component prefix
-            return components[0] == parent_dir
+        # Otherwise, require closest common parent directory prefix
+        parent_dir = self._common_parent_dir(paths)
+        return len(given_components) == 1 and given_components[0] == parent_dir
 
     def description(self):
         msg = (
             "  Checked rules:\n"
-            "   1.Commits with up to 3 changed files should use them as a prefix.\n"
-            "   2.Commits with more than 3 changed files should use their closest common parent directory as a prefix."
+            "   1.Commits touching up to 3 distinct files should use their "
+            "lowercase, extension-less names as the prefix, provided that the "
+            "resulting prefix is at most 40 characters long. When those names "
+            "share a common prefix, a single '<common-prefix>-*' wildcard is also allowed "
+            "(the bare 'nr-*' wildcard is collapsed to 'nr').\n"
+            "   2.Commits touching more than 3 distinct files, or for which no "
+            "filename-based prefix fits within 40 characters, should use their "
+            "closest common parent directory as a prefix.\n"
+            "   3.CHANGES.md is ignored when determining the prefix, unless it is "
+            "the only file touched by the commit."
         )
         return msg
 
     def diagnostic_message(self, commit_info):
         if commit_info.matches is None:
-            return f"  \tError: incorrect format style"
+            return "  \tError: incorrect format style. See MatchesFormatCheck results."
 
-        # Extract components from prefix
-        components = commit_info.matches.group(1).split(", ")
+        paths = self._changed_paths(commit_info)
+        given_components = self._parse_components(commit_info)
 
-        # Extract changed files in the commit
-        changed_files = get_files_dictionary(list(commit_info.commit.stats.files.keys()))
+        # If it already passes, do not print anything.
+        if self.check(commit_info):
+            return None
 
-        if len(changed_files) < 4:
-            # Check each component
-            errors = []
+        basenames = self._unique_basenames(paths)
+        valid_sets = self._valid_prefix_representations(paths)
 
-            # If the names of the files are bigger than 40 characters,
-            # look for similarities, so that we can save up on the prefix length
-            if len(", ".join(changed_files.keys())) > 40:
-                # Find the largest shared prefix
-                all_combinations = itertools.combinations(changed_files.keys(), len(changed_files))
-                max_prefix = ""
-                for combination in all_combinations:
-                    prefix = os.path.commonprefix(combination)
-                    if len(prefix) > len(max_prefix):
-                        max_prefix = prefix
+        if valid_sets:
+            # Prefer the most explicit representation (full filenames) when valid.
+            canonical = basenames
+            canonical_prefix_str = ", ".join(canonical)
+            canonical_valid = len(canonical_prefix_str) <= 40
 
-                # Regenerate prefix with shared prefix
-                changed_files_not_sharing_prefix = list(
-                    filter(lambda x: max_prefix not in x, changed_files.keys())
-                )
-                shorter_prefix = ", ".join(changed_files_not_sharing_prefix + [f"{max_prefix}-*"])
-                if shorter_prefix not in commit_info.header:
-                    errors.append(f'Prefix is too large: use "{shorter_prefix}"')
-
-            for component in components:
-                if component.endswith("*"):
-                    matching_files = list(filter(lambda x: component[:-1] in x, FILES))
-                    if len(matching_files) == 0:
-                        errors.append(f"{component} is not an existing file")
-                        continue
-                    matching_changed_files = list(
-                        filter(lambda x: x in changed_files, matching_files)
-                    )
-                    if len(matching_changed_files) == 0:
-                        errors.append(f"{matching_files} have not been changed")
-                else:
-                    if component not in FILES:
-                        errors.append(f"{component} is not an existing file")
-                        continue
-                    if component not in changed_files:
-                        errors.append(f"{FILES[component]} has not been changed")
-            return f"  \tErrors: {', '.join(errors)}"
+            if canonical_valid:
+                expected_prefix = canonical_prefix_str
+            else:
+                # Fall back to the first wildcard representation.
+                expected_prefix = ", ".join(valid_sets[0])
         else:
-            # Get the common path between the changed files
-            parent_dir = os.path.commonpath(
-                list(map(lambda x: os.path.join("nr", x), changed_files.values()))
-            )
-            parent_dir = os.path.basename(parent_dir)
+            parent_dir = self._common_parent_dir(paths)
+            expected_prefix = parent_dir
 
-            if len(components) != 1 or components[0] != parent_dir:
-                return f"  \tError: prefix should be '{parent_dir}'"
-        return None
+        return f'  \tError: prefix should be "{expected_prefix}"'
+
+
+class BodyParagraphCheck(BaseCheck):
+    # Lines that may follow another line of the same block: list items, indented lines
+    # (code or the continuation of a list item) and trailers
+    BLOCK_LINE_REGEX = re.compile(r"^(?:[-*] |\d+[.)] |\s|[A-Za-z-]+: )")
+
+    def _wrapped_lines(self, commit_info):
+        lines = commit_info.commit.message.split("\n")[1:]
+        wrapped = []
+        for previous, line in zip(lines, lines[1:]):
+            if previous.strip() and line.strip() and not self.BLOCK_LINE_REGEX.match(line):
+                wrapped.append(line)
+        return wrapped
+
+    def check(self, commit_info):
+        return not self._wrapped_lines(commit_info)
+
+    def description(self):
+        return (
+            "Checked rule: blank lines separate the paragraphs of the commit message body, and a "
+            "paragraph is written on a single line, without line breaks."
+        )
+
+    def diagnostic_message(self, commit_info):
+        msg = "  \tError: line breaks inside a paragraph, before:"
+        msg += "".join(f"\n\t\t{line}" for line in self._wrapped_lines(commit_info))
+        return msg
 
 
 def retrieve_commits_info():
@@ -372,6 +442,7 @@ def main(argv):
         LengthCheck(args),
         MatchesFormatCheck(args),
         CheckPrefix(args),
+        BodyParagraphCheck(args),
     ]
 
     passed = 0

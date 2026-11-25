@@ -1510,7 +1510,7 @@ class SliceQfiMappingTest : public TestCase
 {
   public:
     SliceQfiMappingTest()
-        : TestCase("§4.4.7: QFI bands map to URLLC / eMBB / mMTC")
+        : TestCase("§4.4.7: QFI bands map to URLLC - eMBB - mMTC")
     {
     }
 
@@ -1589,7 +1589,7 @@ class SliceTightUrllcStopsAtHapsTest : public TestCase
 {
   public:
     SliceTightUrllcStopsAtHapsTest()
-        : TestCase("§4.4.7: tight 1 ms URLLC stops at HAPS, refusing LEO/GEO")
+        : TestCase("§4.4.7: tight 1 ms URLLC stops at HAPS, refusing LEO-GEO")
     {
     }
 

@@ -35,6 +35,18 @@ using namespace ns3;
 
 namespace
 {
+/// Normalized uniform weights for an array of @p n elements.
+PhasedArrayModel::ComplexVector
+UniformWeights(size_t n)
+{
+    PhasedArrayModel::ComplexVector w(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        w[i] = 1.0 / std::sqrt(static_cast<double>(n));
+    }
+    return w;
+}
+
 
 /// A plugin that scales the received PSD by a fixed factor (stands in for a
 /// THz / Sionna / RIS per-RB transfer function).
@@ -93,7 +105,9 @@ class ScalingPhasedInner : public PhasedArraySpectrumPropagationLossModel
         Ptr<const MobilityModel>,
         Ptr<const MobilityModel>,
         Ptr<const PhasedArrayModel>,
-        Ptr<const PhasedArrayModel>) const override
+        Ptr<const PhasedArrayModel>,
+        const PhasedArrayModel::ComplexVector&,
+        const PhasedArrayModel::ComplexVector&) const override
     {
         Ptr<SpectrumSignalParameters> rx = params->Copy();
         Ptr<SpectrumValue> psd = params->psd->Copy();
@@ -129,7 +143,7 @@ class NtnSpectrumSeamComposeTest : public TestCase
 {
   public:
     NtnSpectrumSeamComposeTest()
-        : TestCase("NtnSpectrumSeamModel composes plugin ON TOP of the 3GPP channel (S1/gate 4)")
+        : TestCase("NtnSpectrumSeamModel composes plugin ON TOP of the 3GPP channel (S1-gate 4)")
     {
     }
 
@@ -140,13 +154,16 @@ class NtnSpectrumSeamComposeTest : public TestCase
         Ptr<ConstantPositionMobilityModel> b = CreateObject<ConstantPositionMobilityModel>();
         b->SetPosition(Vector(1000.0, 0.0, 0.0));
         Ptr<UniformPlanarArray> arr = CreateObject<UniformPlanarArray>();
+        // ns-3.49 passes the beamforming vectors in effect explicitly; the scaling inners
+        // ignore them, any normalized vector does.
+        const PhasedArrayModel::ComplexVector bf = UniformWeights(arr->GetNumElems());
 
         // Case 1: no inner, one halving plugin -> PSD halved.
         {
             Ptr<NtnSpectrumSeamModel> seam = CreateObject<NtnSpectrumSeamModel>();
-            seam->AddPlugin(Create<ScalingPlugin>(0.5));
+            seam->AddPlugin(CreateObject<ScalingPlugin>(0.5));
             NS_TEST_ASSERT_MSG_EQ(seam->GetNumPlugins(), 1u, "plugin registered");
-            auto rx = seam->CalcRxPowerSpectralDensity(MakeParams(100.0), a, b, arr, arr);
+            auto rx = seam->CalcRxPowerSpectralDensity(MakeParams(100.0), a, b, arr, arr, bf, bf);
             NS_TEST_ASSERT_MSG_EQ_TOL((*rx->psd)[0], 50.0, 1e-9,
                                       "plugin must be applied to the PSD");
         }
@@ -157,9 +174,9 @@ class NtnSpectrumSeamComposeTest : public TestCase
         // bug this test guards.)
         {
             Ptr<NtnSpectrumSeamModel> seam = CreateObject<NtnSpectrumSeamModel>();
-            seam->SetInnerModel(Create<ScalingPhasedInner>(2.0));
-            seam->AddPlugin(Create<ScalingPlugin>(0.5));
-            auto rx = seam->CalcRxPowerSpectralDensity(MakeParams(100.0), a, b, arr, arr);
+            seam->SetInnerModel(CreateObject<ScalingPhasedInner>(2.0));
+            seam->AddPlugin(CreateObject<ScalingPlugin>(0.5));
+            auto rx = seam->CalcRxPowerSpectralDensity(MakeParams(100.0), a, b, arr, arr, bf, bf);
             NS_TEST_ASSERT_MSG_EQ_TOL(
                 (*rx->psd)[0], 100.0, 1e-9,
                 "seam must run inner (x2) THEN plugin (x0.5) = x1, not replace inner with plugin");
@@ -168,8 +185,8 @@ class NtnSpectrumSeamComposeTest : public TestCase
         // Case 3: inner alone (no plugin) passes through unchanged (x2).
         {
             Ptr<NtnSpectrumSeamModel> seam = CreateObject<NtnSpectrumSeamModel>();
-            seam->SetInnerModel(Create<ScalingPhasedInner>(2.0));
-            auto rx = seam->CalcRxPowerSpectralDensity(MakeParams(100.0), a, b, arr, arr);
+            seam->SetInnerModel(CreateObject<ScalingPhasedInner>(2.0));
+            auto rx = seam->CalcRxPowerSpectralDensity(MakeParams(100.0), a, b, arr, arr, bf, bf);
             NS_TEST_ASSERT_MSG_EQ_TOL((*rx->psd)[0], 200.0, 1e-9,
                                       "with no plugin the inner 3GPP channel is untouched");
         }
@@ -319,7 +336,9 @@ class MatrixInner : public PhasedArraySpectrumPropagationLossModel
                                                                Ptr<const MobilityModel>,
                                                                Ptr<const MobilityModel>,
                                                                Ptr<const PhasedArrayModel>,
-                                                               Ptr<const PhasedArrayModel>) const override
+                                                               Ptr<const PhasedArrayModel>,
+        const PhasedArrayModel::ComplexVector&,
+        const PhasedArrayModel::ComplexVector&) const override
     {
         Ptr<SpectrumSignalParameters> rx = params->Copy();
         Ptr<SpectrumValue> psd = params->psd->Copy();
@@ -398,6 +417,13 @@ class ArrayProbePhy : public SpectrumPhy
 
     Ptr<Object> GetAntenna() const override
     {
+        // ns-3.49 (#1369) reads both arrays' vectors in StartTx; keep a normalized one that
+        // matches the array's current size.
+        if (m_bfSize != m_array->GetNumElems())
+        {
+            m_bfSize = m_array->GetNumElems();
+            m_array->SetBeamformingVector(UniformWeights(m_bfSize));
+        }
         return m_array;
     }
 
@@ -412,6 +438,9 @@ class ArrayProbePhy : public SpectrumPhy
         p->psd = psd->Copy();
         p->duration = MicroSeconds(100);
         p->txPhy = this;
+        // ns-3.49 (#1369) reads the transmitter's vector at StartTx: give the array a
+        // normalized one for its current size.
+        GetAntenna();
         m_channel->StartTx(p);
     }
 
@@ -424,6 +453,7 @@ class ArrayProbePhy : public SpectrumPhy
 
   private:
     Ptr<UniformPlanarArray> m_array;
+    mutable size_t m_bfSize{0}; ///< array size the current vector was set for
     Ptr<MobilityModel> m_mobility;
     Ptr<SpectrumChannel> m_channel;
     Ptr<const SpectrumModel> m_model;
@@ -495,9 +525,9 @@ class NtnSpectrumSeamOrderTest : public TestCase
     void DoRun() override
     {
         Ptr<NtnSpectrumSeamModel> a = CreateObject<NtnSpectrumSeamModel>();
-        a->SetInnerModel(Create<ScalingPhasedInner>(2.0));
-        a->AddPlugin(Create<AffinePlugin>(2.0, 0.0));
-        a->AddPlugin(Create<AffinePlugin>(1.0, 10.0));
+        a->SetInnerModel(CreateObject<ScalingPhasedInner>(2.0));
+        a->AddPlugin(CreateObject<AffinePlugin>(2.0, 0.0));
+        a->AddPlugin(CreateObject<AffinePlugin>(1.0, 10.0));
         Ptr<SpectrumValue> txPsd;
         const auto ra = LiveSeam(a, 6, 1.0, 20, &txPsd);
         NS_TEST_ASSERT_MSG_EQ(ra.size(), 20u, "every transmission delivered through the phased-array slot");
@@ -511,9 +541,9 @@ class NtnSpectrumSeamOrderTest : public TestCase
         NS_TEST_ASSERT_MSG_EQ((*txPsd)[0], 1.0, "the transmitted PSD is not modified");
 
         Ptr<NtnSpectrumSeamModel> b = CreateObject<NtnSpectrumSeamModel>();
-        b->SetInnerModel(Create<ScalingPhasedInner>(2.0));
-        b->AddPlugin(Create<AffinePlugin>(1.0, 10.0));
-        b->AddPlugin(Create<AffinePlugin>(2.0, 0.0));
+        b->SetInnerModel(CreateObject<ScalingPhasedInner>(2.0));
+        b->AddPlugin(CreateObject<AffinePlugin>(1.0, 10.0));
+        b->AddPlugin(CreateObject<AffinePlugin>(2.0, 0.0));
         const auto rb = LiveSeam(b, 6, 1.0, 5);
         NS_TEST_ASSERT_MSG_EQ(rb.size(), 5u, "delivered");
         if (!rb.empty())
@@ -543,8 +573,8 @@ class NtnSpectrumSeamMatrixTest : public TestCase
         const std::vector<double> g1 = {0.25, 4.0, 1.0, 0.0};
         const std::vector<double> g2 = {4.0, 0.25, 9.0, 5.0};
         Ptr<NtnSpectrumSeamModel> seam = CreateObject<NtnSpectrumSeamModel>();
-        seam->SetInnerModel(Create<MatrixInner>(3.0, 0));
-        seam->AddPlugin(Create<PerRbPlugin>(g1));
+        seam->SetInnerModel(CreateObject<MatrixInner>(3.0, 0));
+        seam->AddPlugin(CreateObject<PerRbPlugin>(g1));
         const auto r1 = LiveSeam(seam, 4, 1.0, 3);
         NS_TEST_ASSERT_MSG_EQ(r1.size(), 3u, "delivered");
         for (const auto& p : r1)
@@ -570,9 +600,9 @@ class NtnSpectrumSeamMatrixTest : public TestCase
         }
 
         Ptr<NtnSpectrumSeamModel> two = CreateObject<NtnSpectrumSeamModel>();
-        two->SetInnerModel(Create<MatrixInner>(1.0, 0));
-        two->AddPlugin(Create<PerRbPlugin>(g1));
-        two->AddPlugin(Create<PerRbPlugin>(g2));
+        two->SetInnerModel(CreateObject<MatrixInner>(1.0, 0));
+        two->AddPlugin(CreateObject<PerRbPlugin>(g1));
+        two->AddPlugin(CreateObject<PerRbPlugin>(g2));
         const auto r2 = LiveSeam(two, 4, 1.0, 1);
         NS_TEST_ASSERT_MSG_EQ(r2.size(), 1u, "delivered");
         if (!r2.empty())
@@ -621,9 +651,9 @@ class NtnSpectrumSeamFailurePathsTest : public TestCase
         }
         {
             Ptr<NtnSpectrumSeamModel> seam = CreateObject<NtnSpectrumSeamModel>();
-            seam->SetInnerModel(Create<ScalingPhasedInner>(2.0));
-            seam->AddPlugin(Create<NullPlugin>());
-            seam->AddPlugin(Create<AffinePlugin>(3.0, 0.0));
+            seam->SetInnerModel(CreateObject<ScalingPhasedInner>(2.0));
+            seam->AddPlugin(CreateObject<NullPlugin>());
+            seam->AddPlugin(CreateObject<AffinePlugin>(3.0, 0.0));
             const auto r = LiveSeam(seam, 3, 1.0, 2);
             NS_TEST_ASSERT_MSG_EQ(r.size(), 2u, "delivered");
             for (const auto& p : r)
@@ -634,8 +664,8 @@ class NtnSpectrumSeamFailurePathsTest : public TestCase
         }
         {
             Ptr<NtnSpectrumSeamModel> seam = CreateObject<NtnSpectrumSeamModel>();
-            seam->SetInnerModel(Create<MatrixInner>(1.0, 2));
-            seam->AddPlugin(Create<PerRbPlugin>(std::vector<double>{0.5, 0.5, 0.5}));
+            seam->SetInnerModel(CreateObject<MatrixInner>(1.0, 2));
+            seam->AddPlugin(CreateObject<PerRbPlugin>(std::vector<double>{0.5, 0.5, 0.5}));
             const auto r = LiveSeam(seam, 3, 1.0, 1);
             NS_TEST_ASSERT_MSG_EQ(r.size(), 1u, "delivered");
             if (!r.empty())
@@ -670,9 +700,9 @@ class NtnSpectrumSeamDeterminismTest : public TestCase
     std::vector<double> Run(int64_t stream, int64_t* used)
     {
         Ptr<NtnSpectrumSeamModel> seam = CreateObject<NtnSpectrumSeamModel>();
-        seam->SetInnerModel(Create<ScalingPhasedInner>(2.0));
+        seam->SetInnerModel(CreateObject<ScalingPhasedInner>(2.0));
         seam->AddPlugin(CreateObject<NtnTdlSpectrumPropagationLossModel>());
-        seam->AddPlugin(Create<ScalingPlugin>(0.5));
+        seam->AddPlugin(CreateObject<ScalingPlugin>(0.5));
         *used = seam->AssignStreams(stream);
         const auto r = LiveSeam(seam, 12, 1.0, 20);
         std::vector<double> v;
@@ -750,7 +780,7 @@ NrSinrWithPlugins(const std::vector<Ptr<SpectrumPropagationLossModel>>& plugins,
 Ptr<SpectrumPropagationLossModel>
 GainDb(double db)
 {
-    return Create<ScalingPlugin>(std::pow(10.0, db / 10.0));
+    return CreateObject<ScalingPlugin>(std::pow(10.0, db / 10.0));
 }
 
 } // namespace

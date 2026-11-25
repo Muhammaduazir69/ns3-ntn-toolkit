@@ -10,6 +10,7 @@
 #define TID_TO_LINK_MAPPING_H
 
 #include "ns3/nstime.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-information-element.h"
 #include "ns3/wifi-utils.h"
 
@@ -31,42 +32,42 @@ constexpr uint16_t WIFI_TID_TO_LINK_MAPPING_CONTROL_BASIC_SIZE_B =
 constexpr uint16_t WIFI_LINK_MAPPING_PRESENCE_IND_SIZE_B = 1;
 
 /**
- * \brief TID-to-Link Mapping Information Element
- * \ingroup wifi
+ * @brief TID-to-Link Mapping Information Element
+ * @ingroup wifi
  *
  * This class serializes and deserializes
  * the TID-to-Link Mapping element
  * IEEE 802.11be D3.1 9.4.2.314
  *
  */
-class TidToLinkMapping : public WifiInformationElement
+class WIFI_EXPORT TidToLinkMapping : public WifiInformationElement
 {
   public:
     /**
      * TID-to-Link Mapping Control subfield
      * IEEE 802.11be D3.1 Figure 9-1002ap
      */
-    struct Control
+    struct WIFI_EXPORT Control
     {
         friend class TidToLinkMapping;
 
         WifiDirection direction{DEFAULT_WIFI_TID_LINK_MAP_DIR}; ///< Direction
         bool defaultMapping{DEFAULT_WIFI_TID_LINK_MAPPING};     ///< Default link mapping
 
-        /// \return Serialized size of TID-to-Link Mapping Control in octets
+        /// @return Serialized size of TID-to-Link Mapping Control in octets
         uint16_t GetSubfieldSize() const;
 
         /**
          * Serialize the TID-to-Link Mapping Control subfield
          *
-         * \param start iterator pointing to where the subfield should be written to
+         * @param start iterator pointing to where the subfield should be written to
          */
         void Serialize(Buffer::Iterator& start) const;
         /**
          * Deserialize the TID-to-Link Mapping Control subfield
          *
-         * \param start iterator pointing to where the subfield should be read from
-         * \return the number of octets read
+         * @param start iterator pointing to where the subfield should be read from
+         * @return the number of octets read
          */
         uint16_t Deserialize(Buffer::Iterator start);
 
@@ -87,38 +88,38 @@ class TidToLinkMapping : public WifiInformationElement
     /**
      * Set the Mapping Switch Time field.
      *
-     * \param mappingSwitchTime the time when the new mapping is established (rounded to a
+     * @param mappingSwitchTime the time when the new mapping is established (rounded to a
      *                          multiple of a TU)
      */
     void SetMappingSwitchTime(Time mappingSwitchTime);
 
-    /// \return the value of the Mapping Switch Time field, if present.
+    /// @return the value of the Mapping Switch Time field, if present.
     std::optional<Time> GetMappingSwitchTime() const;
 
     /**
      * Set the Expected Duration field.
      *
-     * \param expectedDuration the value for the Expected Duration field (rounded to a
+     * @param expectedDuration the value for the Expected Duration field (rounded to a
      *                         multiple of a TU)
      */
     void SetExpectedDuration(Time expectedDuration);
 
-    /// \return the value of the Expected Duration field, if present.
+    /// @return the value of the Expected Duration field, if present.
     std::optional<Time> GetExpectedDuration() const;
 
     /**
      * Set the Link Mapping field of the given TID such that the given TID is mapped
      * to the links associated with the given link IDs.
      *
-     * \param tid the given TID
-     * \param linkIds the IDs of the links which the given TID is mapped to
+     * @param tid the given TID
+     * @param linkIds the IDs of the links which the given TID is mapped to
      */
     void SetLinkMappingOfTid(uint8_t tid, std::set<uint8_t> linkIds);
     /**
      * Get the Link Mapping field of the given TID.
      *
-     * \param tid the given TID
-     * \return the IDs of the links which the given TID is mapped to
+     * @param tid the given TID
+     * @return the IDs of the links which the given TID is mapped to
      */
     std::set<uint8_t> GetLinkMappingOfTid(uint8_t tid) const;
 
@@ -132,6 +133,7 @@ class TidToLinkMapping : public WifiInformationElement
     uint16_t GetInformationFieldSize() const override;
     void SerializeInformationField(Buffer::Iterator start) const override;
     uint16_t DeserializeInformationField(Buffer::Iterator start, uint16_t length) override;
+    void Print(std::ostream& os) const override;
 };
 
 } // namespace ns3

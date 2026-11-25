@@ -20,7 +20,7 @@ using namespace ns3;
 using namespace ns3::energy;
 
 /**
- * \ingroup uan
+ * @ingroup uan
  *
  * This example shows the usage of UDP over IPv4 to transfer data.
  * Two nodes are sending their remaining energy percentage (1 byte)
@@ -63,15 +63,15 @@ class UanExperiment
 
     /**
      * Send a packet from one of the nodes
-     * \param node The sending node
-     * \param pkt The packet
-     * \param dst the destination
+     * @param node The sending node
+     * @param pkt The packet
+     * @param dst the destination
      */
     void SendSinglePacket(Ptr<Node> node, Ptr<Packet> pkt, Ipv4Address dst);
 
     /**
      * Print the received packet
-     * \param socket The receiving socket
+     * @param socket The receiving socket
      */
     void PrintReceivedPacket(Ptr<Socket> socket);
 
@@ -209,8 +209,7 @@ UanExperiment::SendPackets()
 void
 UanExperiment::SendSinglePacket(Ptr<Node> node, Ptr<Packet> pkt, Ipv4Address dst)
 {
-    NS_LOG_UNCOND(Simulator::Now().GetHours() << "h"
-                                              << " packet sent to " << dst);
+    NS_LOG_UNCOND(Simulator::Now().GetHours() << "h packet sent to " << dst);
     InetSocketAddress ipv4_destination = InetSocketAddress(dst, 9);
     m_sockets[node]->SendTo(pkt, 0, ipv4_destination);
 }

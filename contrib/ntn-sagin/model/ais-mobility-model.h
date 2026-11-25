@@ -29,6 +29,11 @@ class AisMobilityModel : public MobilityModel
     static constexpr double kKnotsToMps = 0.5144444;
 
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<AisMobilityModel>(*this);
+    }
     AisMobilityModel();
     ~AisMobilityModel() override = default;
 

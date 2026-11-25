@@ -108,7 +108,6 @@ PacketMetadata::Reserve(uint32_t size)
 bool
 PacketMetadata::IsSharedPointerOk(uint16_t pointer) const
 {
-    NS_LOG_FUNCTION(this << pointer);
     bool ok = pointer == 0xffff || pointer <= m_data->m_size;
     return ok;
 }
@@ -116,7 +115,6 @@ PacketMetadata::IsSharedPointerOk(uint16_t pointer) const
 bool
 PacketMetadata::IsPointerOk(uint16_t pointer) const
 {
-    NS_LOG_FUNCTION(this << pointer);
     bool ok = pointer == 0xffff || pointer <= m_used;
     return ok;
 }
@@ -1248,8 +1246,8 @@ PacketMetadata::Serialize(uint8_t* buffer, uint32_t maxSize) const
         current = item.next;
     }
 
-    NS_ASSERT(static_cast<uint32_t>(buffer - start) == maxSize);
-    return 1;
+    NS_ASSERT(static_cast<uint32_t>(buffer - start) <= maxSize);
+    return static_cast<uint32_t>(buffer - start);
 }
 
 uint32_t
@@ -1257,7 +1255,7 @@ PacketMetadata::Deserialize(const uint8_t* buffer, uint32_t size)
 {
     NS_LOG_FUNCTION(this << &buffer << size);
     const uint8_t* start = buffer;
-    uint32_t desSize = size - 4;
+    uint32_t desSize = size;
 
     buffer = ReadFromRawU64(m_packetUid, start, buffer, size);
     desSize -= 8;
@@ -1310,7 +1308,7 @@ PacketMetadata::Deserialize(const uint8_t* buffer, uint32_t size)
         UpdateTail(tmp);
     }
     NS_ASSERT(desSize == 0);
-    return (desSize != 0) ? 0 : 1;
+    return (desSize != 0) ? 0 : size;
 }
 
 uint8_t*

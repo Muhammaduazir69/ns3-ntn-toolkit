@@ -33,6 +33,8 @@
 
 #include "thz-ntn-pass-kit.h"
 
+#include "ns3/ntn-dataset-writer.h"
+#include <filesystem>
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
 #include <ns3/thz-ntn-molecular-absorption.h>
@@ -223,11 +225,18 @@ main(int argc, char* argv[])
                             {
                                 lutOk = a->LoadAtmosphericLut(lutFile);
                             }
+                            // Globe scene of the measured pass (SGP4 satellite and the
+                            // TR 38.811 terminal), next to the run record.
+                            ns3::ntnobs::StartSceneFromNodeList(
+                                std::filesystem::path(out).parent_path().string());
                         });
         if (!lutOk)
         {
             std::cerr << "companion: cannot load LUT " << lutFile << "\n";
         }
     }
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(std::filesystem::path(out).parent_path().string(), "thz-ntn-absorption-sweep", "analytic", argc, argv);
     return 0;
 }

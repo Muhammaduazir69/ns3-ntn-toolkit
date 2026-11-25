@@ -12,9 +12,9 @@
 #include <iostream>
 
 /**
- * \file
- * \ingroup core-examples
- * \ingroup ptr
+ * @file
+ * @ingroup core-examples
+ * @ingroup ptr
  * Example program illustrating use of the ns3::Ptr smart pointer.
  */
 
@@ -26,6 +26,12 @@ using namespace ns3;
 class PtrExample : public Object
 {
   public:
+    /**
+     * @brief Get the type ID.
+     * @return the object TypeId
+     */
+    static TypeId GetTypeId();
+
     /** Constructor. */
     PtrExample();
     /** Destructor. */
@@ -33,6 +39,16 @@ class PtrExample : public Object
     /** Example class method. */
     void Method();
 };
+
+NS_OBJECT_ENSURE_REGISTERED(PtrExample);
+
+TypeId
+PtrExample::GetTypeId()
+{
+    static TypeId tid =
+        TypeId("ns3::PtrExample").SetParent<Object>().SetGroupName("Core").HideFromDocumentation();
+    return tid;
+}
 
 PtrExample::PtrExample()
 {
@@ -60,8 +76,8 @@ static Ptr<PtrExample> g_ptr = nullptr;
  *
  * This function stores it's argument in the global variable \c g_ptr
  * and returns the old value of \c g_ptr.
- * \param [in] p A Ptr.
- * \returns The prior value of \c g_ptr.
+ * @param [in] p A Ptr.
+ * @returns The prior value of \c g_ptr.
  */
 static Ptr<PtrExample>
 StorePtr(Ptr<PtrExample> p)

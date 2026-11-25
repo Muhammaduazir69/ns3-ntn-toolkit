@@ -5,11 +5,12 @@
 #include "ns3/antenna-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
-#include "ns3/nr-eps-bearer-tag.h"
 #include "ns3/nr-module.h"
+#include "ns3/nr-qos-flow-tag.h"
 #include "ns3/point-to-point-helper.h"
 
 // Do not put your test classes in namespace ns3.  You may find it useful
@@ -17,10 +18,10 @@
 using namespace ns3;
 
 /**
- * \file nr-test-numerology-delay.cc
- * \ingroup test
+ * @file nr-test-numerology-delay.cc
+ * @ingroup test
  *
- * \brief In this test case we want to observe delays of a single UDP packet, and to track its
+ * @brief In this test case we want to observe delays of a single UDP packet, and to track its
  * gNB processing time, air time, UE time depending on the numerology.
  */
 
@@ -56,6 +57,7 @@ class NrTestNumerologyDelayCase1 : public TestCase
     uint32_t m_numSym{0};
     bool m_firstMacPdu{true};
     bool m_firstRlcPdu{true};
+    bool m_firstPdcpPdu{true};
     bool m_firstDlTransmission{true};
     bool m_firstDlReception{true};
     bool m_firstRxPlcPDU{true};
@@ -155,16 +157,16 @@ NrTestRxPdcpPDUCallback(NrTestNumerologyDelayCase1* testcase,
 void
 ConnectRlcPdcpTraces(NrTestNumerologyDelayCase1* testcase)
 {
-    Config::Connect("/NodeList/1/DeviceList/*/NrGnbRrc/UeMap/1/DataRadioBearerMap/1/NrRlc/TxPDU",
+    Config::Connect("/NodeList/1/DeviceList/*/NrGnbRrc/UeMap/1/DataRadioBearerMap/3/NrRlc/TxPDU",
                     MakeBoundCallback(&NrTestTxRlcPDUCallback, testcase));
 
-    Config::Connect("/NodeList/1/DeviceList/*/NrGnbRrc/UeMap/1/DataRadioBearerMap/1/NrPdcp/TxPDU",
+    Config::Connect("/NodeList/1/DeviceList/*/NrGnbRrc/UeMap/1/DataRadioBearerMap/3/NrPdcp/TxPDU",
                     MakeBoundCallback(&NrTestTxPdcpPDUCallback, testcase));
 
-    Config::Connect("/NodeList/0/DeviceList/*/NrUeRrc/DataRadioBearerMap/1/NrRlc/RxPDU",
+    Config::Connect("/NodeList/0/DeviceList/*/NrUeRrc/DataRadioBearerMap/3/NrRlc/RxPDU",
                     MakeBoundCallback(&NrTestRxRlcPDUCallback, testcase));
 
-    Config::Connect("/NodeList/0/DeviceList/*/NrUeRrc/DataRadioBearerMap/1/NrPdcp/RxPDU",
+    Config::Connect("/NodeList/0/DeviceList/*/NrUeRrc/DataRadioBearerMap/3/NrPdcp/RxPDU",
                     MakeBoundCallback(&NrTestRxPdcpPDUCallback, testcase));
 }
 
@@ -178,9 +180,9 @@ SendPacket(Ptr<NetDevice> device, Address& addr)
     // dropped in Ipv4L3Protocol::Receive method upon not finding the route.
     Ipv4Header ipHeader;
     pkt->AddHeader(ipHeader);
-    NrEpsBearerTag tag(1, 1);
+    NrQosFlowTag tag(1, 1);
     pkt->AddPacketTag(tag);
-    device->Send(pkt, addr, Ipv4L3Protocol::PROT_NUMBER);
+    device->Send(pkt, addr, iana::ieee802numbers::IPV4);
 }
 
 void
@@ -203,6 +205,13 @@ NrTestNumerologyDelayCase1::DoRun()
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Set the spectrum channel with UMi scenario and some attributes
+    channelHelper->ConfigureFactories("UMi");
+    // Set spectrum attributes
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
     // Beamforming method
     idealBeamformingHelper->SetAttribute("BeamformingMethod",
@@ -215,16 +224,9 @@ NrTestNumerologyDelayCase1::DoRun()
     CcBwpCreator ccBwpCreator;
     const uint8_t numCcPerBand = 1;
 
-    CcBwpCreator::SimpleOperationBandConf bandConf1(28e9,
-                                                    400e6,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon);
+    CcBwpCreator::SimpleOperationBandConf bandConf1(28e9, 400e6, numCcPerBand);
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
-
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
+    channelHelper->AssignChannelsToBands({band1});
     nrHelper->SetSchedulerAttribute("FixedMcsDl", BooleanValue(true));
     nrHelper->SetSchedulerAttribute("StartingMcsDl", UintegerValue(1));
 
@@ -256,24 +258,13 @@ NrTestNumerologyDelayCase1::DoRun()
         "AmcModel",
         EnumValue(NrAmc::ErrorModel)); // NrAmc::ShannonModel or NrAmc::ErrorModel
 
-    nrHelper->InitializeOperationBand(&band1);
     allBwps = CcBwpCreator::GetAllBwps({band1});
 
     NetDeviceContainer gnbNetDev = nrHelper->InstallGnbDevice(gNbNode, allBwps);
     NetDeviceContainer ueNetDev = nrHelper->InstallUeDevice(ueNode, allBwps);
 
-    m_l1l2 = nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->GetL1L2CtrlLatency();
-    m_tbDecodeLatency = nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->GetTbDecodeLatency();
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
+    m_l1l2 = NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->GetL1L2CtrlLatency();
+    m_tbDecodeLatency = NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->GetTbDecodeLatency();
 
     InternetStackHelper internet;
     internet.Install(ueNode);
@@ -303,6 +294,13 @@ NrTestNumerologyDelayCase1::DoRun()
 
     nrHelper->EnableTraces();
 
+    SeedManager::SetSeed(1);
+    nrHelper->AssignStreams({.assignEpc = true,
+                             .ueNodes = NodeContainer(ueNode),
+                             .gnbDevs = gnbNetDev,
+                             .ueDevs = ueNetDev,
+                             .ueNodeStream = 1000});
+
     Simulator::Stop(MilliSeconds(800));
     Simulator::Run();
     Simulator::Destroy();
@@ -311,7 +309,7 @@ NrTestNumerologyDelayCase1::DoRun()
 Time
 NrTestNumerologyDelayCase1::GetSlotTime(uint32_t numerology)
 {
-    uint16_t slotsPerSubframe = static_cast<uint16_t>(std::pow(2, numerology));
+    auto slotsPerSubframe = static_cast<uint16_t>(std::pow(2, numerology));
     return Seconds(0.001 / slotsPerSubframe);
 }
 
@@ -329,10 +327,16 @@ NrTestNumerologyDelayCase1::TxPdcpPDU(uint16_t rnti, uint8_t lcid, uint32_t byte
       std::cout<<"\n lcid :"<<(unsigned) lcid<<std::endl;
       std::cout<<"\n bytes :"<<bytes<<std::endl;*/
 
-    NS_TEST_ASSERT_MSG_EQ(
-        Simulator::Now(),
-        m_sendPacketTime,
-        "There should not be delay between packet being sent and being scheduled by the gNb PDCP.");
+    // Only the test packet: its empty IPv4 header makes the UE reply with an
+    // ICMP error, which returns later as a second PDU
+    if (m_firstPdcpPdu)
+    {
+        NS_TEST_ASSERT_MSG_EQ(Simulator::Now(),
+                              m_sendPacketTime,
+                              "There should not be delay between packet being sent and being "
+                              "scheduled by the gNb PDCP.");
+        m_firstPdcpPdu = false;
+    }
 }
 
 void

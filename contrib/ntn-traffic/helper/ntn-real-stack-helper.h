@@ -47,6 +47,9 @@
 #ifndef NTN_REAL_STACK_HELPER_H
 #define NTN_REAL_STACK_HELPER_H
 
+#include "ns3/propagation-loss-model.h"
+#include "ns3/phased-array-spectrum-propagation-loss-model.h"
+#include "ns3/ntn-scene-recorder.h"
 #include "ns3/application-container.h"
 #include "ns3/data-rate.h"
 #include "ns3/event-id.h"
@@ -1812,6 +1815,13 @@ class NtnRealStackHelper
     /// after a handover back to an earlier cell the UE would listen to the
     /// wrong satellite. Rescheduled just after each beamforming pass.
     void NrReassertUeBeams();
+    /**
+     * Query every BWP channel's matrix-based (3GPP-style) channel once per gNB/UE pair with the
+     * gNB as the first end, so each matrix carries the gNB on its s side. ns-3.48 conjugates the
+     * u-side beamforming vector (#1314) and orients a matrix by its first caller; with DirectPath
+     * beamforming nothing queries the channel before a UE transmits on a paired FDD uplink carrier.
+     */
+    void PrimeNrChannelOrientation();
     /// (cellId, IMSI) pairs that have an ideal-beamforming task registered.
     std::set<std::pair<uint16_t, uint64_t>> m_nrBfPairs;
     // Enabler D: stretch the NR HARQ process pool to the slant RTT so a
@@ -2009,6 +2019,10 @@ class NtnRealStackHelper
     bool m_duplexModeSet{false};
     double m_ulFreqHzExplicit{0.0};
     bool m_fddApplied{false};
+    bool m_nrLinkFilterApplied{false};
+    ApplicationContainer m_flentApps; ///< ns-3.49 Flent benchmark (NtnRealStackFlentTest)
+    /// Install the Flent benchmark when NtnRealStackFlentTest names a test.
+    void InstallFlentFromGlobals(); ///< v5.2 NrSidelinkFilter installed (exact for the duplexing)
     double m_ulFreqHzApplied{0.0};
     uint8_t m_nrBwpTotal{0};
     uint8_t m_nrDlBwpCount{1};
@@ -2046,6 +2060,7 @@ class NtnRealStackHelper
     std::string m_prevElevationModel;
     int m_prevRsrpLinear{-1};
     bool m_ssbCellBeam{false};
+    bool m_ssbCellBeamSet{false}; ///< SetSsbCellBeam was called (else GlobalValue NtnRealStackSsbCellBeam)
     Ptr<MobilityModel> m_cellBeamCenter;
     Time m_cellBeamRefresh{MilliSeconds(100)};
     std::vector<Ptr<MobilityModel>> m_nadirCenters;
@@ -2103,6 +2118,14 @@ class NtnRealStackHelper
     double m_ipdvP95AbsMs{std::numeric_limits<double>::quiet_NaN()};
     int32_t UeIndexOfImsi(uint64_t imsi) const;
     int32_t UeIndexOfCellRnti(uint16_t cellId, uint16_t rnti) const;
+    /// ntn-dataset@1 / globe plan L4: a scene recorder started automatically at t=0 when the
+    /// scenario did not start its own; writes <outputDir>/scene.czml and, when the environment
+    /// sets NTN_LIVE_SCENE=1 (the control-center backend does), streams ##NTNSCENE## frames.
+    void StartAutoScene();
+    void StopAutoScene();
+    uint32_t GnbNodeIdOfCell(uint16_t cellId) const;
+    Ptr<ntnobs::NtnSceneRecorder> m_autoScene;
+    std::map<uint32_t, uint32_t> m_autoServing; ///< UE node id -> serving satellite node id (scene)
     void NrUePhyMeas(uint32_t ueIndex,
                      uint16_t rnti,
                      uint16_t cellId,
@@ -2114,7 +2137,9 @@ class NtnRealStackHelper
     void UePdcpRx(uint32_t ueIndex, uint16_t rnti, uint8_t lcid, uint32_t size, uint64_t delayNs);
     void NrUeRrcConnTrace(std::string ctx, uint64_t imsi, uint16_t cellId, uint16_t rnti);
     void RefreshFeederFromServing();
-    void ApplyNs3Tr38811Channel(BandwidthPartInfo* bwp);
+    void ApplyNs3Tr38811Channel(const BandwidthPartInfo* bwp,
+                                Ptr<PropagationLossModel>& plOut,
+                                Ptr<PhasedArraySpectrumPropagationLossModel>& spOut);
     void ApplyLosOnlySpatialModel();
     /// NT-04: periodic re-evaluation of the folded service-link delay.
     void RefreshBackhaulFold();

@@ -30,14 +30,14 @@
 using namespace ns3;
 
 /**
- * \ingroup sixlowpan-tests
+ * @ingroup sixlowpan-tests
  *
- * \brief 6LoWPAN IPHC stateful compression Test
+ * @brief 6LoWPAN IPHC stateful compression Test
  */
 class SixlowpanIphcStatefulImplTest : public TestCase
 {
     /**
-     * \brief Structure to hold the Rx/Tx packets.
+     * @brief Structure to hold the Rx/Tx packets.
      */
     struct Data
     {
@@ -51,13 +51,13 @@ class SixlowpanIphcStatefulImplTest : public TestCase
 
     /**
      * Receive from a MockDevice.
-     * \param device a pointer to the net device which is calling this function
-     * \param packet the packet received
-     * \param protocol the 16 bit protocol number associated with this packet.
-     * \param source the address of the sender
-     * \param destination the address of the receiver
-     * \param packetType type of packet received (broadcast/multicast/unicast/otherhost)
-     * \returns true.
+     * @param device a pointer to the net device which is calling this function
+     * @param packet the packet received
+     * @param protocol the 16 bit protocol number associated with this packet.
+     * @param source the address of the sender
+     * @param destination the address of the receiver
+     * @param packetType type of packet received (broadcast/multicast/unicast/otherhost)
+     * @returns true.
      */
     bool ReceiveFromMockDevice(Ptr<NetDevice> device,
                                Ptr<const Packet> packet,
@@ -68,13 +68,13 @@ class SixlowpanIphcStatefulImplTest : public TestCase
 
     /**
      * Promiscuous receive from a SixLowPanNetDevice.
-     * \param device a pointer to the net device which is calling this function
-     * \param packet the packet received
-     * \param protocol the 16 bit protocol number associated with this packet.
-     * \param source the address of the sender
-     * \param destination the address of the receiver
-     * \param packetType type of packet received (broadcast/multicast/unicast/otherhost)
-     * \returns true.
+     * @param device a pointer to the net device which is calling this function
+     * @param packet the packet received
+     * @param protocol the 16 bit protocol number associated with this packet.
+     * @param source the address of the sender
+     * @param destination the address of the receiver
+     * @param packetType type of packet received (broadcast/multicast/unicast/otherhost)
+     * @returns true.
      */
     bool PromiscReceiveFromSixLowPanDevice(Ptr<NetDevice> device,
                                            Ptr<const Packet> packet,
@@ -85,9 +85,9 @@ class SixlowpanIphcStatefulImplTest : public TestCase
 
     /**
      * Send one packet.
-     * \param device the device to send from
-     * \param from sender address
-     * \param to destination address
+     * @param device the device to send from
+     * @param from sender address
+     * @param to destination address
      */
     void SendOnePacket(Ptr<NetDevice> device, Ipv6Address from, Ipv6Address to);
 
@@ -259,6 +259,14 @@ SixlowpanIphcStatefulImplTest::DoRun()
                         srcElided,
                         Ipv6Address("2001:1::f00d:f00d:cafe:cafe"));
 
+    // Context-based (stateful) multicast destination, matching context 0. See issue #1344.
+    Simulator::Schedule(Seconds(5),
+                        &SixlowpanIphcStatefulImplTest::SendOnePacket,
+                        this,
+                        m_sixDevices.Get(0),
+                        srcElided,
+                        Ipv6Address("ff32:0040:2001:0002:0000:0000:dead:beef"));
+
     Simulator::Stop(Seconds(10));
 
     Simulator::Run();
@@ -361,14 +369,29 @@ SixlowpanIphcStatefulImplTest::DoRun()
                           Ipv6Address("2001:1::f00d:f00d:cafe:cafe"),
                           "Dst address wrongly rebuilt");
 
+    // fifth packet sent to a context-based multicast destination,
+    // expected M(1) DAC(1) DAM(0/HC_INLINE). See issue #1344.
+    m_txPackets[4].packet->RemoveHeader(iphcHdr);
+    NS_TEST_EXPECT_MSG_EQ(iphcHdr.GetM(), true, "M should be true, is false");
+    NS_TEST_EXPECT_MSG_EQ(iphcHdr.GetDac(), true, "DAC should be true, is false");
+    NS_TEST_EXPECT_MSG_EQ(iphcHdr.GetDam(),
+                          SixLowPanIphc::HC_INLINE,
+                          "DAM should be HC_INLINE, it is not");
+
+    // fifth packet received, the context-based multicast destination must be rebuilt exactly
+    m_rxPackets[4].packet->RemoveHeader(ipv6Hdr);
+    NS_TEST_EXPECT_MSG_EQ(ipv6Hdr.GetDestination(),
+                          Ipv6Address("ff32:0040:2001:0002:0000:0000:dead:beef"),
+                          "Multicast dst address wrongly rebuilt");
+
     m_rxPackets.clear();
     m_txPackets.clear();
 }
 
 /**
- * \ingroup sixlowpan-tests
+ * @ingroup sixlowpan-tests
  *
- * \brief 6LoWPAN IPHC TestSuite
+ * @brief 6LoWPAN IPHC TestSuite
  */
 class SixlowpanIphcStatefulTestSuite : public TestSuite
 {

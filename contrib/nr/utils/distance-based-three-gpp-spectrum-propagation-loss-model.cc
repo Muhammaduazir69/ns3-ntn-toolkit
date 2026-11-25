@@ -70,7 +70,9 @@ DistanceBasedThreeGppSpectrumPropagationLossModel::DoCalcRxPowerSpectralDensity(
     Ptr<const MobilityModel> a,
     Ptr<const MobilityModel> b,
     Ptr<const PhasedArrayModel> aPhasedArrayModel,
-    Ptr<const PhasedArrayModel> bPhasedArrayModel) const
+    Ptr<const PhasedArrayModel> bPhasedArrayModel,
+    const PhasedArrayModel::ComplexVector& aBeamformingVector,
+    const PhasedArrayModel::ComplexVector& bBeamformingVector) const
 {
     NS_LOG_FUNCTION(this);
     uint32_t aId = a->GetObject<Node>()->GetId(); // id of the node a
@@ -92,7 +94,9 @@ DistanceBasedThreeGppSpectrumPropagationLossModel::DoCalcRxPowerSpectralDensity(
             a,
             b,
             aPhasedArrayModel,
-            bPhasedArrayModel);
+            bPhasedArrayModel,
+            aBeamformingVector,
+            bBeamformingVector);
     }
 
     return rxParams;

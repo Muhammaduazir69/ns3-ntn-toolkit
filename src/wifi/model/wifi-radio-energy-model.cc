@@ -82,7 +82,7 @@ WifiRadioEnergyModel::GetTypeId()
 WifiRadioEnergyModel::WifiRadioEnergyModel()
     : m_source(nullptr),
       m_currentState(WifiPhyState::IDLE),
-      m_lastUpdateTime(Seconds(0.0)),
+      m_lastUpdateTime(),
       m_nPendingChangeState(0)
 {
     NS_LOG_FUNCTION(this);
@@ -514,7 +514,7 @@ WifiRadioEnergyModelPhyListener::NotifyRxEndOk()
 }
 
 void
-WifiRadioEnergyModelPhyListener::NotifyRxEndError()
+WifiRadioEnergyModelPhyListener::NotifyRxEndError(const WifiTxVector& /* txVector */)
 {
     NS_LOG_FUNCTION(this);
     if (m_changeStateCallback.IsNull())

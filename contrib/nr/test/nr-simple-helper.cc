@@ -7,6 +7,19 @@
  * (Based on lte-helper.cc)
  */
 
+/**
+ * @ingroup test
+ * @file nr-simple-helper.cc
+ *
+ * @brief Test support helper, not a test suite. NrSimpleHelper is a stripped-down substitute for
+ * NrHelper that builds a minimal protocol stack for RLC testing: on one gNB node and one UE node
+ * it instantiates NrTestRrc, NrPdcp, an NrRlcUm or NrRlcAm entity and an NrTestMac, wires them
+ * together through their SAPs, and connects the two sides with NrSimpleNetDevice objects over a
+ * SimpleChannel instead of the real NR PHY/MAC. It also exposes the usual RLC/PDCP trace and
+ * stats enabling methods. It is used by the RLC UM and AM end-to-end test suites
+ * (nr-test-rlc-um-e2e.cc and nr-test-rlc-am-e2e.cc).
+ */
+
 #include "nr-simple-helper.h"
 
 #include "nr-simple-net-device.h"
@@ -232,11 +245,11 @@ NrSimpleHelper::EnableRlcTraces()
 /**
  * DL transmit PDU callback
  *
- * \param rlcStats the stats calculator
- * \param path
- * \param rnti the RNTI
- * \param lcid the LCID
- * \param packetSize the packet size
+ * @param rlcStats the stats calculator
+ * @param path
+ * @param rnti the RNTI
+ * @param lcid the LCID
+ * @param packetSize the packet size
  */
 void
 NrSimpleHelperDlTxPduCallback(Ptr<NrBearerStatsCalculator> rlcStats,
@@ -254,12 +267,12 @@ NrSimpleHelperDlTxPduCallback(Ptr<NrBearerStatsCalculator> rlcStats,
 /**
  * DL receive PDU callback
  *
- * \param rlcStats the stats calculator
- * \param path
- * \param rnti the RNTI
- * \param lcid the LCID
- * \param packetSize the packet size
- * \param delay the delay
+ * @param rlcStats the stats calculator
+ * @param path
+ * @param rnti the RNTI
+ * @param lcid the LCID
+ * @param packetSize the packet size
+ * @param delay the delay
  */
 void
 NrSimpleHelperDlRxPduCallback(Ptr<NrBearerStatsCalculator> rlcStats,
@@ -289,11 +302,11 @@ NrSimpleHelper::EnableDlRlcTraces()
 /**
  * UL transmit PDU callback
  *
- * \param rlcStats the stats calculator
- * \param path
- * \param rnti the RNTI
- * \param lcid the LCID
- * \param packetSize the packet size
+ * @param rlcStats the stats calculator
+ * @param path
+ * @param rnti the RNTI
+ * @param lcid the LCID
+ * @param packetSize the packet size
  */
 void
 NrSimpleHelperUlTxPduCallback(Ptr<NrBearerStatsCalculator> rlcStats,
@@ -311,12 +324,12 @@ NrSimpleHelperUlTxPduCallback(Ptr<NrBearerStatsCalculator> rlcStats,
 /**
  * UL receive PDU callback
  *
- * \param rlcStats the stats calculator
- * \param path
- * \param rnti the RNTI
- * \param lcid the LCID
- * \param packetSize the packet size
- * \param delay the delay
+ * @param rlcStats the stats calculator
+ * @param path
+ * @param rnti the RNTI
+ * @param lcid the LCID
+ * @param packetSize the packet size
+ * @param delay the delay
  */
 void
 NrSimpleHelperUlRxPduCallback(Ptr<NrBearerStatsCalculator> rlcStats,

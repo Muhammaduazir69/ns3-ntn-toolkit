@@ -9,6 +9,7 @@
 #ifndef APARF_WIFI_MANAGER_H
 #define APARF_WIFI_MANAGER_H
 
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-remote-station-manager.h"
 
 namespace ns3
@@ -17,7 +18,7 @@ namespace ns3
 struct AparfWifiRemoteStation;
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  * APARF Power and rate control algorithm
  *
  * This class implements the High Performance power and rate control algorithm
@@ -31,12 +32,12 @@ struct AparfWifiRemoteStation;
  * exit if the user tries to configure this RAA with a Wi-Fi MAC
  * that supports 802.11n or higher.
  */
-class AparfWifiManager : public WifiRemoteStationManager
+class WIFI_EXPORT AparfWifiManager : public WifiRemoteStationManager
 {
   public:
     /**
      * Register this type.
-     * \return The object TypeId.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
     AparfWifiManager();
@@ -77,7 +78,7 @@ class AparfWifiManager : public WifiRemoteStationManager
 
     /** Check for initializations.
      *
-     * \param station The remote station.
+     * @param station The remote station.
      */
     void CheckInit(AparfWifiRemoteStation* station);
 
@@ -87,27 +88,27 @@ class AparfWifiManager : public WifiRemoteStationManager
                             //!< try a new power or rate.
     uint32_t m_failMax;  //!< The minimum number of failed transmissions to try a new power or rate.
     uint32_t m_powerMax; //!< The maximum number of power changes.
-    uint8_t m_powerInc;  //!< Step size for increment the power.
-    uint8_t m_powerDec;  //!< Step size for decrement the power.
-    uint8_t m_rateInc;   //!< Step size for increment the rate.
-    uint8_t m_rateDec;   //!< Step size for decrement the rate.
+    uint8_t m_powerLevelInc; //!< Step size for increment the power level.
+    uint8_t m_powerLevelDec; //!< Step size for decrement the power level.
+    uint8_t m_rateInc;       //!< Step size for increment the rate.
+    uint8_t m_rateDec;       //!< Step size for decrement the rate.
 
     /**
      * Minimal power level.
      * Differently form rate, power levels do not depend on the remote station.
      * The levels depend only on the physical layer of the device.
      */
-    uint8_t m_minPower;
+    uint8_t m_minPowerLevel{WIFI_MIN_TX_PWR_LEVEL};
 
     /**
      * Maximal power level.
      */
-    uint8_t m_maxPower;
+    uint8_t m_maxPowerLevel{WIFI_MIN_TX_PWR_LEVEL};
 
     /**
      * The trace source fired when the transmission power changes.
      */
-    TracedCallback<double, double, Mac48Address> m_powerChange;
+    TracedCallback<dBm_u, dBm_u, Mac48Address> m_powerChange;
     /**
      * The trace source fired when the transmission rate changes.
      */

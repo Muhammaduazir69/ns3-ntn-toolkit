@@ -39,7 +39,7 @@ RttEstimator::GetTypeId()
                             .SetGroupName("Internet")
                             .AddAttribute("InitialEstimation",
                                           "Initial RTT estimate",
-                                          TimeValue(Seconds(1.0)),
+                                          TimeValue(Seconds(1)),
                                           MakeTimeAccessor(&RttEstimator::m_initialEstimatedRtt),
                                           MakeTimeChecker());
     return tid;
@@ -63,12 +63,13 @@ RttEstimator::RttEstimator()
     : m_nSamples(0)
 {
     NS_LOG_FUNCTION(this);
+}
 
-    // We need attributes initialized here, not later, so use the
-    // ConstructSelf() technique documented in the manual
-    ObjectBase::ConstructSelf(AttributeConstructionList());
+void
+RttEstimator::NotifyConstructionCompleted()
+{
+    NS_LOG_FUNCTION(this);
     m_estimatedRtt = m_initialEstimatedRtt;
-    m_estimatedVariation = Time(0);
     NS_LOG_DEBUG("Initialize m_estimatedRtt to " << m_estimatedRtt.GetSeconds() << " sec.");
 }
 
@@ -85,12 +86,6 @@ RttEstimator::RttEstimator(const RttEstimator& c)
 RttEstimator::~RttEstimator()
 {
     NS_LOG_FUNCTION(this);
-}
-
-TypeId
-RttEstimator::GetInstanceTypeId() const
-{
-    return GetTypeId();
 }
 
 void
@@ -147,12 +142,6 @@ RttMeanDeviation::RttMeanDeviation(const RttMeanDeviation& c)
       m_beta(c.m_beta)
 {
     NS_LOG_FUNCTION(this);
-}
-
-TypeId
-RttMeanDeviation::GetInstanceTypeId() const
-{
-    return GetTypeId();
 }
 
 uint32_t

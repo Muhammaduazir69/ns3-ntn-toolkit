@@ -13,6 +13,7 @@
 //
 // Quick test:  --simSeconds=20 --numPlanes=4 --satsPerPlane=11
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
@@ -198,6 +199,9 @@ main(int argc, char* argv[])
     if (!czmlOut.empty()) ntnScene.SetCzml(czmlOut);
     Ptr<ns3::ntnobs::NtnSceneRecorder> ntnSceneRec = ntnScene.Build(satNodes, ueNodes);
 
+    // The rest of the Walker shell feeds only the contact-graph scheduler; give those satellites
+    // device-less nodes so the run's globe scene shows the constellation it routes over.
+    ns3::ntnobs::AddContextSatelliteNodes(sats);
     Simulator::Run();
     if (ntnSceneRec) ntnSceneRec->Stop();
     scheduler->Stop();

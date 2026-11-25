@@ -8,7 +8,6 @@
 
 #include "thompson-sampling-wifi-manager.h"
 
-#include "ns3/core-module.h"
 #include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/packet.h"
@@ -112,7 +111,7 @@ ThompsonSamplingWifiManager::InitializeStation(WifiRemoteStation* st) const
     // Add HT, VHT or HE MCSes
     for (const auto& mode : GetPhy()->GetMcsList())
     {
-        for (MHz_u j = 20; j <= GetPhy()->GetChannelWidth(); j *= 2)
+        for (MHz_u j{20}; j <= GetPhy()->GetChannelWidth(); j *= 2)
         {
             WifiModulationClass modulationClass = WIFI_MOD_CLASS_HT;
             if (GetVhtSupported())
@@ -151,11 +150,11 @@ ThompsonSamplingWifiManager::InitializeStation(WifiRemoteStation* st) const
             if (stats.mode.GetModulationClass() == WIFI_MOD_CLASS_DSSS ||
                 stats.mode.GetModulationClass() == WIFI_MOD_CLASS_HR_DSSS)
             {
-                stats.channelWidth = 22;
+                stats.channelWidth = MHz_u{22};
             }
             else
             {
-                stats.channelWidth = 20;
+                stats.channelWidth = MHz_u{20};
             }
             stats.nss = 1;
             station->m_mcsStats.push_back(stats);
@@ -226,10 +225,10 @@ ThompsonSamplingWifiManager::UpdateNextMode(WifiRemoteStation* st) const
         // Thompson sampling
         frameSuccessRate = SampleBetaVariable(1.0 + station->m_mcsStats.at(i).success,
                                               1.0 + station->m_mcsStats.at(i).fails);
-        NS_LOG_DEBUG("Draw"
-                     << " success=" << station->m_mcsStats.at(i).success
-                     << " fails=" << station->m_mcsStats.at(i).fails
-                     << " frameSuccessRate=" << frameSuccessRate << " mode=" << mode);
+        NS_LOG_DEBUG("Draw success=" << station->m_mcsStats.at(i).success
+                                     << " fails=" << station->m_mcsStats.at(i).fails
+                                     << " frameSuccessRate=" << frameSuccessRate
+                                     << " mode=" << mode);
         if (frameSuccessRate * rate > maxThroughput)
         {
             maxThroughput = frameSuccessRate * rate;
@@ -320,9 +319,8 @@ ThompsonSamplingWifiManager::DoGetDataTxVector(WifiRemoteStation* st, MHz_u allo
 
     station->m_lastMode = station->m_nextMode;
 
-    NS_LOG_DEBUG("Using"
-                 << " mode=" << mode << " channelWidth=" << channelWidth << " nss=" << +nss
-                 << " guardInterval=" << guardInterval);
+    NS_LOG_DEBUG("Using mode=" << mode << " channelWidth=" << channelWidth << " nss=" << +nss
+                               << " guardInterval=" << guardInterval);
 
     const auto rate = mode.GetDataRate(channelWidth, guardInterval, nss);
     if (m_currentRate != rate)

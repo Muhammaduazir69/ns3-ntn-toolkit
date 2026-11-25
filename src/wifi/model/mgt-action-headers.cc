@@ -11,6 +11,7 @@
 #include "mgt-action-headers.h"
 
 #include "addba-extension.h"
+#include "gcr-group-address.h"
 
 #include "ns3/multi-link-element.h"
 #include "ns3/packet.h"
@@ -739,6 +740,13 @@ MgtAddBaRequestHeader::GetInstanceTypeId() const
 void
 MgtAddBaRequestHeader::Print(std::ostream& os) const
 {
+    os << "A-MSDU support=" << m_amsduSupport << " Policy=" << +m_policy << " TID=" << +m_tid
+       << " Buffer size=" << m_bufferSize << " Timeout=" << m_timeoutValue
+       << " Starting seq=" << m_startingSeq;
+    if (m_gcrGroupAddress.has_value())
+    {
+        os << " GCR group address=" << m_gcrGroupAddress.value();
+    }
 }
 
 uint32_t
@@ -749,6 +757,11 @@ MgtAddBaRequestHeader::GetSerializedSize() const
     size += 2; // Block ack parameter set
     size += 2; // Block ack timeout value
     size += 2; // Starting sequence control
+    if (m_gcrGroupAddress)
+    {
+        // a GCR Group Address element has to be added
+        size += GcrGroupAddress().GetSerializedSize();
+    }
     if (m_bufferSize >= 1024)
     {
         // an ADDBA Extension element has to be added
@@ -762,9 +775,15 @@ MgtAddBaRequestHeader::Serialize(Buffer::Iterator start) const
 {
     Buffer::Iterator i = start;
     i.WriteU8(m_dialogToken);
-    i.WriteHtolsbU16(GetParameterSet());
-    i.WriteHtolsbU16(m_timeoutValue);
-    i.WriteHtolsbU16(GetStartingSequenceControl());
+    i.WriteU16(GetParameterSet());
+    i.WriteU16(m_timeoutValue);
+    i.WriteU16(GetStartingSequenceControl());
+    if (m_gcrGroupAddress)
+    {
+        GcrGroupAddress gcrGroupAddr;
+        gcrGroupAddr.m_gcrGroupAddress = *m_gcrGroupAddress;
+        i = gcrGroupAddr.Serialize(i);
+    }
     if (m_bufferSize >= 1024)
     {
         AddbaExtension addbaExt;
@@ -778,11 +797,19 @@ MgtAddBaRequestHeader::Deserialize(Buffer::Iterator start)
 {
     Buffer::Iterator i = start;
     m_dialogToken = i.ReadU8();
-    SetParameterSet(i.ReadLsbtohU16());
-    m_timeoutValue = i.ReadLsbtohU16();
-    SetStartingSequenceControl(i.ReadLsbtohU16());
-    AddbaExtension addbaExt;
+    SetParameterSet(i.ReadU16());
+    m_timeoutValue = i.ReadU16();
+    SetStartingSequenceControl(i.ReadU16());
+    m_gcrGroupAddress.reset();
+    GcrGroupAddress gcrGroupAddr;
     auto tmp = i;
+    i = gcrGroupAddr.DeserializeIfPresent(i);
+    if (i.GetDistanceFrom(tmp) != 0)
+    {
+        m_gcrGroupAddress = gcrGroupAddr.m_gcrGroupAddress;
+    }
+    AddbaExtension addbaExt;
+    tmp = i;
     i = addbaExt.DeserializeIfPresent(i);
     if (i.GetDistanceFrom(tmp) != 0)
     {
@@ -842,6 +869,12 @@ MgtAddBaRequestHeader::SetAmsduSupport(bool supported)
     m_amsduSupport = supported;
 }
 
+void
+MgtAddBaRequestHeader::SetGcrGroupAddress(const Mac48Address& address)
+{
+    m_gcrGroupAddress = address;
+}
+
 uint8_t
 MgtAddBaRequestHeader::GetTid() const
 {
@@ -869,7 +902,7 @@ MgtAddBaRequestHeader::GetBufferSize() const
 bool
 MgtAddBaRequestHeader::IsAmsduSupported() const
 {
-    return m_amsduSupport == 1;
+    return m_amsduSupport;
 }
 
 uint16_t
@@ -884,11 +917,16 @@ MgtAddBaRequestHeader::GetStartingSequenceControl() const
     return (m_startingSeq << 4) & 0xfff0;
 }
 
+std::optional<Mac48Address>
+MgtAddBaRequestHeader::GetGcrGroupAddress() const
+{
+    return m_gcrGroupAddress;
+}
+
 uint16_t
 MgtAddBaRequestHeader::GetParameterSet() const
 {
-    uint16_t res = 0;
-    res |= m_amsduSupport;
+    uint16_t res = m_amsduSupport ? 1 : 0;
     res |= m_policy << 1;
     res |= m_tid << 2;
     res |= (m_bufferSize % 1024) << 6;
@@ -898,7 +936,7 @@ MgtAddBaRequestHeader::GetParameterSet() const
 void
 MgtAddBaRequestHeader::SetParameterSet(uint16_t params)
 {
-    m_amsduSupport = params & 0x01;
+    m_amsduSupport = ((params & 0x01) == 1);
     m_policy = (params >> 1) & 0x01;
     m_tid = (params >> 2) & 0x0f;
     m_bufferSize = (params >> 6) & 0x03ff;
@@ -929,7 +967,12 @@ MgtAddBaResponseHeader::GetInstanceTypeId() const
 void
 MgtAddBaResponseHeader::Print(std::ostream& os) const
 {
-    os << "status code=" << m_code;
+    os << "Status code=" << m_code << "A-MSDU support=" << m_amsduSupport << " Policy=" << +m_policy
+       << " TID=" << +m_tid << " Buffer size=" << m_bufferSize << " Timeout=" << m_timeoutValue;
+    if (m_gcrGroupAddress.has_value())
+    {
+        os << " GCR group address=" << m_gcrGroupAddress.value();
+    }
 }
 
 uint32_t
@@ -940,6 +983,11 @@ MgtAddBaResponseHeader::GetSerializedSize() const
     size += m_code.GetSerializedSize(); // Status code
     size += 2;                          // Block ack parameter set
     size += 2;                          // Block ack timeout value
+    if (m_gcrGroupAddress)
+    {
+        // a GCR Group Address element has to be added
+        size += GcrGroupAddress().GetSerializedSize();
+    }
     if (m_bufferSize >= 1024)
     {
         // an ADDBA Extension element has to be added
@@ -954,8 +1002,14 @@ MgtAddBaResponseHeader::Serialize(Buffer::Iterator start) const
     Buffer::Iterator i = start;
     i.WriteU8(m_dialogToken);
     i = m_code.Serialize(i);
-    i.WriteHtolsbU16(GetParameterSet());
-    i.WriteHtolsbU16(m_timeoutValue);
+    i.WriteU16(GetParameterSet());
+    i.WriteU16(m_timeoutValue);
+    if (m_gcrGroupAddress)
+    {
+        GcrGroupAddress gcrGroupAddr;
+        gcrGroupAddr.m_gcrGroupAddress = *m_gcrGroupAddress;
+        i = gcrGroupAddr.Serialize(i);
+    }
     if (m_bufferSize >= 1024)
     {
         AddbaExtension addbaExt;
@@ -970,10 +1024,18 @@ MgtAddBaResponseHeader::Deserialize(Buffer::Iterator start)
     Buffer::Iterator i = start;
     m_dialogToken = i.ReadU8();
     i = m_code.Deserialize(i);
-    SetParameterSet(i.ReadLsbtohU16());
-    m_timeoutValue = i.ReadLsbtohU16();
-    AddbaExtension addbaExt;
+    SetParameterSet(i.ReadU16());
+    m_timeoutValue = i.ReadU16();
+    m_gcrGroupAddress.reset();
+    GcrGroupAddress gcrGroupAddr;
     auto tmp = i;
+    i = gcrGroupAddr.DeserializeIfPresent(i);
+    if (i.GetDistanceFrom(tmp) != 0)
+    {
+        m_gcrGroupAddress = gcrGroupAddr.m_gcrGroupAddress;
+    }
+    AddbaExtension addbaExt;
+    tmp = i;
     i = addbaExt.DeserializeIfPresent(i);
     if (i.GetDistanceFrom(tmp) != 0)
     {
@@ -1027,6 +1089,12 @@ MgtAddBaResponseHeader::SetAmsduSupport(bool supported)
     m_amsduSupport = supported;
 }
 
+void
+MgtAddBaResponseHeader::SetGcrGroupAddress(const Mac48Address& address)
+{
+    m_gcrGroupAddress = address;
+}
+
 StatusCode
 MgtAddBaResponseHeader::GetStatusCode() const
 {
@@ -1060,14 +1128,19 @@ MgtAddBaResponseHeader::GetBufferSize() const
 bool
 MgtAddBaResponseHeader::IsAmsduSupported() const
 {
-    return m_amsduSupport == 1;
+    return m_amsduSupport;
+}
+
+std::optional<Mac48Address>
+MgtAddBaResponseHeader::GetGcrGroupAddress() const
+{
+    return m_gcrGroupAddress;
 }
 
 uint16_t
 MgtAddBaResponseHeader::GetParameterSet() const
 {
-    uint16_t res = 0;
-    res |= m_amsduSupport;
+    uint16_t res = m_amsduSupport ? 1 : 0;
     res |= m_policy << 1;
     res |= m_tid << 2;
     res |= (m_bufferSize % 1024) << 6;
@@ -1077,7 +1150,7 @@ MgtAddBaResponseHeader::GetParameterSet() const
 void
 MgtAddBaResponseHeader::SetParameterSet(uint16_t params)
 {
-    m_amsduSupport = params & 0x01;
+    m_amsduSupport = ((params & 0x01) == 1);
     m_policy = (params >> 1) & 0x01;
     m_tid = (params >> 2) & 0x0f;
     m_bufferSize = (params >> 6) & 0x03ff;
@@ -1108,6 +1181,11 @@ MgtDelBaHeader::GetInstanceTypeId() const
 void
 MgtDelBaHeader::Print(std::ostream& os) const
 {
+    os << "Initiator=" << m_initiator << " TID=" << +m_tid;
+    if (m_gcrGroupAddress.has_value())
+    {
+        os << " GCR group address=" << m_gcrGroupAddress.value();
+    }
 }
 
 uint32_t
@@ -1116,6 +1194,11 @@ MgtDelBaHeader::GetSerializedSize() const
     uint32_t size = 0;
     size += 2; // DelBa parameter set
     size += 2; // Reason code
+    if (m_gcrGroupAddress)
+    {
+        // a GCR Group Address element has to be added
+        size += GcrGroupAddress().GetSerializedSize();
+    }
     return size;
 }
 
@@ -1123,16 +1206,30 @@ void
 MgtDelBaHeader::Serialize(Buffer::Iterator start) const
 {
     Buffer::Iterator i = start;
-    i.WriteHtolsbU16(GetParameterSet());
-    i.WriteHtolsbU16(m_reasonCode);
+    i.WriteU16(GetParameterSet());
+    i.WriteU16(m_reasonCode);
+    if (m_gcrGroupAddress)
+    {
+        GcrGroupAddress gcrGroupAddr;
+        gcrGroupAddr.m_gcrGroupAddress = *m_gcrGroupAddress;
+        i = gcrGroupAddr.Serialize(i);
+    }
 }
 
 uint32_t
 MgtDelBaHeader::Deserialize(Buffer::Iterator start)
 {
     Buffer::Iterator i = start;
-    SetParameterSet(i.ReadLsbtohU16());
-    m_reasonCode = i.ReadLsbtohU16();
+    SetParameterSet(i.ReadU16());
+    m_reasonCode = i.ReadU16();
+    m_gcrGroupAddress.reset();
+    GcrGroupAddress gcrGroupAddr;
+    auto tmp = i;
+    i = gcrGroupAddr.DeserializeIfPresent(i);
+    if (i.GetDistanceFrom(tmp) != 0)
+    {
+        m_gcrGroupAddress = gcrGroupAddr.m_gcrGroupAddress;
+    }
     return i.GetDistanceFrom(start);
 }
 
@@ -1167,6 +1264,18 @@ MgtDelBaHeader::SetTid(uint8_t tid)
 {
     NS_ASSERT(tid < 16);
     m_tid = static_cast<uint16_t>(tid);
+}
+
+void
+MgtDelBaHeader::SetGcrGroupAddress(const Mac48Address& address)
+{
+    m_gcrGroupAddress = address;
+}
+
+std::optional<Mac48Address>
+MgtDelBaHeader::GetGcrGroupAddress() const
+{
+    return m_gcrGroupAddress;
 }
 
 uint16_t
@@ -1264,7 +1373,7 @@ MgtEmlOmn::Serialize(Buffer::Iterator start) const
                     "Mode and EMLMR Mode subfields are set to 1");
     if (m_emlControl.linkBitmap)
     {
-        start.WriteHtolsbU16(*m_emlControl.linkBitmap);
+        start.WriteU16(*m_emlControl.linkBitmap);
     }
     // TODO serialize MCS Map Count Control and EMLMR Supported MCS And NSS Set subfields
     // when implemented
@@ -1299,7 +1408,7 @@ MgtEmlOmn::Deserialize(Buffer::Iterator start)
 
     if (m_emlControl.emlsrMode == 1 || m_emlControl.emlmrMode == 1)
     {
-        m_emlControl.linkBitmap = i.ReadLsbtohU16();
+        m_emlControl.linkBitmap = i.ReadU16();
     }
     // TODO deserialize MCS Map Count Control and EMLMR Supported MCS And NSS Set subfields
     // when implemented
@@ -1373,6 +1482,51 @@ FilsDiscHeader::FilsDiscHeader()
       m_accessNetOpt(m_frameCtl.m_anoPresenceInd),
       m_chCntrFreqSeg1(m_frameCtl.m_chCntrFreqSeg1PresenceInd)
 {
+}
+
+FilsDiscHeader::FilsDiscHeader(const FilsDiscHeader& other)
+    : m_frameCtl(other.m_frameCtl),
+      m_timeStamp(other.m_timeStamp),
+      m_beaconInt(other.m_beaconInt),
+      m_len(m_frameCtl.m_lenPresenceInd),
+      m_fdCap(m_frameCtl.m_capPresenceInd),
+      m_opClass(other.m_opClass),
+      m_primaryCh(m_frameCtl.m_primChPresenceInd),
+      m_apConfigSeqNum(m_frameCtl.m_apCsnPresenceInd),
+      m_accessNetOpt(m_frameCtl.m_anoPresenceInd),
+      m_chCntrFreqSeg1(m_frameCtl.m_chCntrFreqSeg1PresenceInd),
+      m_rnr(other.m_rnr),
+      m_tim(other.m_tim),
+      m_ssid(other.m_ssid)
+{
+    m_len = other.m_len.ToOptional();
+    m_fdCap = other.m_fdCap.ToOptional();
+    m_primaryCh = other.m_primaryCh.ToOptional();
+    m_apConfigSeqNum = other.m_apConfigSeqNum.ToOptional();
+    m_accessNetOpt = other.m_accessNetOpt.ToOptional();
+    m_chCntrFreqSeg1 = other.m_chCntrFreqSeg1.ToOptional();
+}
+
+FilsDiscHeader&
+FilsDiscHeader::operator=(const FilsDiscHeader& other)
+{
+    if (this != &other)
+    {
+        m_frameCtl = other.m_frameCtl;
+        m_timeStamp = other.m_timeStamp;
+        m_beaconInt = other.m_beaconInt;
+        m_len = other.m_len.ToOptional();
+        m_fdCap = other.m_fdCap.ToOptional();
+        m_opClass = other.m_opClass;
+        m_primaryCh = other.m_primaryCh.ToOptional();
+        m_apConfigSeqNum = other.m_apConfigSeqNum.ToOptional();
+        m_accessNetOpt = other.m_accessNetOpt.ToOptional();
+        m_chCntrFreqSeg1 = other.m_chCntrFreqSeg1.ToOptional();
+        m_rnr = other.m_rnr;
+        m_tim = other.m_tim;
+        m_ssid = other.m_ssid;
+    }
+    return *this;
 }
 
 void
@@ -1477,8 +1631,8 @@ FilsDiscHeader::Serialize(Buffer::Iterator start) const
 {
     Buffer::Iterator i = start;
     m_frameCtl.Serialize(i);
-    i.WriteHtolsbU64(Simulator::Now().GetMicroSeconds()); // Time stamp
-    i.WriteHtolsbU16(m_beaconInt);
+    i.WriteU64(Simulator::Now().GetMicroSeconds()); // Time stamp
+    i.WriteU16(m_beaconInt);
     i.Write(reinterpret_cast<const uint8_t*>(m_ssid.data()), m_ssid.length());
     if (m_len.has_value())
     {
@@ -1519,8 +1673,8 @@ FilsDiscHeader::Deserialize(Buffer::Iterator start)
     Buffer::Iterator i = start;
     auto nOctets = m_frameCtl.Deserialize(i);
     i.Next(nOctets);
-    m_timeStamp = i.ReadLsbtohU64();
-    m_beaconInt = i.ReadLsbtohU16();
+    m_timeStamp = i.ReadU64();
+    m_beaconInt = i.ReadU16();
     std::vector<uint8_t> ssid(m_frameCtl.m_ssidLen + 2);
     i.Read(ssid.data(), m_frameCtl.m_ssidLen + 1);
     ssid[m_frameCtl.m_ssidLen + 1] = 0;
@@ -1532,6 +1686,7 @@ FilsDiscHeader::Deserialize(Buffer::Iterator start)
     }
     if (m_frameCtl.m_capPresenceInd)
     {
+        m_fdCap = FilsDiscHeader::FdCapability{};
         nOctets = m_fdCap->Deserialize(i);
         i.Next(nOctets);
     }
@@ -1595,13 +1750,13 @@ FilsDiscHeader::FilsDiscFrameControl::Serialize(Buffer::Iterator& start) const
                    ((m_chCntrFreqSeg1PresenceInd ? 1 : 0) << 9) |
                    ((m_primChPresenceInd ? 1 : 0) << 10) | (m_rsnInfoPresenceInd << 11) |
                    ((m_lenPresenceInd ? 1 : 0) << 12) | (m_mdPresenceInd << 13);
-    start.WriteHtolsbU16(val);
+    start.WriteU16(val);
 }
 
 uint32_t
 FilsDiscHeader::FilsDiscFrameControl::Deserialize(Buffer::Iterator start)
 {
-    auto val = start.ReadLsbtohU16();
+    auto val = start.ReadU16();
 
     m_ssidLen = val & 0x001f;
     m_capPresenceInd = ((val >> 5) & 0x0001) == 1;
@@ -1632,13 +1787,13 @@ FilsDiscHeader::FdCapability::Serialize(Buffer::Iterator& start) const
 {
     uint16_t val = m_ess | (m_privacy << 1) | (m_chWidth << 2) | (m_maxNss << 5) |
                    (m_multiBssidPresenceInd << 9) | (m_phyIdx << 10) | (m_minRate << 13);
-    start.WriteHtolsbU16(val);
+    start.WriteU16(val);
 }
 
 uint32_t
 FilsDiscHeader::FdCapability::Deserialize(Buffer::Iterator start)
 {
-    auto val = start.ReadLsbtohU16();
+    auto val = start.ReadU16();
 
     m_ess = val & 0x0001;
     m_privacy = (val >> 1) & 0x0001;
@@ -1654,11 +1809,12 @@ FilsDiscHeader::FdCapability::Deserialize(Buffer::Iterator start)
 void
 FilsDiscHeader::FdCapability::SetOpChannelWidth(MHz_u width)
 {
-    m_chWidth = (width == 20 || width == 22) ? 0
-                : (width == 40)              ? 1
-                : (width == 80)              ? 2
-                : (width == 160)             ? 3
-                                             : 4;
+    m_chWidth = (width == MHz_u{20} || width == MHz_u{22}) ? 0
+                : (width == MHz_u{40})                     ? 1
+                : (width == MHz_u{80})                     ? 2
+                : (width == MHz_u{160})                    ? 3
+                : (width == MHz_u{320})                    ? 4
+                                                           : 5;
 }
 
 MHz_u
@@ -1667,17 +1823,19 @@ FilsDiscHeader::FdCapability::GetOpChannelWidth() const
     switch (m_chWidth)
     {
     case 0:
-        return m_phyIdx == 0 ? 22 : 20; // PHY Index 0 indicates 802.11b
+        return m_phyIdx == 0 ? MHz_u{22} : MHz_u{20}; // PHY Index 0 indicates 802.11b
     case 1:
-        return 40;
+        return MHz_u{40};
     case 2:
-        return 80;
+        return MHz_u{80};
     case 3:
-        return 160;
+        return MHz_u{160};
+    case 4:
+        return MHz_u{320};
     default:
         NS_ABORT_MSG("Reserved value: " << +m_chWidth);
     }
-    return 0;
+    return MHz_u{0};
 }
 
 void

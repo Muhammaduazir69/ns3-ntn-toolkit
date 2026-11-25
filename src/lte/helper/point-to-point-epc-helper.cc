@@ -63,8 +63,15 @@ PointToPointEpcHelper::PointToPointEpcHelper()
       m_s1apUdpPort(36412)
 {
     NS_LOG_FUNCTION(this);
-    // To access the attribute value within the constructor
-    ObjectBase::ConstructSelf(AttributeConstructionList());
+}
+
+void
+PointToPointEpcHelper::NotifyConstructionCompleted()
+{
+    // ns-3.45+: CreateObject sets the TypeId and attributes after the constructor, so the
+    // attribute-dependent setup that used ConstructSelf() in the constructor runs here.
+    EpcHelper::NotifyConstructionCompleted();
+    NS_LOG_FUNCTION(this);
 
     // since we use point-to-point links for all S1-U and S1-AP links,
     // we use a /30 subnet which can hold exactly two addresses
@@ -243,11 +250,6 @@ PointToPointEpcHelper::GetTypeId(void)
     return tid;
 }
 
-TypeId
-PointToPointEpcHelper::GetInstanceTypeId() const
-{
-    return GetTypeId();
-}
 
 void
 PointToPointEpcHelper::DoDispose()

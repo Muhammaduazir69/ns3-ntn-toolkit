@@ -21,10 +21,10 @@
 #include "ns3/point-to-point-module.h"
 
 /**
- * \file cttc-nr-notching.cc
- * \ingroup examples
+ * @file cttc-nr-notching.cc
+ * @ingroup examples
  *
- * \brief Creates a configurable NR TDD/FDD deployment with up to 2 gNBs, for
+ * @brief Creates a configurable NR TDD/FDD deployment with up to 2 gNBs, for
  * testing a notching mask.
  *
  * This example is used to study notching. By default the notching mask (mask with
@@ -246,18 +246,18 @@ main(int argc, char* argv[])
     }
 
     // Default mask (all 1s)
-    std::vector<uint8_t> notchedMaskDl(size, 1);
-    std::vector<uint8_t> notchedMaskUl(size, 1);
+    std::vector<bool> notchedMaskDl(size, true);
+    std::vector<bool> notchedMaskUl(size, true);
 
     // mute RBs from notchedRbStart to (notchedRbStart + numOfNotchedRbs)
     for (int i = notchedRbStartDl; i < (notchedRbStartDl + numOfNotchedRbsDl); i++)
     {
-        notchedMaskDl[i] = 0;
+        notchedMaskDl[i] = false;
     }
 
     for (int i = notchedRbStartUl; i < (notchedRbStartUl + numOfNotchedRbsUl); i++)
     {
-        notchedMaskUl[i] = 0;
+        notchedMaskUl[i] = false;
     }
 
     std::cout << "DL notched Mask: ";
@@ -280,9 +280,9 @@ main(int argc, char* argv[])
     // enable logging or not
     if (logging)
     {
-        LogLevel logLevel1 =
+        auto logLevel1 =
             (LogLevel)(LOG_PREFIX_FUNC | LOG_PREFIX_TIME | LOG_PREFIX_NODE | LOG_LEVEL_INFO);
-        LogLevel logLevel2 =
+        auto logLevel2 =
             (LogLevel)(LOG_PREFIX_FUNC | LOG_PREFIX_TIME | LOG_PREFIX_NODE | LOG_LEVEL_DEBUG);
         LogComponentEnable("NrMacSchedulerNs3", logLevel1);
         LogComponentEnable("NrMacSchedulerTdma", logLevel1);
@@ -293,8 +293,6 @@ main(int argc, char* argv[])
     }
 
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
-
-    int64_t randomStream = 1;
 
     GridScenarioHelper gridScenario;
     gridScenario.SetRows(1);
@@ -308,18 +306,15 @@ main(int argc, char* argv[])
     gridScenario.SetUtNumber(ueNumPergNb * gNbNum);
     gridScenario.SetScenarioHeight(3); // Create a 3x3 scenario where the UE will
     gridScenario.SetScenarioLength(3); // be distributed.
-    randomStream += gridScenario.AssignStreams(randomStream);
     gridScenario.CreateScenario();
 
     // setup the nr simulation
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
-
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
-
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     nrEpcHelper->SetAttribute("S1uLinkDelay", TimeValue(MilliSeconds(0)));
     if (enableOfdma)
     {
@@ -363,22 +358,22 @@ main(int argc, char* argv[])
         // For FDD we have 2 BWPs so the BW must be doubled (e.g. for BW of 10MHz we
         // need 20MHz --> 10MHz for the DL BWP and 10MHz for the UL BWP)
         bandwidth = bandwidth * 2;
-        // First CC (index 0) will be DL, and second CC (index 1) will be UL
-        Config::SetDefault("ns3::NrUeNetDevice::PrimaryUlIndex", UintegerValue(1));
+        // First CC (index 0) will be DL, and second CC (index 1) will be UL;
+        // the UE derives its primary UL BWP and routing from the cell configuration
     }
 
     // Create the configuration for the CcBwpHelper
-    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequencyBand,
-                                                   bandwidth,
-                                                   numOfCcs,
-                                                   BandwidthPartInfo::UMi_StreetCanyon_LoS);
+    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequencyBand, bandwidth, numOfCcs);
 
     bandConf.m_numBwp = operationMode == "FDD" ? 2 : 1; // FDD will have 2 BWPs per CC
 
     // By using the configuration created, it is time to make the operation band
     band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-
-    nrHelper->InitializeOperationBand(&band);
+    // Set the channel to use UMi scenario, LOS channel condition and 3GPP channel model
+    channelHelper->ConfigureFactories("UMi", "LOS", "ThreeGpp");
+    // Disable shadowing
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+    channelHelper->AssignChannelsToBands({band});
     allBwps = CcBwpCreator::GetAllBwps({band});
 
     double x = pow(10, totalTxPower / 10);
@@ -403,8 +398,6 @@ main(int argc, char* argv[])
     {
         nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB",
                                                      UintegerValue(bwpIdForLowLat));
-        nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_VIDEO_TCP_DEFAULT",
-                                                    UintegerValue(bwpIdForVideo));
     }
     else
     {
@@ -413,11 +406,6 @@ main(int argc, char* argv[])
                                                      UintegerValue(bwpIdForLowLat));
         nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_VIDEO_TCP_DEFAULT",
                                                      UintegerValue(bwpIdForVideo));
-
-        nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB",
-                                                    UintegerValue(bwpIdForLowLat));
-        nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_VIDEO_TCP_DEFAULT",
-                                                    UintegerValue(bwpIdForVideo));
     }
 
     // Install and get the pointers to the NetDevices
@@ -426,65 +414,42 @@ main(int argc, char* argv[])
     NetDeviceContainer ueNetDev =
         nrHelper->InstallUeDevice(gridScenario.GetUserTerminals(), allBwps);
 
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+    nrHelper->AssignStreams({.scenario = &gridScenario, .gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     for (uint32_t i = 0; i < gNbNum; ++i)
     {
         // Manually set the attribute of the netdevice (gnbNetDev.Get (0)) and bandwidth part (0),
         // (1), ...
-        nrHelper->GetGnbPhy(gnbNetDev.Get(i), 0)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(i), 0)
             ->SetAttribute("Numerology", UintegerValue(numerology));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(i), 0)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(i), 0)
             ->SetAttribute("TxPower", DoubleValue(10 * log10(x)));
 
         // Set the mask
         Ptr<NrMacSchedulerNs3> schedulerBwp1 =
-            DynamicCast<NrMacSchedulerNs3>(nrHelper->GetScheduler(gnbNetDev.Get(i), 0));
+            DynamicCast<NrMacSchedulerNs3>(NrHelper::GetScheduler(gnbNetDev.Get(i), 0));
         schedulerBwp1->SetDlNotchedRbgMask(notchedMaskDl);
 
         if (operationMode == "TDD")
         {
-            nrHelper->GetGnbPhy(gnbNetDev.Get(i), 0)->SetAttribute("Pattern", StringValue(pattern));
+            NrHelper::GetGnbPhy(gnbNetDev.Get(i), 0)->SetAttribute("Pattern", StringValue(pattern));
             schedulerBwp1->SetUlNotchedRbgMask(notchedMaskUl);
         }
         else
         {
-            nrHelper->GetGnbPhy(gnbNetDev.Get(i), 0)
+            NrHelper::GetGnbPhy(gnbNetDev.Get(i), 0)
                 ->SetAttribute("Pattern", StringValue("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|"));
 
-            nrHelper->GetGnbPhy(gnbNetDev.Get(i), 1)
+            NrHelper::GetGnbPhy(gnbNetDev.Get(i), 1)
                 ->SetAttribute("Numerology", UintegerValue(numerology));
-            nrHelper->GetGnbPhy(gnbNetDev.Get(i), 1)->SetAttribute("TxPower", DoubleValue(-30.0));
-            nrHelper->GetGnbPhy(gnbNetDev.Get(i), 1)
+            NrHelper::GetGnbPhy(gnbNetDev.Get(i), 1)->SetAttribute("TxPower", DoubleValue(-30.0));
+            NrHelper::GetGnbPhy(gnbNetDev.Get(i), 1)
                 ->SetAttribute("Pattern", StringValue("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|"));
 
             Ptr<NrMacSchedulerNs3> schedulerBwp2 =
-                DynamicCast<NrMacSchedulerNs3>(nrHelper->GetScheduler(gnbNetDev.Get(i), 1));
+                DynamicCast<NrMacSchedulerNs3>(NrHelper::GetScheduler(gnbNetDev.Get(i), 1));
             schedulerBwp2->SetUlNotchedRbgMask(notchedMaskUl);
-
-            // Link the two FDD BWPs:
-            nrHelper->GetBwpManagerGnb(gnbNetDev.Get(i))->SetOutputLink(1, 0);
         }
-    }
-
-    if (operationMode == "FDD")
-    {
-        // Set the UE routing:
-        for (uint32_t i = 0; i < ueNetDev.GetN(); i++)
-        {
-            nrHelper->GetBwpManagerUe(ueNetDev.Get(i))->SetOutputLink(0, 1);
-        }
-    }
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
     }
 
     // create the internet and install the IP stack on the UEs
@@ -513,14 +478,6 @@ main(int argc, char* argv[])
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
 
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < gridScenario.GetUserTerminals().GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(
-            gridScenario.GetUserTerminals().Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
-
     // Attach to GNB
     nrHelper->AttachToClosestGnb(ueNetDev, gnbNetDev);
 
@@ -546,38 +503,36 @@ main(int argc, char* argv[])
      * Low-Latency configuration and object creation:
      */
     UdpClientHelper dlClientLowLat;
-    dlClientLowLat.SetAttribute("RemotePort", UintegerValue(dlPortLowLat));
     dlClientLowLat.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientLowLat.SetAttribute("PacketSize", UintegerValue(udpPacketSizeBe));
     dlClientLowLat.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaBe)));
 
-    // The bearer that will carry low latency traffic
-    NrEpsBearer lowLatBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    // The QoS flow that will carry low latency traffic
+    NrQosFlow lowLatFlow(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
     // The filter for the low-latency traffic
-    Ptr<NrEpcTft> lowLatTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfLowLat;
+    Ptr<NrQosRule> lowLatRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfLowLat;
     dlpfLowLat.localPortStart = dlPortLowLat;
     dlpfLowLat.localPortEnd = dlPortLowLat;
-    lowLatTft->Add(dlpfLowLat);
+    lowLatRule->Add(dlpfLowLat);
 
     // Voice configuration and object creation:
     UdpClientHelper ulClientVoice;
-    ulClientVoice.SetAttribute("RemotePort", UintegerValue(ulPortVoice));
     ulClientVoice.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     ulClientVoice.SetAttribute("PacketSize", UintegerValue(udpPacketSizeBe));
     ulClientVoice.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaBe)));
 
-    // The bearer that will carry voice traffic
-    NrEpsBearer videoBearer(NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT);
+    // The QoS flow that will carry voice traffic
+    NrQosFlow videoFlow(NrQosFlow::NGBR_VIDEO_TCP_DEFAULT);
 
     // The filter for the voice traffic
-    Ptr<NrEpcTft> voiceTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter ulpfVoice;
+    Ptr<NrQosRule> voiceRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter ulpfVoice;
     ulpfVoice.remotePortStart = ulPortVoice;
     ulpfVoice.remotePortEnd = ulPortVoice;
-    ulpfVoice.direction = NrEpcTft::UPLINK;
-    voiceTft->Add(ulpfVoice);
+    ulpfVoice.direction = NrQosRule::UPLINK;
+    voiceRule->Add(ulpfVoice);
 
     //  Install the applications
     ApplicationContainer clientApps;
@@ -592,20 +547,24 @@ main(int argc, char* argv[])
         // with destination address set to the address of the UE
         if (enableDl)
         {
-            dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+            dlClientLowLat.SetAttribute(
+                "Remote",
+                AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
             clientApps.Add(dlClientLowLat.Install(remoteHost));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, lowLatBearer, lowLatTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, lowLatFlow, lowLatRule);
         }
         // For the uplink, the installation happens in the UE, and the remote address
         // is the one of the remote host
         if (enableUl)
         {
-            ulClientVoice.SetAttribute("RemoteAddress",
-                                       AddressValue(internetIpIfaces.GetAddress(1)));
+            ulClientVoice.SetAttribute(
+                "Remote",
+                AddressValue(addressUtils::ConvertToSocketAddress(internetIpIfaces.GetAddress(1),
+                                                                  ulPortVoice)));
             clientApps.Add(ulClientVoice.Install(ue));
 
-            nrHelper->ActivateDedicatedEpsBearer(ueDevice, videoBearer, voiceTft);
+            nrHelper->ActivateDedicatedQosFlow(ueDevice, videoFlow, voiceRule);
         }
     }
 
@@ -658,9 +617,7 @@ main(int argc, char* argv[])
 
     outFile.setf(std::ios_base::fixed);
 
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;

@@ -7,6 +7,7 @@
 #ifndef NR_PDCP_SAP_H
 #define NR_PDCP_SAP_H
 
+#include "ns3/nr-export.h"
 #include "ns3/packet.h"
 
 namespace ns3
@@ -19,7 +20,7 @@ namespace ns3
  * This is the PDCP SAP Provider
  * (i.e. the part of the SAP that contains the PDCP methods called by the RRC)
  */
-class NrPdcpSapProvider
+class NR_EXPORT NrPdcpSapProvider
 {
   public:
     virtual ~NrPdcpSapProvider() = default;
@@ -27,7 +28,7 @@ class NrPdcpSapProvider
     /**
      * Parameters for NrPdcpSapProvider::TransmitPdcpSdu
      */
-    struct TransmitPdcpSduParameters
+    struct NR_EXPORT TransmitPdcpSduParameters
     {
         Ptr<Packet> pdcpSdu; /**< the RRC PDU */
         uint16_t rnti;       /**< the C-RNTI identifying the UE */
@@ -40,7 +41,7 @@ class NrPdcpSapProvider
      * This method is to be called when upper RRC entity has a
      * RRC PDU ready to send
      *
-     * \param params Parameters
+     * @param params Parameters
      */
     virtual void TransmitPdcpSdu(TransmitPdcpSduParameters params) = 0;
 };
@@ -52,7 +53,7 @@ class NrPdcpSapProvider
  * This is the PDCP SAP User
  * (i.e. the part of the SAP that contains the RRC methods called by the PDCP)
  */
-class NrPdcpSapUser
+class NR_EXPORT NrPdcpSapUser
 {
   public:
     virtual ~NrPdcpSapUser() = default;
@@ -60,7 +61,7 @@ class NrPdcpSapUser
     /**
      * Parameters for NrPdcpSapUser::ReceivePdcpSdu
      */
-    struct ReceivePdcpSduParameters
+    struct NR_EXPORT ReceivePdcpSduParameters
     {
         Ptr<Packet> pdcpSdu; /**< the RRC PDU */
         uint16_t rnti;       /**< the C-RNTI identifying the UE */
@@ -70,7 +71,7 @@ class NrPdcpSapUser
     /**
      * Called by the PDCP entity to notify the RRC entity of the reception of a new RRC PDU
      *
-     * \param params Parameters
+     * @param params Parameters
      */
     virtual void ReceivePdcpSdu(ReceivePdcpSduParameters params) = 0;
 };
@@ -83,7 +84,7 @@ class NrPdcpSpecificNrPdcpSapProvider : public NrPdcpSapProvider
     /**
      * Constructor
      *
-     * \param pdcp PDCP
+     * @param pdcp PDCP
      */
     NrPdcpSpecificNrPdcpSapProvider(C* pdcp);
 
@@ -118,7 +119,7 @@ class NrPdcpSpecificNrPdcpSapUser : public NrPdcpSapUser
     /**
      * Constructor
      *
-     * \param rrc RRC
+     * @param rrc RRC
      */
     NrPdcpSpecificNrPdcpSapUser(C* rrc);
 

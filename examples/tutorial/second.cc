@@ -64,6 +64,11 @@ main(int argc, char* argv[])
     csmaDevices = csma.Install(csmaNodes);
 
     InternetStackHelper stack;
+
+    // Disabling IPv6 because it is not necessary to show what we want to demonstrate here.
+    // Note: Normal networks typically have both IPv4 and IPv6 enabled.
+    stack.SetIpv6StackInstall(false);
+
     stack.Install(p2pNodes.Get(0));
     stack.Install(csmaNodes);
 
@@ -79,17 +84,17 @@ main(int argc, char* argv[])
     UdpEchoServerHelper echoServer(9);
 
     ApplicationContainer serverApps = echoServer.Install(csmaNodes.Get(nCsma));
-    serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(10.0));
+    serverApps.Start(Seconds(1));
+    serverApps.Stop(Seconds(10));
 
     UdpEchoClientHelper echoClient(csmaInterfaces.GetAddress(nCsma), 9);
     echoClient.SetAttribute("MaxPackets", UintegerValue(1));
-    echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
+    echoClient.SetAttribute("Interval", TimeValue(Seconds(1)));
     echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 
     ApplicationContainer clientApps = echoClient.Install(p2pNodes.Get(0));
-    clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(10.0));
+    clientApps.Start(Seconds(2));
+    clientApps.Stop(Seconds(10));
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 

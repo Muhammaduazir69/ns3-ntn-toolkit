@@ -19,12 +19,13 @@
 #include "object.h"
 #include "type-id.h"
 
+#include <limits>
 #include <map>
 #include <stdint.h>
 
 /**
- * \file
- * \ingroup randomvariable
+ * @file
+ * @ingroup randomvariable
  * ns3::RandomVariableStream declaration, and related classes.
  */
 
@@ -32,10 +33,10 @@ namespace ns3
 {
 
 /**
- * \ingroup core
- * \defgroup randomvariable Random Variables
+ * @ingroup core
+ * @defgroup randomvariable Random Variables
  *
- * \brief ns-3 random numbers are provided via instances of
+ * @brief ns-3 random numbers are provided via instances of
  * ns3::RandomVariableStream.
  *
  * - By default, ns-3 simulations use a fixed seed; if there is any
@@ -64,10 +65,10 @@ namespace ns3
 class RngStream;
 
 /**
- * \ingroup randomvariable
- * \brief The basic uniform Random Number Generator (RNG).
+ * @ingroup randomvariable
+ * @brief The basic uniform Random Number Generator (RNG).
  *
- * \note The underlying random number generation method used
+ * @note The underlying random number generation method used
  * by ns-3 is the RngStream code by Pierre L'Ecuyer at
  * the University of Montreal.
  *
@@ -78,7 +79,7 @@ class RngStream;
  *
  * By default, the underlying generator is seeded all the time with
  * the same seed value and run number coming from the ns3::GlobalValue
- * \ref GlobalValueRngSeed "RngSeed" and \ref GlobalValueRngRun
+ * @ref GlobalValueRngSeed "RngSeed" and @ref GlobalValueRngRun
  * "RngRun".  Also by default, the stream number value for the
  * underlying RngStream is automatically allocated.
  *
@@ -90,16 +91,16 @@ class RandomVariableStream : public Object
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
     /**
-     * \brief Default constructor.
+     * @brief Default constructor.
      */
     RandomVariableStream();
     /**
-     * \brief Destructor.
+     * @brief Destructor.
      */
     ~RandomVariableStream() override;
 
@@ -108,45 +109,45 @@ class RandomVariableStream : public Object
     RandomVariableStream& operator=(const RandomVariableStream&) = delete;
 
     /**
-     * \brief Specifies the stream number for the RngStream.
-     * \param [in] stream The stream number for the RngStream.
+     * @brief Specifies the stream number for the RngStream.
+     * @param [in] stream The stream number for the RngStream.
      * -1 means "allocate a stream number automatically".
      */
     void SetStream(int64_t stream);
 
     /**
-     * \brief Returns the stream number for the RngStream.
-     * \return The stream number for the RngStream.
+     * @brief Returns the stream number for the RngStream.
+     * @return The stream number for the RngStream.
      * -1 means this stream was allocated automatically.
      */
     int64_t GetStream() const;
 
     /**
-     * \brief Specify whether antithetic values should be generated.
-     * \param [in] isAntithetic If \c true antithetic value will be generated.
+     * @brief Specify whether antithetic values should be generated.
+     * @param [in] isAntithetic If \c true antithetic value will be generated.
      */
     void SetAntithetic(bool isAntithetic);
 
     /**
-     * \brief Check if antithetic values will be generated.
-     * \return \c true if antithetic values will be generated.
+     * @brief Check if antithetic values will be generated.
+     * @return \c true if antithetic values will be generated.
      */
     bool IsAntithetic() const;
 
     /**
-     * \brief Get the next random value drawn from the distribution.
-     * \return A random value.
+     * @brief Get the next random value drawn from the distribution.
+     * @return A random value.
      */
     virtual double GetValue() = 0;
 
-    /** \copydoc GetValue() */
+    /** @copydoc GetValue() */
     // The base implementation returns `(uint32_t)GetValue()`
     virtual uint32_t GetInteger();
 
   protected:
     /**
-     * \brief Get the pointer to the underlying RngStream.
-     * \return The underlying RngStream
+     * @brief Get the pointer to the underlying RngStream.
+     * @return The underlying RngStream
      */
     RngStream* Peek() const;
 
@@ -160,11 +161,12 @@ class RandomVariableStream : public Object
     /** The stream number for the RngStream. */
     int64_t m_stream;
 
-}; // class RandomVariableStream
+    // end of class RandomVariableStream
+};
 
 /**
- * \ingroup randomvariable
- * \brief The uniform distribution Random Number Generator (RNG).
+ * @ingroup randomvariable
+ * @brief The uniform distribution Random Number Generator (RNG).
  *
  * This class supports the creation of objects that return random numbers
  * from a fixed uniform distribution.  It also supports the generation of
@@ -194,10 +196,10 @@ class RandomVariableStream : public Object
  *
  * where \f$u\f$ is a uniform random variable on [0,1).
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double min = 0.0;
  *   double max = 10.0;
  *
@@ -206,9 +208,9 @@ class RandomVariableStream : public Object
  *   x->SetAttribute ("Max", DoubleValue (max));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * Normally this RNG returns values \f$x\f$ for floating point values
  * (or \f$k\f$ for integer values) uniformly in the interval [\c Min, \c Max)
@@ -224,52 +226,52 @@ class UniformRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a uniform distribution RNG with the default range.
+     * @brief Creates a uniform distribution RNG with the default range.
      */
     UniformRandomVariable();
 
     /**
-     * \brief Get the lower bound on randoms returned by GetValue().
-     * \return The lower bound on values from GetValue().
+     * @brief Get the lower bound on randoms returned by GetValue().
+     * @return The lower bound on values from GetValue().
      */
     double GetMin() const;
 
     /**
-     * \brief Get the upper bound on values returned by GetValue().
-     * \return The upper bound on values from GetValue().
+     * @brief Get the upper bound on values returned by GetValue().
+     * @return The upper bound on values from GetValue().
      */
     double GetMax() const;
 
     /**
-     * \copydoc GetValue()
+     * @copydoc GetValue()
      *
-     * \param [in] min Low end of the range (included).
-     * \param [in] max High end of the range (excluded).
+     * @param [in] min Low end of the range (included).
+     * @param [in] max High end of the range (excluded).
      */
     double GetValue(double min, double max);
 
     /**
-     * \copydoc GetValue(double,double)
-     * \note The upper limit is included in the output range, unlike GetValue(double,double).
+     * @copydoc GetValue(double,double)
+     * @note The upper limit is included in the output range, unlike GetValue(double,double).
      */
     uint32_t GetInteger(uint32_t min, uint32_t max);
 
     // Inherited
     /**
-     * \copydoc RandomVariableStream::GetValue()
-     * \note The upper limit is excluded from the output range, unlike GetInteger().
+     * @copydoc RandomVariableStream::GetValue()
+     * @note The upper limit is excluded from the output range, unlike GetInteger().
      */
     double GetValue() override;
 
     /**
-     * \copydoc RandomVariableStream::GetInteger()
-     * \note The upper limit is included in the output range, unlike GetValue().
+     * @copydoc RandomVariableStream::GetInteger()
+     * @note The upper limit is included in the output range, unlike GetValue().
      */
     uint32_t GetInteger() override;
 
@@ -280,17 +282,18 @@ class UniformRandomVariable : public RandomVariableStream
     /** The upper bound on values that can be returned by this RNG stream. */
     double m_max;
 
-}; // class UniformRandomVariable
+    // end of class UniformRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Random Number Generator (RNG) that returns a constant.
+ * @ingroup randomvariable
+ * @brief The Random Number Generator (RNG) that returns a constant.
  *
  * This RNG returns the same \c Constant value for every sample.
  *
  * This distribution has mean equal to the \c Constant and zero variance.
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * This RNG ignores the antithetic setting.
  */
@@ -298,34 +301,34 @@ class ConstantRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a constant RNG with the default constant value.
+     * @brief Creates a constant RNG with the default constant value.
      */
     ConstantRandomVariable();
 
     /**
-     * \brief Get the constant value returned by this RNG stream.
-     * \return The constant value.
+     * @brief Get the constant value returned by this RNG stream.
+     * @return The constant value.
      */
     double GetConstant() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] constant The value to return.
+     * @copydoc GetValue()
+     * @param [in] constant The value to return.
      */
     double GetValue(double constant);
-    /** \copydoc GetValue(double) */
+    /** @copydoc GetValue(double) */
     uint32_t GetInteger(uint32_t constant);
 
     // Inherited
     /*
-     * \copydoc RandomVariableStream::GetValue()
-     * \note This RNG always returns the same value.
+     * @copydoc RandomVariableStream::GetValue()
+     * @note This RNG always returns the same value.
      */
     double GetValue() override;
     /* \note This RNG always returns the same value. */
@@ -335,11 +338,12 @@ class ConstantRandomVariable : public RandomVariableStream
     /** The constant value returned by this RNG stream. */
     double m_constant;
 
-}; // class ConstantRandomVariable
+    // end of class ConstantRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Random Number Generator (RNG) that returns a pattern of
+ * @ingroup randomvariable
+ * @brief The Random Number Generator (RNG) that returns a pattern of
  * sequential values.
  *
  * This RNG has four configuration attributes:
@@ -355,13 +359,13 @@ class ConstantRandomVariable : public RandomVariableStream
  * the value to equal or exceed \c Max it is reset to \c Min plus the
  * remainder:
  *
- * \code{.cc}
+ * @code{.cc}
  *     m_current += m_increment->GetValue();
  *     if (m_current >= m_max)
  *     {
  *         m_current = m_min + (m_current - m_max);
  *     }
- * \endcode
+ * @endcode
  *
  * This RNG returns values in the range \f$ x \in [\text{Min}, \text{Max}) \f$.
  * See the Example, below, for how this executes in practice.
@@ -369,7 +373,7 @@ class ConstantRandomVariable : public RandomVariableStream
  * Note the \c Increment attribute is itself a RandomVariableStream,
  * which enables more varied patterns than in the example given here.
  *
- * \par Example
+ * @par Example
  *
  * For example, if an instance is configured with:
  *
@@ -394,7 +398,7 @@ class ConstantRandomVariable : public RandomVariableStream
  * The last value (3) is the result of the update rule in the code snippet
  * above, `2 + (14 - 13)`.
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * This RNG ignores the antithetic setting.
  */
@@ -402,40 +406,40 @@ class SequentialRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a sequential RNG with the default values
+     * @brief Creates a sequential RNG with the default values
      * for the sequence parameters.
      */
     SequentialRandomVariable();
 
     /**
-     * \brief Get the first value of the sequence.
-     * \return The first value of the sequence.
+     * @brief Get the first value of the sequence.
+     * @return The first value of the sequence.
      */
     double GetMin() const;
 
     /**
-     * \brief Get the limit of the sequence, which is (at least)
+     * @brief Get the limit of the sequence, which is (at least)
      * one more than the last value of the sequence.
-     * \return The limit of the sequence.
+     * @return The limit of the sequence.
      */
     double GetMax() const;
 
     /**
-     * \brief Get the increment for the sequence.
-     * \return The increment between distinct values for the sequence.
+     * @brief Get the increment for the sequence.
+     * @return The increment between distinct values for the sequence.
      */
     Ptr<RandomVariableStream> GetIncrement() const;
 
     /**
-     * \brief Get the number of times each distinct value of the sequence
+     * @brief Get the number of times each distinct value of the sequence
      * is repeated before incrementing to the next value.
-     * \return The number of times each value is repeated.
+     * @return The number of times each value is repeated.
      */
     uint32_t GetConsecutive() const;
 
@@ -465,11 +469,12 @@ class SequentialRandomVariable : public RandomVariableStream
     /** Indicates if the current sequence value has been properly initialized. */
     bool m_isCurrentSet;
 
-}; // class SequentialRandomVariable
+    // end of class SequentialRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The exponential distribution Random Number Generator (RNG).
+ * @ingroup randomvariable
+ * @brief The exponential distribution Random Number Generator (RNG).
  *
  * This class supports the creation of objects that return random numbers
  * from a fixed exponential distribution.  It also supports the generation of
@@ -495,7 +500,7 @@ class SequentialRandomVariable : public RandomVariableStream
  *
  * where \f$u\f$ is a uniform random variable on [0,1).
  *
- * \par Bounded Distribution
+ * @par Bounded Distribution
  *
  * Since the exponential distributions can theoretically return unbounded
  * values, it is sometimes useful to specify a fixed upper \c Bound.  The
@@ -514,10 +519,10 @@ class SequentialRandomVariable : public RandomVariableStream
  *          \left(\frac{1}{\alpha} + b\right)\exp^{-\alpha b}
  *   \f]
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double mean = 3.14;
  *   double bound = 0.0;
  *
@@ -526,9 +531,9 @@ class SequentialRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Bound", DoubleValue (bound));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated as follows:
@@ -543,40 +548,40 @@ class ExponentialRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates an exponential distribution RNG with the default
+     * @brief Creates an exponential distribution RNG with the default
      * values for the mean and upper bound.
      */
     ExponentialRandomVariable();
 
     /**
-     * \brief Get the configured mean value of this RNG.
+     * @brief Get the configured mean value of this RNG.
      *
-     * \note This will not be the actual mean if the distribution is
+     * @note This will not be the actual mean if the distribution is
      * truncated by a bound.
-     * \return The configured mean value.
+     * @return The configured mean value.
      */
     double GetMean() const;
 
     /**
-     * \brief Get the configured upper bound of this RNG.
-     * \return The upper bound.
+     * @brief Get the configured upper bound of this RNG.
+     * @return The upper bound.
      */
     double GetBound() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] mean Mean value of the unbounded exponential distribution.
-     * \param [in] bound Upper bound on values returned.
+     * @copydoc GetValue()
+     * @param [in] mean Mean value of the unbounded exponential distribution.
+     * @param [in] bound Upper bound on values returned.
      */
     double GetValue(double mean, double bound);
 
-    /** \copydoc GetValue(double,double) */
+    /** @copydoc GetValue(double,double) */
     uint32_t GetInteger(uint32_t mean, uint32_t bound);
 
     // Inherited
@@ -590,11 +595,12 @@ class ExponentialRandomVariable : public RandomVariableStream
     /** The upper bound on values that can be returned by this RNG stream. */
     double m_bound;
 
-}; // class ExponentialRandomVariable
+    // end of class ExponentialRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Pareto distribution Random Number Generator (RNG).
+ * @ingroup randomvariable
+ * @brief The Pareto distribution Random Number Generator (RNG).
  *
  * This class supports the creation of objects that return random numbers
  * from a fixed Pareto distribution.  It also supports the generation of
@@ -637,7 +643,7 @@ class ExponentialRandomVariable : public RandomVariableStream
  *
  * where \f$u\f$ is a uniform random variable on [0,1).
  *
- * \par Bounded Distribution
+ * @par Bounded Distribution
  *
  * Since Pareto distributions can theoretically return unbounded
  * values, it is sometimes useful to specify a fixed upper \c Bound.  The
@@ -646,10 +652,10 @@ class ExponentialRandomVariable : public RandomVariableStream
  * of the resulting distribution is slightly smaller than the mean value
  * in the unbounded case.
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double scale = 5.0;
  *   double shape = 2.0;
  *
@@ -658,9 +664,9 @@ class ExponentialRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Shape", DoubleValue (shape));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated as follows:
@@ -675,44 +681,44 @@ class ParetoRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a Pareto distribution RNG with the default
+     * @brief Creates a Pareto distribution RNG with the default
      * values for the mean, the shape, and upper bound.
      */
     ParetoRandomVariable();
 
     /**
-     * \brief Returns the scale parameter for the Pareto distribution returned by this RNG stream.
-     * \return The scale parameter for the Pareto distribution returned by this RNG stream.
+     * @brief Returns the scale parameter for the Pareto distribution returned by this RNG stream.
+     * @return The scale parameter for the Pareto distribution returned by this RNG stream.
      */
     double GetScale() const;
 
     /**
-     * \brief Returns the shape parameter for the Pareto distribution returned by this RNG stream.
-     * \return The shape parameter for the Pareto distribution returned by this RNG stream.
+     * @brief Returns the shape parameter for the Pareto distribution returned by this RNG stream.
+     * @return The shape parameter for the Pareto distribution returned by this RNG stream.
      */
     double GetShape() const;
 
     /**
-     * \brief Returns the upper bound on values that can be returned by this RNG stream.
-     * \return The upper bound on values that can be returned by this RNG stream.
+     * @brief Returns the upper bound on values that can be returned by this RNG stream.
+     * @return The upper bound on values that can be returned by this RNG stream.
      */
     double GetBound() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] scale Mean parameter for the Pareto distribution.
-     * \param [in] shape Shape parameter for the Pareto distribution.
-     * \param [in] bound Upper bound on values returned.
+     * @copydoc GetValue()
+     * @param [in] scale Mean parameter for the Pareto distribution.
+     * @param [in] shape Shape parameter for the Pareto distribution.
+     * @param [in] bound Upper bound on values returned.
      */
     double GetValue(double scale, double shape, double bound);
 
-    /** \copydoc GetValue(double,double,double) */
+    /** @copydoc GetValue(double,double,double) */
     uint32_t GetInteger(uint32_t scale, uint32_t shape, uint32_t bound);
 
     // Inherited
@@ -729,11 +735,12 @@ class ParetoRandomVariable : public RandomVariableStream
     /** The upper bound on values that can be returned by this RNG stream. */
     double m_bound;
 
-}; // class ParetoRandomVariable
+    // end of class ParetoRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Weibull distribution Random Number Generator (RNG)
+ * @ingroup randomvariable
+ * @brief The Weibull distribution Random Number Generator (RNG)
  * which allows stream numbers to be set deterministically.
  *
  * This class supports the creation of objects that return random numbers
@@ -784,7 +791,7 @@ class ParetoRandomVariable : public RandomVariableStream
  *
  * where \f$u\f$ is a uniform random variable on [0,1).
  *
- * \par Bounded Distribution
+ * @par Bounded Distribution
  *
  * Since Weibull distributions can theoretically return unbounded values,
  * it is sometimes useful to specify a fixed upper limit.    The
@@ -793,10 +800,10 @@ class ParetoRandomVariable : public RandomVariableStream
  * resulting distribution is slightly smaller than the mean value
  * in the unbounded case.
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double scale = 5.0;
  *   double shape = 1.0;
  *
@@ -805,9 +812,9 @@ class ParetoRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Shape", DoubleValue (shape));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated as follows:
@@ -822,57 +829,57 @@ class WeibullRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a Weibull distribution RNG with the default
+     * @brief Creates a Weibull distribution RNG with the default
      * values for the scale, shape, and upper bound.
      */
     WeibullRandomVariable();
 
     /**
-     * \brief Returns the scale parameter for the Weibull distribution returned by this RNG stream.
-     * \return The scale parameter for the Weibull distribution returned by this RNG stream.
+     * @brief Returns the scale parameter for the Weibull distribution returned by this RNG stream.
+     * @return The scale parameter for the Weibull distribution returned by this RNG stream.
      */
     double GetScale() const;
 
     /**
-     * \brief Returns the shape parameter for the Weibull distribution returned by this RNG stream.
-     * \return The shape parameter for the Weibull distribution returned by this RNG stream.
+     * @brief Returns the shape parameter for the Weibull distribution returned by this RNG stream.
+     * @return The shape parameter for the Weibull distribution returned by this RNG stream.
      */
     double GetShape() const;
 
     /**
-     * \brief Returns the upper bound on values that can be returned by this RNG stream.
-     * \return The upper bound on values that can be returned by this RNG stream.
+     * @brief Returns the upper bound on values that can be returned by this RNG stream.
+     * @return The upper bound on values that can be returned by this RNG stream.
      */
     double GetBound() const;
 
     /**
-     * \brief Returns the mean value for the Weibull distribution returned by this RNG stream.
-     * \return The mean value for the Weibull distribution returned by this RNG stream.
+     * @brief Returns the mean value for the Weibull distribution returned by this RNG stream.
+     * @return The mean value for the Weibull distribution returned by this RNG stream.
      */
     double GetMean() const;
 
     /**
-     * \copydoc GetMean()
-     * \param [in] scale Scale parameter for the Weibull distribution.
-     * \param [in] shape Shape parameter for the Weibull distribution.
+     * @copydoc GetMean()
+     * @param [in] scale Scale parameter for the Weibull distribution.
+     * @param [in] shape Shape parameter for the Weibull distribution.
      */
     static double GetMean(double scale, double shape);
 
     /**
-     * \copydoc GetValue()
-     * \param [in] scale Scale parameter for the Weibull distribution.
-     * \param [in] shape Shape parameter for the Weibull distribution.
-     * \param [in] bound Upper bound on values returned.
+     * @copydoc GetValue()
+     * @param [in] scale Scale parameter for the Weibull distribution.
+     * @param [in] shape Shape parameter for the Weibull distribution.
+     * @param [in] bound Upper bound on values returned.
      */
     double GetValue(double scale, double shape, double bound);
 
-    /** \copydoc GetValue(double,double,double) */
+    /** @copydoc GetValue(double,double,double) */
     uint32_t GetInteger(uint32_t scale, uint32_t shape, uint32_t bound);
 
     // Inherited
@@ -889,11 +896,12 @@ class WeibullRandomVariable : public RandomVariableStream
     /** The upper bound on values that can be returned by this RNG stream. */
     double m_bound;
 
-}; // class WeibullRandomVariable
+    // end of class WeibullRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The normal (Gaussian) distribution Random Number Generator
+ * @ingroup randomvariable
+ * @brief The normal (Gaussian) distribution Random Number Generator
  * (RNG) that allows stream numbers to be set deterministically.
  *
  * This class supports the creation of objects that return random numbers
@@ -927,7 +935,7 @@ class WeibullRandomVariable : public RandomVariableStream
  * two normally distributed values.  The implementation used here
  * caches \f$y\f$ and \f$v_2\f$ to generate \f$x_2\f$ on the next call.
  *
- * \par Bounded Distribution
+ * @par Bounded Distribution
  *
  * Since normal distributions can theoretically return unbounded
  * values, it is sometimes useful to specify a fixed bound.  The
@@ -935,10 +943,10 @@ class WeibullRandomVariable : public RandomVariableStream
  * the \c Bound parameter, \f$b\f$, _i.e._ its values are confined to the interval
  * \f$[\mu - b, \mu + b]\f$.  This preserves the mean but decreases the variance.
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double mean = 5.0;
  *   double variance = 2.0;
  *
@@ -949,9 +957,9 @@ class WeibullRandomVariable : public RandomVariableStream
  *   // The expected value for the mean of the values returned by a
  *   // normally distributed random variable is equal to mean.
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual values returned, \f$x_1^{\prime}\f$ and \f$x_2^{\prime}\f$,
@@ -971,51 +979,66 @@ class WeibullRandomVariable : public RandomVariableStream
 class NormalRandomVariable : public RandomVariableStream
 {
   public:
-    /** Large constant to bound the range. */
-    static const double INFINITE_VALUE;
+    /// Large constant to bound the range.
+    static constexpr double INFINITE_VALUE = std::numeric_limits<double>::max();
 
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a normal distribution RNG with the default
+     * @brief Creates a normal distribution RNG with the default
      * values for the mean, variance, and bound.
      */
     NormalRandomVariable();
 
     /**
-     * \brief Returns the mean value for the normal distribution returned by this RNG stream.
-     * \return The mean value for the normal distribution returned by this RNG stream.
+     * @brief Returns the mean value for the normal distribution returned by this RNG stream.
+     * @return The mean value for the normal distribution returned by this RNG stream.
      */
     double GetMean() const;
 
     /**
-     * \brief Returns the variance value for the normal distribution returned by this RNG stream.
-     * \return The variance value for the normal distribution returned by this RNG stream.
+     * @brief Returns the variance value for the normal distribution returned by this RNG stream.
+     * @return The variance value for the normal distribution returned by this RNG stream.
      */
     double GetVariance() const;
 
     /**
-     * \brief Returns the bound on values that can be returned by this RNG stream.
-     * \return The bound on values that can be returned by this RNG stream.
+     * @brief Returns the standard deviation value for the normal distribution returned by this RNG
+     * stream.
+     * @return The standard deviation value for the normal distribution returned by this RNG stream.
+     */
+    double GetStdDev() const;
+
+    /**
+     * @brief Returns the bound on values that can be returned by this RNG stream.
+     * @return The bound on values that can be returned by this RNG stream.
      */
     double GetBound() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] mean Mean value for the normal distribution.
-     * \param [in] variance Variance value for the normal distribution.
-     * \param [in] bound Bound on values returned.
+     * @copydoc GetValue()
+     * @param [in] mean Mean value for the normal distribution.
+     * @param [in] variance Variance value for the normal distribution.
+     * @param [in] bound Bound on values returned.
      */
     double GetValue(double mean,
                     double variance,
                     double bound = NormalRandomVariable::INFINITE_VALUE);
 
-    /** \copydoc GetValue(double,double,double) */
+    /** @copydoc GetValue(double,double,double) */
     uint32_t GetInteger(uint32_t mean, uint32_t variance, uint32_t bound);
+
+    /**
+     * Set standard deviation of this normal distribution RNG stream.
+     * The deviation is squared and stored as variance, which can also be set
+     * via the variance attribute.
+     * @param [in] stdDev Standard deviation value for the normal distribution.
+     */
+    void SetStdDev(double stdDev);
 
     // Inherited
     double GetValue() override;
@@ -1039,11 +1062,12 @@ class NormalRandomVariable : public RandomVariableStream
     /** The algorithm produces two values at a time. Cache parameters for possible reuse.*/
     double m_y;
 
-}; // class NormalRandomVariable
+    // end of class NormalRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The log-normal distribution Random Number Generator
+ * @ingroup randomvariable
+ * @brief The log-normal distribution Random Number Generator
  * (RNG) that allows stream numbers to be set deterministically.
  *
  * This class supports the creation of objects that return random
@@ -1102,10 +1126,10 @@ class NormalRandomVariable : public RandomVariableStream
  *      x   & = &  \exp\left(\mu + v_1 y \sigma\right)  .
  *   \f}
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double mu = 5.0;
  *   double sigma = 2.0;
  *
@@ -1114,9 +1138,9 @@ class NormalRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Sigma", DoubleValue (sigma));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated as follows:
@@ -1135,37 +1159,37 @@ class LogNormalRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a log-normal distribution RNG with the default
+     * @brief Creates a log-normal distribution RNG with the default
      * values for mu and sigma.
      */
     LogNormalRandomVariable();
 
     /**
-     * \brief Returns the mu value for the log-normal distribution returned by this RNG stream.
-     * \return The mu value for the log-normal distribution returned by this RNG stream.
+     * @brief Returns the mu value for the log-normal distribution returned by this RNG stream.
+     * @return The mu value for the log-normal distribution returned by this RNG stream.
      */
     double GetMu() const;
 
     /**
-     * \brief Returns the sigma value for the log-normal distribution returned by this RNG stream.
-     * \return The sigma value for the log-normal distribution returned by this RNG stream.
+     * @brief Returns the sigma value for the log-normal distribution returned by this RNG stream.
+     * @return The sigma value for the log-normal distribution returned by this RNG stream.
      */
     double GetSigma() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] mu Mu value for the log-normal distribution.
-     * \param [in] sigma Sigma value for the log-normal distribution.
+     * @copydoc GetValue()
+     * @param [in] mu Mu value for the log-normal distribution.
+     * @param [in] sigma Sigma value for the log-normal distribution.
      */
     double GetValue(double mu, double sigma);
 
-    /** \copydoc GetValue(double,double) */
+    /** @copydoc GetValue(double,double) */
     uint32_t GetInteger(uint32_t mu, uint32_t sigma);
 
     // Inherited
@@ -1188,11 +1212,12 @@ class LogNormalRandomVariable : public RandomVariableStream
     /** The algorithm produces two values at a time. Cache parameters for possible reuse.*/
     double m_normal;
 
-}; // class LogNormalRandomVariable
+    // end of class LogNormalRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The gamma distribution Random Number Generator (RNG) that
+ * @ingroup randomvariable
+ * @brief The gamma distribution Random Number Generator (RNG) that
  * allows stream numbers to be set deterministically.
  *
  * This class supports the creation of objects that return random numbers
@@ -1224,10 +1249,10 @@ class LogNormalRandomVariable : public RandomVariableStream
  * [A simple method for generating Gamma variables](https://dl.acm.org/doi/10.1145/358407.358414),
  * ACM Transactions on Mathematical Software, Vol. 26, No. 3, Sept. 2000.
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double alpha = 5.0;
  *   double beta = 2.0;
  *
@@ -1236,9 +1261,9 @@ class LogNormalRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Beta", DoubleValue (beta));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated using the prescription
@@ -1248,37 +1273,37 @@ class GammaRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a gamma distribution RNG with the default values
+     * @brief Creates a gamma distribution RNG with the default values
      * for alpha and beta.
      */
     GammaRandomVariable();
 
     /**
-     * \brief Returns the alpha value for the gamma distribution returned by this RNG stream.
-     * \return The alpha value for the gamma distribution returned by this RNG stream.
+     * @brief Returns the alpha value for the gamma distribution returned by this RNG stream.
+     * @return The alpha value for the gamma distribution returned by this RNG stream.
      */
     double GetAlpha() const;
 
     /**
-     * \brief Returns the beta value for the gamma distribution returned by this RNG stream.
-     * \return The beta value for the gamma distribution returned by this RNG stream.
+     * @brief Returns the beta value for the gamma distribution returned by this RNG stream.
+     * @return The beta value for the gamma distribution returned by this RNG stream.
      */
     double GetBeta() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] alpha Alpha value for the gamma distribution.
-     * \param [in] beta Beta value for the gamma distribution.
+     * @copydoc GetValue()
+     * @param [in] alpha Alpha value for the gamma distribution.
+     * @param [in] beta Beta value for the gamma distribution.
      */
     double GetValue(double alpha, double beta);
 
-    /** \copydoc GetValue(double,double) */
+    /** @copydoc GetValue(double,double) */
     uint32_t GetInteger(uint32_t alpha, uint32_t beta);
 
     // Inherited
@@ -1287,12 +1312,12 @@ class GammaRandomVariable : public RandomVariableStream
 
   private:
     /**
-     * \brief Returns a random double from a normal distribution with the specified mean, variance,
+     * @brief Returns a random double from a normal distribution with the specified mean, variance,
      * and bound.
-     * \param [in] mean Mean value for the normal distribution.
-     * \param [in] variance Variance value for the normal distribution.
-     * \param [in] bound Bound on values returned.
-     * \return A floating point random value.
+     * @param [in] mean Mean value for the normal distribution.
+     * @param [in] variance Variance value for the normal distribution.
+     * @param [in] bound Bound on values returned.
+     * @return A floating point random value.
      */
     double GetNormalValue(double mean, double variance, double bound);
 
@@ -1310,11 +1335,12 @@ class GammaRandomVariable : public RandomVariableStream
     /** The algorithm produces two values at a time. Cache parameters for possible reuse.*/
     double m_y;
 
-}; // class GammaRandomVariable
+    // end of class GammaRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Erlang distribution Random Number Generator (RNG) that
+ * @ingroup randomvariable
+ * @brief The Erlang distribution Random Number Generator (RNG) that
  * allows stream numbers to be set deterministically.
  *
  * This class supports the creation of objects that return random numbers
@@ -1353,10 +1379,10 @@ class GammaRandomVariable : public RandomVariableStream
  *
  * where the \f$u_i\f$ are \f$k\f$ uniform random variables on [0,1).
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   uint32_t k = 5;
  *   double lambda = 2.0;
  *
@@ -1365,9 +1391,9 @@ class GammaRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Lambda", DoubleValue (lambda));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated as follows:
@@ -1382,37 +1408,37 @@ class ErlangRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates an Erlang distribution RNG with the default values
+     * @brief Creates an Erlang distribution RNG with the default values
      * for k and lambda.
      */
     ErlangRandomVariable();
 
     /**
-     * \brief Returns the k value for the Erlang distribution returned by this RNG stream.
-     * \return The k value for the Erlang distribution returned by this RNG stream.
+     * @brief Returns the k value for the Erlang distribution returned by this RNG stream.
+     * @return The k value for the Erlang distribution returned by this RNG stream.
      */
     uint32_t GetK() const;
 
     /**
-     * \brief Returns the lambda value for the Erlang distribution returned by this RNG stream.
-     * \return The lambda value for the Erlang distribution returned by this RNG stream.
+     * @brief Returns the lambda value for the Erlang distribution returned by this RNG stream.
+     * @return The lambda value for the Erlang distribution returned by this RNG stream.
      */
     double GetLambda() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] k K value for the Erlang distribution.
-     * \param [in] lambda Lambda value for the Erlang distribution.
+     * @copydoc GetValue()
+     * @param [in] k K value for the Erlang distribution.
+     * @param [in] lambda Lambda value for the Erlang distribution.
      */
     double GetValue(uint32_t k, double lambda);
 
-    /** \copydoc GetValue(uint32_t,double) */
+    /** @copydoc GetValue(uint32_t,double) */
     uint32_t GetInteger(uint32_t k, uint32_t lambda);
 
     // Inherited
@@ -1421,11 +1447,11 @@ class ErlangRandomVariable : public RandomVariableStream
 
   private:
     /**
-     * \brief Returns a random double from an exponential distribution with the specified mean and
+     * @brief Returns a random double from an exponential distribution with the specified mean and
      * upper bound.
-     * \param [in] mean Mean value of the random variables.
-     * \param [in] bound Upper bound on values returned.
-     * \return A floating point random value.
+     * @param [in] mean Mean value of the random variables.
+     * @param [in] bound Upper bound on values returned.
+     * @return A floating point random value.
      */
     double GetExponentialValue(double mean, double bound);
 
@@ -1435,11 +1461,12 @@ class ErlangRandomVariable : public RandomVariableStream
     /** The lambda value for the Erlang distribution returned by this RNG stream. */
     double m_lambda;
 
-}; // class ErlangRandomVariable
+    // end of class ErlangRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The triangular distribution Random Number Generator (RNG) that
+ * @ingroup randomvariable
+ * @brief The triangular distribution Random Number Generator (RNG) that
  * allows stream numbers to be set deterministically.
  *
  * This class supports the creation of objects that return random numbers
@@ -1477,10 +1504,10 @@ class ErlangRandomVariable : public RandomVariableStream
  *
  * where \f$u\f$ is a uniform random variable on [0,1).
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double mean = 5.0;
  *   double min = 2.0;
  *   double max = 10.0;
@@ -1491,9 +1518,9 @@ class ErlangRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Max", DoubleValue (max));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated as follows:
@@ -1512,44 +1539,44 @@ class TriangularRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a triangular distribution RNG with the default
+     * @brief Creates a triangular distribution RNG with the default
      * values for the mean, lower bound, and upper bound.
      */
     TriangularRandomVariable();
 
     /**
-     * \brief Returns the mean value for the triangular distribution returned by this RNG stream.
-     * \return The mean value for the triangular distribution returned by this RNG stream.
+     * @brief Returns the mean value for the triangular distribution returned by this RNG stream.
+     * @return The mean value for the triangular distribution returned by this RNG stream.
      */
     double GetMean() const;
 
     /**
-     * \brief Returns the lower bound for the triangular distribution returned by this RNG stream.
-     * \return The lower bound for the triangular distribution returned by this RNG stream.
+     * @brief Returns the lower bound for the triangular distribution returned by this RNG stream.
+     * @return The lower bound for the triangular distribution returned by this RNG stream.
      */
     double GetMin() const;
 
     /**
-     * \brief Returns the upper bound on values that can be returned by this RNG stream.
-     * \return The upper bound on values that can be returned by this RNG stream.
+     * @brief Returns the upper bound on values that can be returned by this RNG stream.
+     * @return The upper bound on values that can be returned by this RNG stream.
      */
     double GetMax() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] mean Mean value for the triangular distribution.
-     * \param [in] min Low end of the range.
-     * \param [in] max High end of the range.
+     * @copydoc GetValue()
+     * @param [in] mean Mean value for the triangular distribution.
+     * @param [in] min Low end of the range.
+     * @param [in] max High end of the range.
      */
     double GetValue(double mean, double min, double max);
 
-    /** \copydoc GetValue(double,double,double) */
+    /** @copydoc GetValue(double,double,double) */
     uint32_t GetInteger(uint32_t mean, uint32_t min, uint32_t max);
 
     // Inherited
@@ -1566,11 +1593,12 @@ class TriangularRandomVariable : public RandomVariableStream
     /** The upper bound on values that can be returned by this RNG stream. */
     double m_max;
 
-}; // class TriangularRandomVariable
+    // end of class TriangularRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Zipf distribution Random Number Generator (RNG) that
+ * @ingroup randomvariable
+ * @brief The Zipf distribution Random Number Generator (RNG) that
  * allows stream numbers to be set deterministically.
  *
  * This class supports the creation of objects that return random numbers
@@ -1617,10 +1645,10 @@ class TriangularRandomVariable : public RandomVariableStream
  *
  * where \f$u\f$ is a uniform random variable on [0,1).
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   uint32_t n = 1;
  *   double alpha = 2.0;
  *
@@ -1629,9 +1657,9 @@ class TriangularRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Alpha", DoubleValue (alpha));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$k'\f$, is the value such that
@@ -1645,38 +1673,38 @@ class ZipfRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a Zipf distribution RNG with the default values
+     * @brief Creates a Zipf distribution RNG with the default values
      * for n and alpha.
      */
     ZipfRandomVariable();
 
     /**
-     * \brief Returns the n value for the Zipf distribution returned by this RNG stream.
-     * \return The n value for the Zipf distribution returned by this RNG stream.
+     * @brief Returns the n value for the Zipf distribution returned by this RNG stream.
+     * @return The n value for the Zipf distribution returned by this RNG stream.
      */
     uint32_t GetN() const;
 
     /**
-     * \brief Returns the alpha value for the Zipf distribution returned by this RNG stream.
-     * \return The alpha value for the Zipf distribution returned by this RNG stream.
+     * @brief Returns the alpha value for the Zipf distribution returned by this RNG stream.
+     * @return The alpha value for the Zipf distribution returned by this RNG stream.
      */
     double GetAlpha() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] n N value for the Zipf distribution.
-     * \param [in] alpha Alpha value for the Zipf distribution.
-     * \return A floating point random value.
+     * @copydoc GetValue()
+     * @param [in] n N value for the Zipf distribution.
+     * @param [in] alpha Alpha value for the Zipf distribution.
+     * @return A floating point random value.
      */
     double GetValue(uint32_t n, double alpha);
 
-    /** \copydoc GetValue(uint32_t,double) */
+    /** @copydoc GetValue(uint32_t,double) */
     uint32_t GetInteger(uint32_t n, uint32_t alpha);
 
     // Inherited
@@ -1693,11 +1721,12 @@ class ZipfRandomVariable : public RandomVariableStream
     /** The normalization constant. */
     double m_c;
 
-}; // class ZipfRandomVariable
+    // end of class ZipfRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The zeta distribution Random Number Generator (RNG) that
+ * @ingroup randomvariable
+ * @brief The zeta distribution Random Number Generator (RNG) that
  * allows stream numbers to be set deterministically.
  *
  * This class supports the creation of objects that return random numbers
@@ -1736,19 +1765,19 @@ class ZipfRandomVariable : public RandomVariableStream
  * The Zeta RNG \f$x\f$ is generated by an accept-reject algorithm;
  * see the implementation of GetValue(double).
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double alpha = 2.0;
  *
  *   Ptr<ZetaRandomVariable> x = CreateObject<ZetaRandomVariable> ();
  *   x->SetAttribute ("Alpha", DoubleValue (alpha));
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated by using
@@ -1758,30 +1787,30 @@ class ZetaRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a zeta distribution RNG with the default value for
+     * @brief Creates a zeta distribution RNG with the default value for
      * alpha.
      */
     ZetaRandomVariable();
 
     /**
-     * \brief Returns the alpha value for the zeta distribution returned by this RNG stream.
-     * \return The alpha value for the zeta distribution returned by this RNG stream.
+     * @brief Returns the alpha value for the zeta distribution returned by this RNG stream.
+     * @return The alpha value for the zeta distribution returned by this RNG stream.
      */
     double GetAlpha() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] alpha Alpha value for the zeta distribution.
+     * @copydoc GetValue()
+     * @param [in] alpha Alpha value for the zeta distribution.
      */
     double GetValue(double alpha);
 
-    /** \copydoc GetValue(double) */
+    /** @copydoc GetValue(double) */
     uint32_t GetInteger(uint32_t alpha);
 
     // Inherited
@@ -1795,11 +1824,12 @@ class ZetaRandomVariable : public RandomVariableStream
     /** Just for calculus simplifications. */
     double m_b;
 
-}; // class ZetaRandomVariable
+    // end of class ZetaRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Random Number Generator (RNG) that returns a predetermined sequence.
+ * @ingroup randomvariable
+ * @brief The Random Number Generator (RNG) that returns a predetermined sequence.
  *
  * Defines a random variable that has a specified, predetermined
  * sequence.  This would be useful when trying to force the RNG to
@@ -1812,17 +1842,17 @@ class ZetaRandomVariable : public RandomVariableStream
  * (deep-copy).  Also note that the sequence repeats if more values
  * are requested than are present in the array.
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   Ptr<DeterministicRandomVariable> s = CreateObject<DeterministicRandomVariable> ();
  *
  *   std::vector array{ 4, 4, 7, 7, 10, 10};
  *   s->SetValueArray (array);
  *
  *   double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
  * This will return values in the repeating sequence
  *
@@ -1830,7 +1860,7 @@ class ZetaRandomVariable : public RandomVariableStream
  *      x \in 4, 4, 7, 7, 10, 10, 4, \dots
  *   \f]
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * This RNG ignores the antithetic setting.
  */
@@ -1838,33 +1868,33 @@ class DeterministicRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a deterministic RNG that will have a predetermined
+     * @brief Creates a deterministic RNG that will have a predetermined
      * sequence of values.
      */
     DeterministicRandomVariable();
     ~DeterministicRandomVariable() override;
 
     /**
-     * \brief Sets the array of values that holds the predetermined sequence.
+     * @brief Sets the array of values that holds the predetermined sequence.
      *
      * Note that the values in the array are copied and stored
      * (deep-copy).
-     * \param [in] values Array of random values to return in sequence.
+     * @param [in] values Array of random values to return in sequence.
      */
     void SetValueArray(const std::vector<double>& values);
     /**
-     * \brief Sets the array of values that holds the predetermined sequence.
+     * @brief Sets the array of values that holds the predetermined sequence.
      *
      * Note that the values in the array are copied and stored
      * (deep-copy).
-     * \param [in] values Array of random values to return in sequence.
-     * \param [in] length Number of values in the array.
+     * @param [in] values Array of random values to return in sequence.
+     * @param [in] length Number of values in the array.
      */
     void SetValueArray(const double* values, std::size_t length);
 
@@ -1882,11 +1912,12 @@ class DeterministicRandomVariable : public RandomVariableStream
     /** Array of values to return in sequence. */
     double* m_data;
 
-}; // class DeterministicRandomVariable
+    // end of class DeterministicRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Random Number Generator (RNG) that has a specified
+ * @ingroup randomvariable
+ * @brief The Random Number Generator (RNG) that has a specified
  * empirical distribution.
  *
  * Defines a random variable that has a specified, empirical
@@ -1929,10 +1960,10 @@ class DeterministicRandomVariable : public RandomVariableStream
  * beyond the first/last to work with), but simply return the extremal CDF
  * value, as in sampling.
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *    // Create the RNG with a non-uniform distribution between 0 and 10.
  *    // in sampling mode.
  *    Ptr<EmpiricalRandomVariable> x = CreateObject<EmpiricalRandomVariable> ();
@@ -1942,7 +1973,7 @@ class DeterministicRandomVariable : public RandomVariableStream
  *    x->CDF (10.0,  1.0);
  *
  *    double value = x->GetValue ();
- * \endcode
+ * @endcode
  *
  * The expected values and probabilities returned by GetValue() are
  *
@@ -1964,7 +1995,7 @@ class DeterministicRandomVariable : public RandomVariableStream
  *
  * See empirical-random-variable-example.cc for an example.
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is generated by using
@@ -1974,22 +2005,22 @@ class EmpiricalRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates an empirical RNG that has a specified, empirical
+     * @brief Creates an empirical RNG that has a specified, empirical
      * distribution, and configured for interpolating mode.
      */
     EmpiricalRandomVariable();
 
     /**
-     * \brief Specifies a point in the empirical distribution
+     * @brief Specifies a point in the empirical distribution
      *
-     * \param [in] v The function value for this point
-     * \param [in] c Probability that the function is less than or equal to \p v
+     * @param [in] v The function value for this point
+     * @param [in] c Probability that the function is less than or equal to \p v
      *               In other words this is cumulative distribution function
      *               at \p v.
      */
@@ -1997,32 +2028,32 @@ class EmpiricalRandomVariable : public RandomVariableStream
 
     // Inherited
     /**
-     * \copydoc RandomVariableStream::GetValue()
-     * \note This does not interpolate the CDF, but treats it as a
+     * @copydoc RandomVariableStream::GetValue()
+     * @note This does not interpolate the CDF, but treats it as a
      * stepwise continuous function.
      */
     double GetValue() override;
     using RandomVariableStream::GetInteger;
 
     /**
-     * \brief Returns the next value in the empirical distribution using
+     * @brief Returns the next value in the empirical distribution using
      * linear interpolation.
-     * \return The floating point next value in the empirical distribution
+     * @return The floating point next value in the empirical distribution
      * using linear interpolation.
      */
     virtual double Interpolate();
 
     /**
-     * \brief Switch the mode between sampling the CDF and interpolating.
+     * @brief Switch the mode between sampling the CDF and interpolating.
      * The default mode is sampling.
-     * \param [in] interpolate If \c true set to interpolation, otherwise sampling.
-     * \returns The previous interpolate flag value.
+     * @param [in] interpolate If \c true set to interpolation, otherwise sampling.
+     * @returns The previous interpolate flag value.
      */
     bool SetInterpolate(bool interpolate);
 
   private:
     /**
-     * \brief Check that the CDF is valid.
+     * @brief Check that the CDF is valid.
      *
      * A valid CDF has
      *
@@ -2033,7 +2064,7 @@ class EmpiricalRandomVariable : public RandomVariableStream
      */
     void Validate();
     /**
-     * \brief Do the initial rng draw and check against the extrema.
+     * @brief Do the initial rng draw and check against the extrema.
      *
      * If the extrema apply, \c value will have the extremal value
      * and the return will be \c true.
@@ -2041,23 +2072,23 @@ class EmpiricalRandomVariable : public RandomVariableStream
      * If the extrema do not apply \c value will have the URNG value
      * and the return will be \c false.
      *
-     * \param [out] value The extremal value, or the URNG.
-     * \returns \c true if \p value is the extremal result,
+     * @param [out] value The extremal value, or the URNG.
+     * @returns \c true if \p value is the extremal result,
      *          or \c false if \p value is the URNG value.
      */
     bool PreSample(double& value);
     /**
-     * \brief Sample the CDF as a histogram (without interpolation).
-     * \param [in] r The CDF value at which to sample the CDF.
-     * \return The bin value corresponding to \c r.
+     * @brief Sample the CDF as a histogram (without interpolation).
+     * @param [in] r The CDF value at which to sample the CDF.
+     * @return The bin value corresponding to \c r.
      */
     double DoSampleCDF(double r);
     /**
-     * \brief Linear interpolation between two points on the CDF to estimate
+     * @brief Linear interpolation between two points on the CDF to estimate
      * the value at \p r.
      *
-     * \param [in] r  The argument value to interpolate to.
-     * \returns The interpolated CDF at \pname{r}
+     * @param [in] r  The argument value to interpolate to.
+     * @returns The interpolated CDF at \pname{r}
      */
     double DoInterpolate(double r);
 
@@ -2075,11 +2106,12 @@ class EmpiricalRandomVariable : public RandomVariableStream
      */
     bool m_interpolate;
 
-}; // class EmpiricalRandomVariable
+    // end of class EmpiricalRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The binomial distribution Random Number Generator (RNG).
+ * @ingroup randomvariable
+ * @brief The binomial distribution Random Number Generator (RNG).
  *
  * This class supports the creation of objects that return random numbers
  * from a fixed binomial distribution. It also supports the generation of
@@ -2109,10 +2141,10 @@ class EmpiricalRandomVariable : public RandomVariableStream
  * The sum of these indicator functions over all trials gives the total
  * number of successes, which is the value of the binomial random variable.
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   uint32_t trials = 10;
  *   double probability = 0.5;
  *
@@ -2121,9 +2153,9 @@ class EmpiricalRandomVariable : public RandomVariableStream
  *   x->SetAttribute ("Probability", DoubleValue (probability));
  *
  *   double successes = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$n'\f$, for the Binomial process is determined by:
@@ -2145,24 +2177,24 @@ class BinomialRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     BinomialRandomVariable();
 
     /**
-     * \copydoc GetValue()
-     * \param [in] trials Number of trials.
-     * \param [in] probability Probability of success in each trial.
-     * \return Returns a number within the range [0, trials] indicating the number of successful
+     * @copydoc GetValue()
+     * @param [in] trials Number of trials.
+     * @param [in] probability Probability of success in each trial.
+     * @return Returns a number within the range [0, trials] indicating the number of successful
      * trials.
      */
     double GetValue(uint32_t trials, double probability);
 
     /**
-     * \copydoc GetValue(uint32_t,double)
+     * @copydoc GetValue(uint32_t,double)
      * This function is similar to GetValue(), but it returns a uint32_t instead of a double.
      */
     uint32_t GetInteger(uint32_t trials, uint32_t probability);
@@ -2178,11 +2210,12 @@ class BinomialRandomVariable : public RandomVariableStream
     /** The probability of success in each trial. */
     double m_probability;
 
-}; // class BinomialRandomVariable
+    // end of class BinomialRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Bernoulli distribution Random Number Generator (RNG).
+ * @ingroup randomvariable
+ * @brief The Bernoulli distribution Random Number Generator (RNG).
  *
  * This class supports the creation of objects that return random numbers
  * from a fixed Bernoulli distribution. It also supports the generation of
@@ -2212,19 +2245,19 @@ class BinomialRandomVariable : public RandomVariableStream
  *
  * where \f$u\f$ is a uniform random variable on [0,1) and \f$p\f$ is the probability of success.
  *
- * \par Example
+ * @par Example
  *
  * Here is an example of how to use this class:
- * \code{.cc}
+ * @code{.cc}
  *   double probability = 0.5;
  *
  *   Ptr<BernoulliRandomVariable> x = CreateObject<BernoulliRandomVariable> ();
  *   x->SetAttribute ("Probability", DoubleValue (probability));
  *
  *   double success = x->GetValue ();
- * \endcode
+ * @endcode
  *
- * \par Antithetic Values.
+ * @par Antithetic Values.
  *
  * If an instance of this RNG is configured to return antithetic values,
  * the actual value returned, \f$x'\f$, is determined by:
@@ -2243,22 +2276,22 @@ class BernoulliRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     BernoulliRandomVariable();
 
     /**
-     * \copydoc GetValue()
-     * \param [in] probability Probability of success.
-     * \return Returns 1 if the trial is successful, or 0 if it is not.
+     * @copydoc GetValue()
+     * @param [in] probability Probability of success.
+     * @return Returns 1 if the trial is successful, or 0 if it is not.
      */
     double GetValue(double probability);
 
     /**
-     * \copydoc GetValue(double)
+     * @copydoc GetValue(double)
      * This function is similar to GetValue(), but it returns a uint32_t instead of a double.
      */
     uint32_t GetInteger(uint32_t probability);
@@ -2271,11 +2304,12 @@ class BernoulliRandomVariable : public RandomVariableStream
     /** The probability of success. */
     double m_probability;
 
-}; // class BernoulliRandomVariable
+    // end of class BernoulliRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The laplacian distribution Random Number Generator (RNG).
+ * @ingroup randomvariable
+ * @brief The laplacian distribution Random Number Generator (RNG).
  *
  * This class supports the creation of objects that return random numbers
  * from a fixed laplacian distribution.
@@ -2299,7 +2333,7 @@ class BernoulliRandomVariable : public RandomVariableStream
  *
  * where \f$u\f$ is a uniform random variable on [-0.5,0.5).
  *
- * \par Bounded Distribution
+ * @par Bounded Distribution
  *
  * The Laplacian distribution can be bounded symmetrically about the mean by
  * the \c Bound parameter, \f$b\f$, _i.e._ its values are confined to the interval
@@ -2309,46 +2343,46 @@ class LaplacianRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates an unbounded laplacian distribution RNG with the default
+     * @brief Creates an unbounded laplacian distribution RNG with the default
      * values for the location and the scale.
      */
     LaplacianRandomVariable();
 
     /**
-     * \brief Get the configured location value of this RNG.
+     * @brief Get the configured location value of this RNG.
      *
-     * \return The configured location value.
+     * @return The configured location value.
      */
     double GetLocation() const;
 
     /**
-     * \brief Get the configured scale value of this RNG.
+     * @brief Get the configured scale value of this RNG.
      *
-     * \return The configured scale value.
+     * @return The configured scale value.
      */
     double GetScale() const;
 
     /**
-     * \brief Get the configured bound of this RNG.
-     * \return The bound.
+     * @brief Get the configured bound of this RNG.
+     * @return The bound.
      */
     double GetBound() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] location location value of the laplacian distribution.
-     * \param [in] scale scale value of the laplacian distribution.
-     * \param [in] bound bound on values returned.
+     * @copydoc GetValue()
+     * @param [in] location location value of the laplacian distribution.
+     * @param [in] scale scale value of the laplacian distribution.
+     * @param [in] bound bound on values returned.
      */
     double GetValue(double location, double scale, double bound);
 
-    /** \copydoc GetValue(double,double,double) */
+    /** @copydoc GetValue(double,double,double) */
     uint32_t GetInteger(uint32_t location, uint32_t scale, uint32_t bound);
 
     // Inherited
@@ -2356,14 +2390,14 @@ class LaplacianRandomVariable : public RandomVariableStream
     using RandomVariableStream::GetInteger;
 
     /**
-     * \brief Returns the variance value for the laplacian distribution returned by this RNG stream.
-     * \return The variance value for the laplacian distribution returned by this RNG stream.
+     * @brief Returns the variance value for the laplacian distribution returned by this RNG stream.
+     * @return The variance value for the laplacian distribution returned by this RNG stream.
      */
     double GetVariance() const;
 
     /**
-     * \copydoc GetVariance()
-     * \param [in] scale scale value of the laplacian distribution.
+     * @copydoc GetVariance()
+     * @param [in] scale scale value of the laplacian distribution.
      */
     static double GetVariance(double scale);
 
@@ -2377,11 +2411,12 @@ class LaplacianRandomVariable : public RandomVariableStream
     /** The bound on values that can be returned by this RNG stream. */
     double m_bound;
 
-}; // class LaplacianRandomVariable
+    // end of class LaplacianRandomVariable
+};
 
 /**
- * \ingroup randomvariable
- * \brief The Largest Extreme Value distribution Random Number Generator (RNG).
+ * @ingroup randomvariable
+ * @brief The Largest Extreme Value distribution Random Number Generator (RNG).
  *
  * This class supports the creation of objects that return random numbers from a fixed Largest
  * Extreme Value distribution. This corresponds to the type-I Generalized Extreme Value
@@ -2424,39 +2459,39 @@ class LargestExtremeValueRandomVariable : public RandomVariableStream
 {
   public:
     /**
-     * \brief Register this type.
-     * \return The object TypeId.
+     * @brief Register this type.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Creates a Largest Extreme Value distribution RNG with the default
+     * @brief Creates a Largest Extreme Value distribution RNG with the default
      * values for the location and the scale.
      */
     LargestExtremeValueRandomVariable();
 
     /**
-     * \brief Get the configured location value of this RNG.
+     * @brief Get the configured location value of this RNG.
      *
-     * \return The configured location value.
+     * @return The configured location value.
      */
     double GetLocation() const;
 
     /**
-     * \brief Get the configured scale value of this RNG.
+     * @brief Get the configured scale value of this RNG.
      *
-     * \return The configured scale value.
+     * @return The configured scale value.
      */
     double GetScale() const;
 
     /**
-     * \copydoc GetValue()
-     * \param [in] location location value of the Largest Extreme Value distribution.
-     * \param [in] scale scale value of the Largest Extreme Value distribution.
+     * @copydoc GetValue()
+     * @param [in] location location value of the Largest Extreme Value distribution.
+     * @param [in] scale scale value of the Largest Extreme Value distribution.
      */
     double GetValue(double location, double scale);
 
-    /** \copydoc GetValue(double,double) */
+    /** @copydoc GetValue(double,double) */
     uint32_t GetInteger(uint32_t location, uint32_t scale);
 
     // Inherited
@@ -2464,31 +2499,31 @@ class LargestExtremeValueRandomVariable : public RandomVariableStream
     using RandomVariableStream::GetInteger;
 
     /**
-     * \brief Returns the mean value for the Largest Extreme Value distribution returned by this RNG
+     * @brief Returns the mean value for the Largest Extreme Value distribution returned by this RNG
      * stream.
-     * \return The mean value for the Largest Extreme Value distribution returned by this
+     * @return The mean value for the Largest Extreme Value distribution returned by this
      * RNG stream.
      */
     double GetMean() const;
 
     /**
-     * \copydoc GetMean()
-     * \param [in] location location value of the Largest Extreme Value distribution.
-     * \param [in] scale scale value of the Largest Extreme Value distribution.
+     * @copydoc GetMean()
+     * @param [in] location location value of the Largest Extreme Value distribution.
+     * @param [in] scale scale value of the Largest Extreme Value distribution.
      */
     static double GetMean(double location, double scale);
 
     /**
-     * \brief Returns the variance value for the Largest Extreme Value distribution returned by this
+     * @brief Returns the variance value for the Largest Extreme Value distribution returned by this
      * RNG stream.
-     * \return The variance value for the Largest Extreme Value distribution returned by
+     * @return The variance value for the Largest Extreme Value distribution returned by
      * this RNG stream.
      */
     double GetVariance() const;
 
     /**
-     * \copydoc GetVariance()
-     * \param [in] scale scale value of the Largest Extreme Value distribution.
+     * @copydoc GetVariance()
+     * @param [in] scale scale value of the Largest Extreme Value distribution.
      */
     static double GetVariance(double scale);
 
@@ -2499,7 +2534,8 @@ class LargestExtremeValueRandomVariable : public RandomVariableStream
     /** The scale value of the Largest Extreme Value distribution. */
     double m_scale;
 
-}; // class LargestExtremeValueRandomVariable
+    // end of class LargestExtremeValueRandomVariable
+};
 
 } // namespace ns3
 

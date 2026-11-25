@@ -72,6 +72,7 @@ function(write_lock)
   cache_cmake_flag(NS3_BRITE "ENABLE_BRITE" lock_contents)
   cache_cmake_flag(NS3_ENABLE_SUDO "ENABLE_SUDO" lock_contents)
   cache_cmake_flag(NS3_PYTHON_BINDINGS "ENABLE_PYTHON_BINDINGS" lock_contents)
+  cache_cmake_flag(NS3_NETANIM "FETCH_NETANIM_VISUALIZER" lock_contents)
 
   string(APPEND lock_contents "EXAMPLE_DIRECTORIES = [")
   foreach(example_folder ${ns3-example-folders})
@@ -94,6 +95,8 @@ function(write_lock)
   else()
     string(APPEND lock_contents "VALGRIND_FOUND = True \n")
   endif()
+
+  string(APPEND lock_contents "CMAKE_PRESET = '${NS3_CMAKE_PRESET}'\n")
 
   # Contents previously in ns-3-dev/build/build-status.py
   string(APPEND lock_contents "\n\n")

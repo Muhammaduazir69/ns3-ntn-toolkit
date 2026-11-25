@@ -57,7 +57,7 @@ MyRrMacScheduler::MyRrMacScheduler()
       m_nextRntiDl(0),
       m_nextRntiUl(0)
 {
-    m_cqiDl = Create<CQIDL>();
+    m_cqiDl = CreateObject<CQIDL>();
     m_amc = CreateObject<LteAmc>();
     m_cschedSapProvider = new MemberCschedSapProvider<MyRrMacScheduler>(this);
     m_schedSapProvider = new MemberSchedSapProvider<MyRrMacScheduler>(this);

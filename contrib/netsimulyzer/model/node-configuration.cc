@@ -1,4 +1,3 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * NIST-developed software is provided by NIST as a public service. You may use,
  * copy and distribute copies of the software in any medium, provided that you
@@ -34,15 +33,16 @@
 
 #include "node-configuration.h"
 
-#include <ns3/boolean.h>
-#include <ns3/double.h>
-#include <ns3/log.h>
-#include <ns3/mobility-model.h>
-#include <ns3/node.h>
-#include <ns3/object-base.h>
-#include <ns3/optional.h>
-#include <ns3/pointer.h>
-#include <ns3/string.h>
+#include "optional.h"
+
+#include "ns3/boolean.h"
+#include "ns3/double.h"
+#include "ns3/log.h"
+#include "ns3/mobility-model.h"
+#include "ns3/node.h"
+#include "ns3/object-base.h"
+#include "ns3/pointer.h"
+#include "ns3/string.h"
 
 #include <cmath>
 #include <optional>
@@ -56,17 +56,17 @@ namespace
  * is less than or equal to the given tolerance. Then they are equal.
  * Don't expect any serious precision out of this...
  *
- * \param left
+ * @param left
  * The Vector to compare to `right`
  *
- * \param right
+ * @param right
  * The Vector to compare to `left`
  *
- * \param tolerance
+ * @param tolerance
  * The allowed difference between any two components while still
  * considering them equal
  *
- * \return
+ * @return
  * True if every component is within the tolerance of each other,
  * False otherwise
  */
@@ -81,10 +81,10 @@ compareWithTolerance(const ns3::Vector3D& left, const ns3::Vector3D& right, doub
  * Calculate the angle to rotate the netsimulyzer model to face the direction
  * given by the ray through `last` to `next`
  *
- * \param last
+ * @param last
  * The previous position of the Node
  *
- * \param next
+ * @param next
  * The position of the Node currently being applied
  *
  * @return
@@ -126,11 +126,12 @@ NodeConfiguration::GetTypeId(void)
             .SetParent<Object>()
             .SetGroupName("netsimulyzer")
             .AddConstructor<NodeConfiguration>()
-            .AddAttribute("Name",
-                          "Name for this Node",
-                          StringValue(""),
-                          MakeStringAccessor(&NodeConfiguration::m_name),
-                          MakeStringChecker())
+            .AddAttribute(
+                "Name",
+                "Name for this Node",
+                StringValue(""),
+                MakeStringAccessor(&NodeConfiguration::GetName, &NodeConfiguration::SetName),
+                MakeStringChecker())
             .AddAttribute("EnableLabel",
                           "Flag to show/hide the label above the Node "
                           "if the application is set to "
@@ -138,12 +139,12 @@ NodeConfiguration::GetTypeId(void)
                           BooleanValue(true),
                           MakeBooleanAccessor(&NodeConfiguration::m_enableLabel),
                           MakeBooleanChecker())
-            .AddAttribute("Model",
-                          "Filename of the model to represent this Node",
-                          StringValue(),
-                          MakeStringAccessor(&NodeConfiguration::GetModel,
-                                             &NodeConfiguration::SetModel),
-                          MakeStringChecker())
+            .AddAttribute(
+                "Model",
+                "Filename of the model to represent this Node",
+                StringValue(),
+                MakeStringAccessor(&NodeConfiguration::GetModel, &NodeConfiguration::SetModel),
+                MakeStringChecker())
             .AddAttribute("Orientation",
                           "Orientation of the Node on each axis in degrees",
                           Vector3DValue(),
@@ -241,11 +242,12 @@ NodeConfiguration::GetTypeId(void)
                           BooleanValue(true),
                           MakeBooleanAccessor(&NodeConfiguration::m_usePositionTolerance),
                           MakeBooleanChecker())
-            .AddAttribute("Visible",
-                          "Defines if the Node is rendered in the visualizer",
-                          BooleanValue(true),
-                          MakeBooleanAccessor(&NodeConfiguration::m_visible),
-                          MakeBooleanChecker())
+            .AddAttribute(
+                "Visible",
+                "Defines if the Node is rendered in the visualizer",
+                BooleanValue(true),
+                MakeBooleanAccessor(&NodeConfiguration::Visible, &NodeConfiguration::SetVisible),
+                MakeBooleanChecker())
             .AddAttribute("Orchestrator",
                           "Orchestrator that manages this Node",
                           PointerValue(),
@@ -275,8 +277,10 @@ NodeConfiguration::CourseChange(ns3::Ptr<const MobilityModel> model)
     m_orchestrator->HandleCourseChange(event);
 
     if (m_faceForward)
+    {
         SetOrientation(
             {m_orientation.x, m_orientation.y, faceForwardAngle(m_lastPosition, event.position)});
+    }
 
     m_lastPosition = event.position;
 }
@@ -315,12 +319,15 @@ NodeConfiguration::Transmit(Time duration, double targetSize, Color3 color)
     m_orchestrator->HandleTransmit(event);
 }
 
-Ptr<LogicalLink> NodeConfiguration::Link(Ptr<Node> target) {
-  NS_LOG_FUNCTION(this);
-  const auto node = GetObject<Node>();
+Ptr<LogicalLink>
+NodeConfiguration::Link(Ptr<Node> target)
+{
+    NS_LOG_FUNCTION(this);
+    const auto node = GetObject<Node>();
 
-  NS_ABORT_MSG_IF(!node, "Cannot establish link if this `NodeConfiguration` "
-                         "has not been aggrigated with a `Node`");
+    NS_ABORT_MSG_IF(!node,
+                    "Cannot establish link if this `NodeConfiguration` "
+                    "has not been aggrigated with a `Node`");
 
     return CreateObject<LogicalLink>(m_orchestrator, node->GetId(), target->GetId());
 }
@@ -349,8 +356,10 @@ NodeConfiguration::MobilityPoll(void)
     }
 
     if (m_faceForward)
+    {
         SetOrientation(
             {m_orientation.x, m_orientation.y, faceForwardAngle(m_lastPosition, position)});
+    }
     m_lastPosition = position;
 
     return {position};
@@ -401,10 +410,12 @@ NodeConfiguration::GetOrchestrator(void) const
 }
 
 void
-NodeConfiguration::SetModel(const std::string &value)
+NodeConfiguration::SetModel(const std::string& value)
 {
     if (m_model == value)
+    {
         return;
+    }
 
     m_model = value;
 
@@ -421,6 +432,34 @@ NodeConfiguration::SetModel(const std::string &value)
     event.model = m_model;
 
     m_orchestrator->HandleModelChange(event);
+}
+
+const std::string&
+NodeConfiguration::GetName() const
+{
+    return m_name;
+}
+
+void
+NodeConfiguration::SetName(const std::string& name)
+{
+    if (m_name == name)
+    {
+        return;
+    }
+
+    m_name = name;
+
+    const auto node = GetObject<Node>();
+    if (!node)
+    {
+        NS_LOG_DEBUG("Not triggering NodeColorChangeEvent event. No Node aggregated");
+        return;
+    }
+
+    NodeNameChangeEvent event{.time = Simulator::Now(), .id = node->GetId(), .name = name};
+
+    m_orchestrator->HandleNameChange(event);
 }
 
 const std::string&
@@ -441,7 +480,9 @@ NodeConfiguration::SetBaseColor(const std::optional<Color3>& value)
 {
     NS_LOG_FUNCTION(this);
     if (m_baseColor == value)
+    {
         return;
+    }
 
     m_baseColor = value;
 
@@ -473,7 +514,9 @@ NodeConfiguration::SetHighlightColor(const std::optional<Color3>& value)
 {
     NS_LOG_FUNCTION(this);
     if (m_highlightColor == value)
+    {
         return;
+    }
 
     m_highlightColor = value;
 
@@ -521,6 +564,37 @@ const Vector3D&
 NodeConfiguration::GetScaleAxes(void) const
 {
     return m_scaleAxes;
+}
+
+void
+NodeConfiguration::SetVisible(const bool value)
+{
+    if (value == m_visible)
+    {
+        return;
+    }
+
+    m_visible = value;
+
+    const auto node = GetObject<Node>();
+    if (!node)
+    {
+        NS_LOG_DEBUG("Not triggering NodeVisibilityChangeEvent event. No Node aggregated");
+        return;
+    }
+
+    NodeVisibilityChangeEvent event;
+    event.time = Simulator::Now();
+    event.id = node->GetId();
+    event.visible = m_visible;
+
+    m_orchestrator->HandleVisibilityChange(event);
+}
+
+bool
+NodeConfiguration::Visible() const
+{
+    return m_visible;
 }
 
 void

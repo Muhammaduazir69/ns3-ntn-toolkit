@@ -17,7 +17,8 @@
 #include "nr-anr-sap.h"
 #include "nr-rrc-sap.h"
 
-#include <ns3/object.h>
+#include "ns3/nr-export.h"
+#include "ns3/object.h"
 
 #include <map>
 
@@ -29,16 +30,16 @@ class NrAnrSapUser;
 class NrNeighbourRelation;
 
 /**
- * \brief Automatic Neighbour Relation function.
+ * @brief Automatic Neighbour Relation function.
  *
  * ANR is a conceptually a list of neighbouring cells called the Neighbour
  * Relation Table (NRT). ANR has the capability of automatically inserting new
- * entries into NRT based on measurement reports obtained from the eNodeB RRC
+ * entries into NRT based on measurement reports obtained from the gNB RRC
  * instance. Besides this, ANR also supports manual insertion and accepts
  * queries for the NRT content.
  *
- * The NrHelper class automatically installs one ANR instance for each eNodeB
- * RRC instance. When installed, ANR will assist the eNodeB RRC's handover
+ * The NrHelper class automatically installs one ANR instance for each gNB
+ * RRC instance. When installed, ANR will assist the gNB RRC's handover
  * function, e.g., by preventing an X2-based handover execution if there is no
  * X2 interface to the target neighbour cell. If this is not desired, it can be
  * disabled by the following code sample:
@@ -46,9 +47,9 @@ class NrNeighbourRelation;
  *     Config::SetDefault ("ns3::NrHelper::AnrEnabled", BooleanValue (false));
  *     Ptr<NrHelper> nrHelper = CreateObject<NrHelper> ();
  *
- * The communication between an ANR instance and the eNodeB RRC instance is done
+ * The communication between an ANR instance and the gNB RRC instance is done
  * through the *ANR SAP* interface. The ANR instance corresponds to the
- * "provider" part of this interface, while the eNodeB RRC instance takes the
+ * "provider" part of this interface, while the gNB RRC instance takes the
  * role of the "user" part. The following code skeleton establishes the
  * connection between both instances:
  *
@@ -65,27 +66,27 @@ class NrNeighbourRelation;
  *
  * \sa SetNrAnrSapProvider, SetNrAnrSapUser
  */
-class NrAnr : public Object
+class NR_EXPORT NrAnr : public Object
 {
   public:
     /**
-     * \brief Creates an ANR instance.
-     * \param servingCellId the cell ID of the eNodeB instance whom this ANR
+     * @brief Creates an ANR instance.
+     * @param servingCellId the cell ID of the gNB instance whom this ANR
      *                      instance is to be associated with
      */
     NrAnr(uint16_t servingCellId);
     ~NrAnr() override;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief Provide an advance information about a related neighbouring cell
+     * @brief Provide an advance information about a related neighbouring cell
      *        and add it as a new Neighbour Relation entry.
-     * \param cellId the cell ID of the new neighbour
+     * @param cellId the cell ID of the new neighbour
      *
      * This function simulates the Neighbour Relation addition operation by
      * network operations and maintenance, as depicted in Section 22.3.2a of
@@ -99,8 +100,8 @@ class NrAnr : public Object
     void AddNeighbourRelation(uint16_t cellId);
 
     /**
-     * \brief Remove an existing Neighbour Relation entry.
-     * \param cellId the cell ID to be removed from the NRT
+     * @brief Remove an existing Neighbour Relation entry.
+     * @param cellId the cell ID to be removed from the NRT
      *
      * This function simulates the Neighbour Relation removal operation by
      * network operations and maintenance, as depicted in Section 22.3.2a of
@@ -109,16 +110,16 @@ class NrAnr : public Object
     void RemoveNeighbourRelation(uint16_t cellId);
 
     /**
-     * \brief Set the "user" part of the ANR SAP interface that this ANR instance
+     * @brief Set the "user" part of the ANR SAP interface that this ANR instance
      *        will interact with.
-     * \param s a reference to the "user" part of the interface, typically a
+     * @param s a reference to the "user" part of the interface, typically a
      *          member of an NrGnbRrc instance
      */
     virtual void SetNrAnrSapUser(NrAnrSapUser* s);
 
     /**
-     * \brief Export the "provider" part of the ANR SAP interface.
-     * \return the reference to the "provider" part of the interface, typically to
+     * @brief Export the "provider" part of the ANR SAP interface.
+     * @return the reference to the "provider" part of the interface, typically to
      *         be kept by an NrGnbRrc instance
      */
     virtual NrAnrSapProvider* GetNrAnrSapProvider();
@@ -135,37 +136,37 @@ class NrAnr : public Object
     // ANR SAP PROVIDER IMPLEMENTATION
 
     /**
-     * \brief Implementation of NrAnrSapProvider::ReportUeMeas.
-     * \param measResults a single report of one measurement identity
+     * @brief Implementation of NrAnrSapProvider::ReportUeMeas.
+     * @param measResults a single report of one measurement identity
      */
     void DoReportUeMeas(NrRrcSap::MeasResults measResults);
 
     /**
-     * \brief Implementation of NrAnrSapProvider::AddNeighbourRelation.
-     * \param cellId the Physical Cell ID of the new neighbouring cell
+     * @brief Implementation of NrAnrSapProvider::AddNeighbourRelation.
+     * @param cellId the Physical Cell ID of the new neighbouring cell
      */
     void DoAddNeighbourRelation(uint16_t cellId);
 
     /**
-     * \brief Implementation of NrAnrSapProvider::GetNoRemove.
-     * \param cellId the Physical Cell ID of the neighbouring cell of interest
-     * \return if true, the Neighbour Relation shall *not* be removed from the NRT
+     * @brief Implementation of NrAnrSapProvider::GetNoRemove.
+     * @param cellId the Physical Cell ID of the neighbouring cell of interest
+     * @return if true, the Neighbour Relation shall *not* be removed from the NRT
      */
     bool DoGetNoRemove(uint16_t cellId) const;
 
     /**
-     * \brief Implementation of NrAnrSapProvider::GetNoHo.
-     * \param cellId the Physical Cell ID of the neighbouring cell of interest
-     * \return if true, the Neighbour Relation shall *not* be used by the eNodeB
+     * @brief Implementation of NrAnrSapProvider::GetNoHo.
+     * @param cellId the Physical Cell ID of the neighbouring cell of interest
+     * @return if true, the Neighbour Relation shall *not* be used by the gNB
      *         for handover reasons
      */
     bool DoGetNoHo(uint16_t cellId) const;
 
     /**
-     * \brief Implementation of NrAnrSapProvider::GetNoX2.
-     * \param cellId the Physical Cell ID of the neighbouring cell of interest
-     * \return if true, the Neighbour Relation shall *not* use an X2 interface in
-     *         order to initiate procedures towards the eNodeB parenting the
+     * @brief Implementation of NrAnrSapProvider::GetNoX2.
+     * @param cellId the Physical Cell ID of the neighbouring cell of interest
+     * @return if true, the Neighbour Relation shall *not* use an X2 interface in
+     *         order to initiate procedures towards the gNB parenting the
      *         target cell
      */
     bool DoGetNoX2(uint16_t cellId) const;
@@ -173,14 +174,14 @@ class NrAnr : public Object
     // ANR SAP
 
     /**
-     * \brief Reference to the "provider" part of the ANR SAP interface, which is
+     * @brief Reference to the "provider" part of the ANR SAP interface, which is
      *        automatically created when this class instantiates.
      */
     NrAnrSapProvider* m_anrSapProvider;
 
     /**
-     * \brief Reference to the "user" part of the ANR SAP interface, which is
-     *        provided by the eNodeB RRC instance.
+     * @brief Reference to the "user" part of the ANR SAP interface, which is
+     *        provided by the gNB RRC instance.
      */
     NrAnrSapUser* m_anrSapUser;
 
@@ -190,10 +191,10 @@ class NrAnr : public Object
     uint8_t m_threshold;
 
     /**
-     * \brief Neighbour Relation between two eNodeBs (serving eNodeB and neighbour
+     * @brief Neighbour Relation between two gNBs (serving eNodeB and neighbour
      *        eNodeB).
      */
-    struct NeighbourRelation_t
+    struct NR_EXPORT NeighbourRelation_t
     {
         bool noRemove;            ///< no remove
         bool noHo;                ///< no HO
@@ -208,9 +209,9 @@ class NrAnr : public Object
     NeighbourRelationTable_t m_neighbourRelationTable;
 
     /**
-     * \internal methods
-     * \param cellId
-     * \returns the neighbor relation
+     * @internal methods
+     * @param cellId
+     * @returns the neighbor relation
      */
     const NeighbourRelation_t* Find(uint16_t cellId) const;
 

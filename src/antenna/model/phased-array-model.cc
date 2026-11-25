@@ -8,16 +8,20 @@
 
 #include "isotropic-antenna-model.h"
 
-#include <ns3/boolean.h>
-#include <ns3/double.h>
-#include <ns3/log.h>
-#include <ns3/pointer.h>
-#include <ns3/uinteger.h>
+#include "ns3/boolean.h"
+#include "ns3/double.h"
+#include "ns3/log.h"
+#include "ns3/pointer.h"
+#include "ns3/uinteger.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace ns3
 {
 
 uint32_t PhasedArrayModel::m_idCounter = 0;
+SymmetricAdjacencyMatrix<bool> PhasedArrayModel::m_outOfDateAntennaPairChannel;
 
 NS_LOG_COMPONENT_DEFINE("PhasedArrayModel");
 
@@ -27,6 +31,8 @@ PhasedArrayModel::PhasedArrayModel()
     : m_isBfVectorValid{false}
 {
     m_id = m_idCounter++;
+    m_outOfDateAntennaPairChannel.AddRow();
+    m_outOfDateAntennaPairChannel.SetValueAdjacent(m_id, true);
 }
 
 PhasedArrayModel::~PhasedArrayModel()
@@ -46,6 +52,26 @@ PhasedArrayModel::GetTypeId()
                           MakePointerAccessor(&PhasedArrayModel::m_antennaElement),
                           MakePointerChecker<AntennaModel>());
     return tid;
+}
+
+std::pair<double, double>
+PhasedArrayModel::GetApertures() const
+{
+    if (GetNumElems() == 0)
+    {
+        return {0.0, 0.0};
+    }
+    Vector minLoc = GetElementLocation(0);
+    Vector maxLoc = minLoc;
+    for (size_t i = 1; i < GetNumElems(); i++)
+    {
+        const Vector loc = GetElementLocation(i);
+        minLoc =
+            Vector(std::min(minLoc.x, loc.x), std::min(minLoc.y, loc.y), std::min(minLoc.z, loc.z));
+        maxLoc =
+            Vector(std::max(maxLoc.x, loc.x), std::max(maxLoc.y, loc.y), std::max(maxLoc.z, loc.z));
+    }
+    return {std::hypot(maxLoc.x - minLoc.x, maxLoc.y - minLoc.y), maxLoc.z - minLoc.z};
 }
 
 void
@@ -135,6 +161,23 @@ uint32_t
 PhasedArrayModel::GetId() const
 {
     return m_id;
+}
+
+bool
+PhasedArrayModel::IsChannelOutOfDate(Ptr<const PhasedArrayModel> antennaB) const
+{
+    // Check that channel needs update
+    bool needsUpdate = m_outOfDateAntennaPairChannel.GetValue(m_id, antennaB->m_id);
+
+    // Assume the channel will be updated (needsUpdate == true), reset these
+    m_outOfDateAntennaPairChannel.SetValue(m_id, antennaB->m_id, false);
+    return needsUpdate;
+}
+
+void
+PhasedArrayModel::InvalidateChannels() const
+{
+    m_outOfDateAntennaPairChannel.SetValueAdjacent(m_id, true);
 }
 
 } /* namespace ns3 */

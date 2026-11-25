@@ -6,28 +6,30 @@
 
 #include "nr-mac-scheduler-ue-info-rr.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 /**
- * \ingroup scheduler
- * \brief UE representation for a proportional fair scheduler
+ * @ingroup scheduler
+ * @brief UE representation for a proportional fair scheduler
  *
  * The representation stores the current throughput, the average throughput,
  * and the last average throughput, as well as providing comparison functions
  * to sort the UEs in case of a PF scheduler.
  *
- * \see CompareUeWeightsDl
- * \see CompareUeWeightsUl
+ * @see CompareUeWeightsDl
+ * @see CompareUeWeightsUl
  */
-class NrMacSchedulerUeInfoPF : public NrMacSchedulerUeInfo
+class NR_EXPORT NrMacSchedulerUeInfoPF : public NrMacSchedulerUeInfo
 {
   public:
     /**
-     * \brief NrMacSchedulerUeInfoPF constructor
-     * \param rnti RNTI of the UE
-     * \param beamId Beam ID of the UE
-     * \param fn A function that tells how many RB per RBG
+     * @brief NrMacSchedulerUeInfoPF constructor
+     * @param rnti RNTI of the UE
+     * @param beamId Beam ID of the UE
+     * @param fn A function that tells how many RB per RBG
      */
     NrMacSchedulerUeInfoPF(float alpha, uint16_t rnti, BeamId beamId, const GetRbPerRbgFn& fn)
         : NrMacSchedulerUeInfo(rnti, beamId, fn),
@@ -36,7 +38,7 @@ class NrMacSchedulerUeInfoPF : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief Reset DL PF scheduler info
+     * @brief Reset DL PF scheduler info
      *
      * Set the last average throughput to the current average throughput,
      * and zeroes the average throughput as well as the current throughput.
@@ -46,14 +48,13 @@ class NrMacSchedulerUeInfoPF : public NrMacSchedulerUeInfo
     void ResetDlSchedInfo() override
     {
         m_lastAvgTputDl = m_avgTputDl;
-        m_avgTputDl = 0.0;
         m_currTputDl = 0.0;
         m_potentialTputDl = 0.0;
         NrMacSchedulerUeInfo::ResetDlSchedInfo();
     }
 
     /**
-     * \brief Reset UL PF scheduler info
+     * @brief Reset UL PF scheduler info
      *
      * Set the last average throughput to the current average throughput,
      * and zeroes the average throughput as well as the current throughput.
@@ -63,14 +64,13 @@ class NrMacSchedulerUeInfoPF : public NrMacSchedulerUeInfo
     void ResetUlSchedInfo() override
     {
         m_lastAvgTputUl = m_avgTputUl;
-        m_avgTputUl = 0.0;
         m_currTputUl = 0.0;
         m_potentialTputUl = 0.0;
         NrMacSchedulerUeInfo::ResetUlSchedInfo();
     }
 
     /**
-     * \brief Reset the DL avg Th to the last value
+     * @brief Reset the DL avg Th to the last value
      */
     void ResetDlMetric() override
     {
@@ -79,7 +79,7 @@ class NrMacSchedulerUeInfoPF : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief Reset the UL avg Th to the last value
+     * @brief Reset the UL avg Th to the last value
      */
     void ResetUlMetric() override
     {
@@ -88,56 +88,46 @@ class NrMacSchedulerUeInfoPF : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief Update the PF metric for downlink
-     * \param totAssigned the resources assigned
-     * \param timeWindow the time window
-     * \param amc a pointer to the AMC
+     * @brief Update the PF metric for downlink
+     * @param totAssigned the resources assigned
+     * @param timeWindow the time window
      *
      * Updates m_currTputDl and m_avgTputDl by keeping in consideration
      * the assigned resources (in form of TBS) and the time window.
      * It gets the tbSize by calling NrMacSchedulerUeInfo::UpdateDlMetric.
      */
-    void UpdateDlPFMetric(const NrMacSchedulerNs3::FTResources& totAssigned,
-                          double timeWindow,
-                          const Ptr<const NrAmc>& amc);
+    void UpdateDlPFMetric(const NrMacSchedulerNs3::FTResources& totAssigned, double timeWindow);
 
     /**
-     * \brief Update the PF metric for uplink
-     * \param totAssigned the resources assigned
-     * \param timeWindow the time window
-     * \param amc a pointer to the AMC
+     * @brief Update the PF metric for uplink
+     * @param totAssigned the resources assigned
+     * @param timeWindow the time window
      *
      * Updates m_currTputUl and m_avgTputUl by keeping in consideration
      * the assigned resources (in form of TBS) and the time window.
      * It gets the tbSize by calling NrMacSchedulerUeInfo::UpdateUlMetric.
      */
-    void UpdateUlPFMetric(const NrMacSchedulerNs3::FTResources& totAssigned,
-                          double timeWindow,
-                          const Ptr<const NrAmc>& amc);
+    void UpdateUlPFMetric(const NrMacSchedulerNs3::FTResources& totAssigned, double timeWindow);
 
     /**
-     * \brief Calculate the Potential throughput for downlink
-     * \param assignableInIteration resources assignable
-     * \param amc a pointer to the AMC
+     * @brief Calculate the Potential throughput for downlink
+     * @param assignableInIteration resources assignable
      */
-    void CalculatePotentialTPutDl(const NrMacSchedulerNs3::FTResources& assignableInIteration,
-                                  const Ptr<const NrAmc>& amc);
+    void CalculatePotentialTPutDl(const NrMacSchedulerNs3::FTResources& assignableInIteration);
 
     /**
-     * \brief Calculate the Potential throughput for uplink
-     * \param assignableInIteration resources assignable
-     * \param amc a pointer to the AMC
+     * @brief Calculate the Potential throughput for uplink
+     * @param assignableInIteration resources assignable
      */
-    void CalculatePotentialTPutUl(const NrMacSchedulerNs3::FTResources& assignableInIteration,
-                                  const Ptr<const NrAmc>& amc);
+    void CalculatePotentialTPutUl(const NrMacSchedulerNs3::FTResources& assignableInIteration);
 
     /**
-     * \brief comparison function object (i.e. an object that satisfies the
+     * @brief comparison function object (i.e. an object that satisfies the
      * requirements of Compare) which returns true if the first argument is less
      * than (i.e. is ordered before) the second.
-     * \param lue Left UE
-     * \param rue Right UE
-     * \return true if the PF metric of the left UE is higher than the right UE
+     * @param lue Left UE
+     * @param rue Right UE
+     * @return true if the PF metric of the left UE is higher than the right UE
      *
      * The PF metric is calculated as following:
      *
@@ -161,12 +151,12 @@ class NrMacSchedulerUeInfoPF : public NrMacSchedulerUeInfo
     }
 
     /**
-     * \brief comparison function object (i.e. an object that satisfies the
+     * @brief comparison function object (i.e. an object that satisfies the
      * requirements of Compare) which returns true if the first argument is less
      * than (i.e. is ordered before) the second.
-     * \param lue Left UE
-     * \param rue Right UE
-     * \return true if the PF metric of the left UE is higher than the right UE
+     * @param lue Left UE
+     * @param rue Right UE
+     * @return true if the PF metric of the left UE is higher than the right UE
      *
      * The PF metric is calculated as following:
      *

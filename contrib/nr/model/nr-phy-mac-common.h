@@ -10,10 +10,11 @@
 #include "nr-error-model.h"
 #include "sfnsf.h"
 
-#include <ns3/log.h>
-#include <ns3/matrix-array.h>
-#include <ns3/object.h>
-#include <ns3/string.h>
+#include "ns3/log.h"
+#include "ns3/matrix-array.h"
+#include "ns3/nr-export.h"
+#include "ns3/object.h"
+#include "ns3/string.h"
 
 #include <deque>
 #include <list>
@@ -25,7 +26,7 @@
 namespace ns3
 {
 
-struct GetFirst
+struct NR_EXPORT GetFirst
 {
     template <class First, class Second>
     First& operator()(std::pair<First, Second>& p)
@@ -52,7 +53,7 @@ struct GetFirst
     }
 };
 
-struct GetSecond
+struct NR_EXPORT GetSecond
 {
     template <class First, class Second>
     Second& operator()(std::pair<First, Second>& p)
@@ -92,13 +93,24 @@ struct GetSecond
 };
 
 /**
- * \ingroup utils
- * \brief Scheduling information. Despite the name, it is not TDMA.
+ * @brief Flags for the CSI feedback configuration
  */
-struct DciInfoElementTdma
+enum CsiFeedbackFlag : uint8_t
+{
+    CQI_PDSCH_MIMO = 0x01, //!< Initialize CSI feedback using MIMO PDSCH
+    CQI_CSI_RS = 0x02,     //!< Initialize CSI feedback to use CSI-RS
+    CQI_CSI_IM = 0x04,     //!< Initialize CSI feedback to use CSI-IM if PDSCH not available
+    CQI_PDSCH_SISO = 0x08  //!< Initialize CSI feedback using SISO PDSCH
+};
+
+/**
+ * @ingroup utils
+ * @brief Scheduling information. Despite the name, it is not TDMA.
+ */
+struct NR_EXPORT DciInfoElementTdma
 {
     /**
-     * \brief Format of the DCI
+     * @brief Format of the DCI
      */
     enum DciFormat
     {
@@ -107,27 +119,27 @@ struct DciInfoElementTdma
     };
 
     /**
-     * \brief The VarTtiType enum
+     * @brief The VarTtiType enum
      */
     enum VarTtiType
     {
-        SRS = 0,  //!< Used for SRS (it would be like DCI format 2_3)
-        DATA = 1, //!< Used for DL/UL DATA
-        CTRL = 2, //!< Used for DL/UL CTRL
-        MSG3 = 3, //!< Used for UL MSG3
+        SRS = 1,  //!< Used for SRS (it would be like DCI format 2_3)
+        DATA = 2, //!< Used for DL/UL DATA
+        CTRL = 4, //!< Used for DL/UL CTRL
+        MSG3 = 8, //!< Used for UL MSG3
     };
 
     /**
-     * \brief Constructor used in NrUePhy to build local DCI for DL and UL control
-     * \param symStart Sym start
-     * \param numSym Num sym
-     * \param rbgBitmask Bitmask of RBG
+     * @brief Constructor used in NrUePhy to build local DCI for DL and UL control
+     * @param symStart Sym start
+     * @param numSym Num sym
+     * @param rbgBitmask Bitmask of RBG
      */
     DciInfoElementTdma(uint8_t symStart,
                        uint8_t numSym,
                        DciFormat format,
                        VarTtiType type,
-                       const std::vector<uint8_t>& rbgBitmask)
+                       const std::vector<bool>& rbgBitmask)
         : m_format(format),
           m_symStart(symStart),
           m_numSym(numSym),
@@ -137,19 +149,19 @@ struct DciInfoElementTdma
     }
 
     /**
-     * \brief Construct to build brand new DCI. Please remember to update manually
+     * @brief Construct to build brand new DCI. Please remember to update manually
      * the HARQ process ID and the RBG bitmask
      *
-     * \param rnti RNTI of the UE
-     * \param format DCI format
-     * \param symStart starting symbol index for flexible TTI scheme
-     * \param numSym number of symbols for flexible TTI scheme
-     * \param mcs MCS
-     * \param rank the Rank number
-     * \param precMats the precoding matrix
-     * \param tbs TB size
-     * \param ndi New Data Indicator
-     * \param rv Redundancy Version
+     * @param rnti RNTI of the UE
+     * @param format DCI format
+     * @param symStart starting symbol index for flexible TTI scheme
+     * @param numSym number of symbols for flexible TTI scheme
+     * @param mcs MCS
+     * @param rank the Rank number
+     * @param precMats the precoding matrix
+     * @param tbs TB size
+     * @param ndi New Data Indicator
+     * @param rv Redundancy Version
      */
     DciInfoElementTdma(uint16_t rnti,
                        DciFormat format,
@@ -181,12 +193,12 @@ struct DciInfoElementTdma
     }
 
     /**
-     * \brief Copy constructor except for some values that have to be overwritten
-     * \param symStart Sym start
-     * \param numSym Num sym
-     * \param ndi New Data Indicator: 0 for Retx, 1 for New Data
-     * \param rv Retransmission value
-     * \param o Other object from which copy all that is not specified as parameter
+     * @brief Copy constructor except for some values that have to be overwritten
+     * @param symStart Sym start
+     * @param numSym Num sym
+     * @param ndi New Data Indicator: 0 for Retx, 1 for New Data
+     * @param rv Retransmission value
+     * @param o Other object from which copy all that is not specified as parameter
      */
     DciInfoElementTdma(uint8_t symStart,
                        uint8_t numSym,
@@ -211,6 +223,58 @@ struct DciInfoElementTdma
     {
     }
 
+    /**
+     * @brief Constructor used in NrMacSchedulerHarqRr to reshape allocations
+     * @param symStart Sym start
+     * @param numSym Num sym
+     * @param rbgBitmask Bitmask of RBG
+     * @param o Original DCI to copy remaining fields
+     */
+    DciInfoElementTdma(uint8_t symStart,
+                       uint8_t numSym,
+                       const std::vector<bool>& rbgBitmask,
+                       const DciInfoElementTdma& o)
+        : m_rnti(o.m_rnti),
+          m_format(o.m_format),
+          m_symStart(symStart),
+          m_numSym(numSym),
+          m_mcs(o.m_mcs),
+          m_rank(o.m_rank),
+          m_precMats(o.m_precMats),
+          m_tbSize(o.m_tbSize),
+          m_ndi(o.m_ndi),
+          m_rv(o.m_rv),
+          m_type(o.m_type),
+          m_bwpIndex(o.m_bwpIndex),
+          m_harqProcess(o.m_harqProcess),
+          m_rbgBitmask(rbgBitmask),
+          m_tpc(o.m_tpc)
+    {
+    }
+
+    /**
+     * @brief Copy constructor
+     * @param o Original DCI to copy remaining fields
+     */
+    DciInfoElementTdma(const DciInfoElementTdma& o)
+        : m_rnti(o.m_rnti),
+          m_format(o.m_format),
+          m_symStart(o.m_symStart),
+          m_numSym(o.m_numSym),
+          m_mcs(o.m_mcs),
+          m_rank(o.m_rank),
+          m_precMats(o.m_precMats),
+          m_tbSize(o.m_tbSize),
+          m_ndi(o.m_ndi),
+          m_rv(o.m_rv),
+          m_type(o.m_type),
+          m_bwpIndex(o.m_bwpIndex),
+          m_harqProcess(o.m_harqProcess),
+          m_rbgBitmask(o.m_rbgBitmask),
+          m_tpc(o.m_tpc)
+    {
+    }
+
     const uint16_t m_rnti{0};     //!< RNTI of the UE
     const DciFormat m_format{DL}; //!< DCI format
     const uint8_t m_symStart{0};  //!< starting symbol index for flexible TTI scheme
@@ -218,21 +282,21 @@ struct DciInfoElementTdma
     const uint8_t m_mcs{0};       //!< MCS
     const uint8_t m_rank{1};      //!< the rank number (the number of MIMO layers)
     Ptr<const ComplexMatrixArray> m_precMats{nullptr};
-    const uint32_t m_tbSize{0};   //!< TB size
-    const uint8_t m_ndi{0};       //!< New Data Indicator
-    const uint8_t m_rv{0};        //!< Redundancy Version
-    const VarTtiType m_type{SRS}; //!< Var TTI type
-    const uint8_t m_bwpIndex{0};  //!< BWP Index to identify to which BWP this DCI applies to.
-    uint8_t m_harqProcess{0};     //!< HARQ process id
-    std::vector<uint8_t> m_rbgBitmask{}; //!< RBG mask: 0 if the RBG is not used, 1 otherwise
-    const uint8_t m_tpc{0};              //!< Tx power control command
+    const uint32_t m_tbSize{0};       //!< TB size
+    const uint8_t m_ndi{0};           //!< New Data Indicator
+    const uint8_t m_rv{0};            //!< Redundancy Version
+    const VarTtiType m_type{SRS};     //!< Var TTI type
+    const uint8_t m_bwpIndex{0};      //!< BWP Index to identify to which BWP this DCI applies to.
+    uint8_t m_harqProcess{0};         //!< HARQ process id
+    std::vector<bool> m_rbgBitmask{}; //!< RBG mask: 0 if the RBG is not used, 1 otherwise
+    const uint8_t m_tpc{0};           //!< Tx power control command
 };
 
 /**
- * \ingroup utils
- * \brief The RlcPduInfo struct
+ * @ingroup utils
+ * @brief The RlcPduInfo struct
  */
-struct RlcPduInfo
+struct NR_EXPORT RlcPduInfo
 {
     RlcPduInfo() = default;
     RlcPduInfo(const RlcPduInfo& o) = default;
@@ -248,7 +312,7 @@ struct RlcPduInfo
     uint32_t m_size{0};
 };
 
-struct VarTtiAllocInfo
+struct NR_EXPORT VarTtiAllocInfo
 {
     VarTtiAllocInfo(const VarTtiAllocInfo& o) = default;
 
@@ -268,7 +332,7 @@ struct VarTtiAllocInfo
     }
 };
 
-struct NrBuildRarListElement_s
+struct NR_EXPORT NrBuildRarListElement_s
 {
     std::shared_ptr<DciInfoElementTdma>
         ulMsg3Dci;             //!< UL MSG3 DCI that will be sent through RAR message
@@ -278,10 +342,10 @@ struct NrBuildRarListElement_s
 };
 
 /**
- * \ingroup utils
- * \brief The SlotAllocInfo struct
+ * @ingroup utils
+ * @brief The SlotAllocInfo struct
  */
-struct SlotAllocInfo
+struct NR_EXPORT SlotAllocInfo
 {
     SlotAllocInfo(SfnSf sfn)
         : m_sfnSf(sfn)
@@ -289,7 +353,7 @@ struct SlotAllocInfo
     }
 
     /**
-     * \brief Enum which indicates the allocations that are inside the allocation info
+     * @brief Enum which indicates the allocations that are inside the allocation info
      */
     enum AllocationType
     {
@@ -300,34 +364,44 @@ struct SlotAllocInfo
     };
 
     /**
-     * \brief Merge the input parameter to this SlotAllocInfo
-     * \param other SlotAllocInfo to merge in this allocation
+     * @brief Merge the input parameter to this SlotAllocInfo
+     * @param other SlotAllocInfo to merge in this allocation
      *
      * After the merge, order the allocation by symStart in DCI
      */
     void Merge(const SlotAllocInfo& other);
 
     /**
-     * \brief Check if we have data allocations
-     * \return true if m_varTtiAllocInfo contains data allocations
+     * @brief Check if we have data allocations
+     * @return true if m_varTtiAllocInfo contains data allocations
      */
     bool ContainsDataAllocation() const;
 
     /**
-     * \brief Check if we have UL MSG3 allocations
-     * \return true if m_varTtiAllocInfo contains data allocations
+     * @brief Check if we have UL MSG3 allocations
+     * @return true if m_varTtiAllocInfo contains data allocations
      */
     bool ContainsUlMsg3Allocation() const;
 
     /**
-     * \return true if m_varTtiAllocInfo contains a DL ctrl allocation
+     * @return true if m_varTtiAllocInfo contains a DL ctrl allocation
      */
     bool ContainsDlCtrlAllocation() const;
 
     /**
-     * \return true if m_varTtiAllocInfo contains a scheduled UL ctrl allocation (e.g., SRS)
+     * @return true if m_varTtiAllocInfo contains a scheduled UL ctrl allocation (e.g., SRS)
      */
     bool ContainsUlCtrlAllocation() const;
+
+    /**
+     * @brief Get the number of symbols allocated for the given type of allocation
+     * @param type DciInfoElementTdma::VarTtiType identifier for DCI type
+     * @return number of allocated symbols in VarTti's DCIs
+     */
+    uint8_t GetAllocInfoNumSymbols(uint8_t type = DciInfoElementTdma::VarTtiType::SRS |
+                                                  DciInfoElementTdma::VarTtiType::DATA |
+                                                  DciInfoElementTdma::VarTtiType::CTRL |
+                                                  DciInfoElementTdma::VarTtiType::MSG3) const;
 
     SfnSf m_sfnSf{};                                     //!< SfnSf of this allocation
     uint32_t m_numSymAlloc{0};                           //!< Number of allocated symbols
@@ -335,9 +409,9 @@ struct SlotAllocInfo
     AllocationType m_type{NONE};                         //!< Allocations type
     std::vector<NrBuildRarListElement_s> m_buildRarList; //!< build rar list that will be sent to UE
     /**
-     * \brief operator < (less than)
-     * \param rhs other SlotAllocInfo to compare
-     * \return true if this SlotAllocInfo is less than rhs
+     * @brief operator < (less than)
+     * @param rhs other SlotAllocInfo to compare
+     * @return true if this SlotAllocInfo is less than rhs
      *
      * The comparison is done on sfnSf
      */
@@ -345,10 +419,10 @@ struct SlotAllocInfo
 };
 
 /**
- * \ingroup utils
- * \brief The DlCqiInfo struct
+ * @ingroup utils
+ * @brief The DlCqiInfo struct
  */
-struct DlCqiInfo
+struct NR_EXPORT DlCqiInfo
 {
     uint16_t m_rnti{0}; //!< The RNTI
     // TODO: Rename to m_rank (m_ri is set directly to the rank).
@@ -371,10 +445,10 @@ struct DlCqiInfo
 };
 
 /**
- * \brief The structure used for the CQI feedback message that contains the optimum CQI, RI, PMI,
+ * @brief The structure used for the CQI feedback message that contains the optimum CQI, RI, PMI,
  and full precoding matrix (dimensions: nGnbPorts * rank * nRbs).
  */
-struct PmCqiInfo
+struct NR_EXPORT PmCqiInfo
 {
     uint8_t m_mcs{0};              //!< Modulation and coding scheme supported by current channel
     uint8_t m_rank{0};             //!< Rank of the channel matrix (supported number of MIMO layers)
@@ -382,19 +456,16 @@ struct PmCqiInfo
     uint8_t m_wbCqi{0};            //!< Wideband CQI
     std::vector<uint8_t> m_sbCqis; //!< Subband CQI values
     std::vector<size_t> m_sbPmis;  //!< Subband PMI values (i2, indices of W2 matrices)
-    Ptr<const ComplexMatrixArray> m_optPrecMat{}; ///< Precoding matrix for each RB
-
-    // TODO: Fix/remove empty DlSBCQIReported, then change default type to SB.
-
+    Ptr<const ComplexMatrixArray> m_optPrecMat{};  ///< Precoding matrix for each RB
     DlCqiInfo::DlCqiType m_cqiType{DlCqiInfo::WB}; ///< CQI type (WB or SB)
     size_t m_tbSize{}; //!< Expected TB size when allocating all resources
 };
 
 /**
- * \ingroup utils
- * \brief The UlCqiInfo struct
+ * @ingroup utils
+ * @brief The UlCqiInfo struct
  */
-struct UlCqiInfo
+struct NR_EXPORT UlCqiInfo
 {
     // std::vector <uint16_t> m_sinr;
     std::vector<double> m_sinr;
@@ -410,10 +481,10 @@ struct UlCqiInfo
 };
 
 /**
- * \ingroup utils
- * \brief The MacCeValue struct
+ * @ingroup utils
+ * @brief The MacCeValue struct
  */
-struct MacCeValue
+struct NR_EXPORT MacCeValue
 {
     MacCeValue()
         : m_phr(0),
@@ -431,10 +502,10 @@ struct MacCeValue
 };
 
 /**
- * \ingroup utils
- * \brief See section 4.3.14 macCEListElement
+ * @ingroup utils
+ * @brief See section 4.3.14 macCEListElement
  */
-struct MacCeElement
+struct NR_EXPORT MacCeElement
 {
     MacCeElement()
         : m_rnti(0)
@@ -453,19 +524,19 @@ struct MacCeElement
 };
 
 /**
- * \ingroup utils
- * \brief The RlcListElement struct
+ * @ingroup utils
+ * @brief The RlcListElement struct
  */
-struct RlcListElement
+struct NR_EXPORT RlcListElement
 {
     std::vector<struct RlcPduInfo> m_rlcPduElements;
 };
 
 /**
- * \ingroup utils
- * \brief The UePhyPacketCountParameter struct
+ * @ingroup utils
+ * @brief The UePhyPacketCountParameter struct
  */
-struct UePhyPacketCountParameter
+struct NR_EXPORT UePhyPacketCountParameter
 {
     uint64_t m_imsi;
     uint32_t m_noBytes;
@@ -474,10 +545,10 @@ struct UePhyPacketCountParameter
 };
 
 /**
- * \ingroup utils
- * \brief The GnbPhyPacketCountParameter struct
+ * @ingroup utils
+ * @brief The GnbPhyPacketCountParameter struct
  */
-struct GnbPhyPacketCountParameter
+struct NR_EXPORT GnbPhyPacketCountParameter
 {
     uint64_t m_cellId;
     uint32_t m_noBytes;
@@ -486,12 +557,12 @@ struct GnbPhyPacketCountParameter
 };
 
 /**
- * \ingroup utils
- * \brief Information about the expected transport block at a certain point in the slot
+ * @ingroup utils
+ * @brief Information about the expected transport block at a certain point in the slot
  *
  * Information passed by the PHY through a call to AddExpectedTb
  */
-struct ExpectedTb
+struct NR_EXPORT ExpectedTb
 {
     ExpectedTb(uint8_t ndi,
                uint32_t tbSize,
@@ -537,7 +608,7 @@ struct ExpectedTb
     SfnSf m_sfn;                 //!< SFN
 };
 
-struct TransportBlockInfo
+struct NR_EXPORT TransportBlockInfo
 {
     TransportBlockInfo(const ExpectedTb& expected)
         : m_expected(expected)
@@ -547,10 +618,11 @@ struct TransportBlockInfo
     TransportBlockInfo() = delete;
 
     /**
-     * \brief Update minimum and average SINR of the transport block based on perceived SINR
-     * \param perceivedSinr SpectrumValue with perceived SINR
+     * @brief Update minimum and average SINR of the transport block based on perceived SINR
+     * @param perceivedSinr SpectrumValue with perceived SINR
+     * @param rbMap Indices of the perceivedSinr values used by the transport block
      */
-    void UpdatePerceivedSinr(const SpectrumValue& perceivedSinr);
+    void UpdatePerceivedSinr(const SpectrumValue& perceivedSinr, const std::vector<int>& rbMap);
 
     ExpectedTb m_expected;          //!< Expected data from the PHY. Filled by AddExpectedTb
     bool m_isCorrupted{false};      //!< True if the ErrorModel indicates that the TB is corrupted.
@@ -562,10 +634,10 @@ struct TransportBlockInfo
 };
 
 /**
- * \ingroup utils
- * \brief The RxPacketTraceParams struct
+ * @ingroup utils
+ * @brief The RxPacketTraceParams struct
  */
-struct RxPacketTraceParams
+struct NR_EXPORT RxPacketTraceParams
 {
     RxPacketTraceParams(TransportBlockInfo tbInfo,
                         bool errorModelEnabled,
@@ -584,13 +656,14 @@ struct RxPacketTraceParams
           m_mcs(tbInfo.m_expected.m_mcs),
           m_rank(tbInfo.m_expected.m_rank),
           m_rv(tbInfo.m_expected.m_rv),
+          m_harqProcessId(tbInfo.m_expected.m_harqProcessId),
           m_sinr(tbInfo.m_sinrAvg),
           m_sinrMin(tbInfo.m_sinrMin),
           m_tbler(errorModelEnabled ? tbInfo.m_outputOfEM->m_tbler : 0),
           m_corrupt(errorModelEnabled && tbInfo.m_isCorrupted),
           m_bwpId(bwpId),
           m_rbAssignedNum(static_cast<uint32_t>(tbInfo.m_expected.m_rbBitmap.size())),
-          m_cqi(cqi){};
+          m_cqi(cqi) {};
     uint64_t m_cellId{0};
     uint16_t m_rnti{0};
     uint32_t m_frameNum{std::numeric_limits<uint32_t>::max()};
@@ -602,6 +675,7 @@ struct RxPacketTraceParams
     uint8_t m_mcs{std::numeric_limits<uint8_t>::max()};
     uint8_t m_rank{std::numeric_limits<uint8_t>::max()};
     uint8_t m_rv{std::numeric_limits<uint8_t>::max()};
+    uint8_t m_harqProcessId{std::numeric_limits<uint8_t>::max()};
     double m_sinr{-1.0};
     double m_sinrMin{-1.0};
     double m_tbler{-1.0};
@@ -612,13 +686,13 @@ struct RxPacketTraceParams
 };
 
 /**
- * \ingroup utils
- * \brief Store information about HARQ
+ * @ingroup utils
+ * @brief Store information about HARQ
  *
- * \see DlHarqInfo
- * \see UlHarqInfo
+ * @see DlHarqInfo
+ * @see UlHarqInfo
  */
-struct HarqInfo
+struct NR_EXPORT HarqInfo
 {
     virtual ~HarqInfo()
     {
@@ -629,23 +703,23 @@ struct HarqInfo
     uint8_t m_bwpIndex{UINT8_MAX};      //!< BWP identifier, uniquely identifies BWP within the UE
 
     /**
-     * \return true if the HARQ should be eliminated, since the info has been
+     * @return true if the HARQ should be eliminated, since the info has been
      * correctly received
      */
     virtual bool IsReceivedOk() const = 0;
 };
 
 /**
- * \ingroup utils
- * \brief A struct that contains info for the DL HARQ
+ * @ingroup utils
+ * @brief A struct that contains info for the DL HARQ
  *
  * http://www.eurecom.fr/~kaltenbe/fapi-2.0/structDlInfoListElement__s.html
  * Note: This should really be called DlInfoListElement ...
  */
-struct DlHarqInfo : public HarqInfo
+struct NR_EXPORT DlHarqInfo : public HarqInfo
 {
     /**
-     * \brief Status of the DL Harq: ACKed or NACKed
+     * @brief Status of the DL Harq: ACKed or NACKed
      */
     enum HarqStatus
     {
@@ -662,10 +736,10 @@ struct DlHarqInfo : public HarqInfo
 };
 
 /**
- * \ingroup utils
- * \brief A struct that contains info for the UL HARQ
+ * @ingroup utils
+ * @brief A struct that contains info for the UL HARQ
  */
-struct UlHarqInfo : public HarqInfo
+struct NR_EXPORT UlHarqInfo : public HarqInfo
 {
     std::vector<uint16_t> m_ulReception;
 
@@ -689,18 +763,18 @@ namespace nr
 {
 
 /**
- * \brief Base class for storing the values of vendor specific parameters
+ * @brief Base class for storing the values of vendor specific parameters
  */
-struct VendorSpecificValue : public SimpleRefCount<VendorSpecificValue>
+struct NR_EXPORT VendorSpecificValue : public SimpleRefCount<VendorSpecificValue>
 {
-    virtual ~VendorSpecificValue(){};
+    virtual ~VendorSpecificValue() {};
 };
 
 /**
- * \brief See section 4.3.3 vendorSpecificListElement
- * \struct VendorSpecificListElement_s
+ * @brief See section 4.3.3 vendorSpecificListElement
+ * @struct VendorSpecificListElement_s
  */
-struct VendorSpecificListElement_s
+struct NR_EXPORT VendorSpecificListElement_s
 {
     uint32_t m_type{UINT32_MAX};      ///< type
     uint32_t m_length{UINT32_MAX};    ///< length
@@ -708,10 +782,10 @@ struct VendorSpecificListElement_s
 };
 
 /**
- * \brief See section 4.3.4 logicalChannelConfigListElement
- * \struct LogicalChannelConfigListElement_s
+ * @brief See section 4.3.4 logicalChannelConfigListElement
+ * @struct LogicalChannelConfigListElement_s
  */
-struct LogicalChannelConfigListElement_s
+struct NR_EXPORT LogicalChannelConfigListElement_s
 {
     uint8_t m_logicalChannelIdentity{UINT8_MAX}; ///< logical channel identity
     uint8_t m_logicalChannelGroup{UINT8_MAX};    ///< logical channel group
@@ -734,7 +808,7 @@ struct LogicalChannelConfigListElement_s
         NotValid_QosBearerType
     } m_qosBearerType{NotValid_QosBearerType}; ///< the QOS bearer type
 
-    uint8_t m_qci{UINT8_MAX};                       ///< QCI
+    uint8_t m_fiveQi{UINT8_MAX};                    ///< 5QI
     uint64_t m_eRabMaximulBitrateUl{UINT64_MAX};    ///< ERAB maximum bit rate UL
     uint64_t m_eRabMaximulBitrateDl{UINT64_MAX};    ///< ERAB maximum bit rate DL
     uint64_t m_eRabGuaranteedBitrateUl{UINT64_MAX}; ///< ERAB guaranteed bit rate UL
@@ -742,19 +816,19 @@ struct LogicalChannelConfigListElement_s
 };
 
 /**
- * \brief See section 4.3.6 rachListElement
- * \struct RachListElement_s
+ * @brief See section 4.3.6 rachListElement
+ * @struct RachListElement_s
  */
-struct RachListElement_s
+struct NR_EXPORT RachListElement_s
 {
     uint16_t m_rnti{UINT16_MAX};          ///< RNTI
     uint16_t m_estimatedSize{UINT16_MAX}; ///< estimated size
 };
 
 /**
- * \brief See section 4.3.15 macCEValue
+ * @brief See section 4.3.15 macCEValue
  */
-struct MacCeValue_u
+struct NR_EXPORT MacCeValue_u
 {
     uint8_t m_phr{UINT8_MAX};            ///< phr
     uint8_t m_crnti{UINT8_MAX};          ///< NRTI
@@ -762,9 +836,9 @@ struct MacCeValue_u
 };
 
 /**
- * \brief See section 4.3.14 macCEListElement
+ * @brief See section 4.3.14 macCEListElement
  */
-struct MacCeListElement_s
+struct NR_EXPORT MacCeListElement_s
 {
     uint16_t m_rnti{UINT16_MAX}; ///< RNTI
 
@@ -779,19 +853,37 @@ struct MacCeListElement_s
     struct MacCeValue_u m_macCeValue; ///< MAC CE value
 };
 
+/**
+ * Counts the number of symbols used within a specified VarTtiAllocInfo's DCI range.
+ *
+ * This function iterates over a range of DCIs objects stored in a VarTtiAllocInfo, and calculates
+ * the total count of used symbols used from a starting symbol (startSym).
+ *
+ * @param startSym The starting symbol index from which counting begins.
+ * @param begin Iterator pointing to the beginning of the specified range of VarTtiAllocInfo.
+ * @param end Iterator pointing to the end of the specified range of VarTtiAllocInfo.
+ * @return The total count of used symbols within the specified range starting from the given
+ * symbol.
+ */
+uint8_t CountUsedSymbolsFromVarAllocTtiRange(uint8_t startSym,
+                                             std::deque<VarTtiAllocInfo>::iterator begin,
+                                             std::deque<VarTtiAllocInfo>::iterator end);
+
+// TS 38.214 nominal RBG size P for RA Type 0.
+int NumRbsPerRbg(int numRbs);
 } // namespace nr
 
-std::ostream& operator<<(std::ostream& os, const DciInfoElementTdma& item);
-std::ostream& operator<<(std::ostream& os, const DciInfoElementTdma::DciFormat& item);
-std::ostream& operator<<(std::ostream& os, const DlHarqInfo& item);
-std::ostream& operator<<(std::ostream& os, const UlHarqInfo& item);
-std::ostream& operator<<(std::ostream& os, const SfnSf& item);
-std::ostream& operator<<(std::ostream& os, const SlotAllocInfo& item);
-std::ostream& operator<<(std::ostream& os, const SlotAllocInfo::AllocationType& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const DciInfoElementTdma& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const DciInfoElementTdma::DciFormat& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const DlHarqInfo& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const UlHarqInfo& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const SfnSf& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const SlotAllocInfo& item);
+NR_EXPORT std::ostream& operator<<(std::ostream& os, const SlotAllocInfo::AllocationType& item);
 } // namespace ns3
 
 /// NrSchedulingCallbackInfo structure
-struct NrSchedulingCallbackInfo
+struct NR_EXPORT NrSchedulingCallbackInfo
 {
     uint16_t m_frameNum{UINT16_MAX};  //!< frame number
     uint8_t m_subframeNum{UINT8_MAX}; //!< subframe number

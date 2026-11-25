@@ -12,6 +12,7 @@
 #include "wifi-mac-queue.h"
 
 #include "wifi-mac-queue-scheduler.h"
+#include "wifi-utils.h"
 
 #include "ns3/simulator.h"
 
@@ -313,18 +314,27 @@ WifiMacQueue::Peek(std::optional<uint8_t> linkId) const
 }
 
 Ptr<WifiMpdu>
-WifiMacQueue::PeekByTidAndAddress(uint8_t tid, Mac48Address dest, Ptr<const WifiMpdu> item) const
+WifiMacQueue::PeekByTidAndAddress(uint8_t tid,
+                                  Mac48Address dest,
+                                  std::optional<Mac48Address> src,
+                                  Ptr<const WifiMpdu> item) const
 {
     NS_LOG_FUNCTION(this << +tid << dest << item);
-    NS_ABORT_IF(dest.IsGroup());
-    WifiContainerQueueId queueId(WIFI_QOSDATA_QUEUE, WIFI_UNICAST, dest, tid);
+    NS_ASSERT_MSG(!dest.IsGroup() || src.has_value(),
+                  "The source address must be specified for group addressed packets");
+
+    const auto queueId =
+        dest.IsBroadcast()
+            ? MakeWifiBroadcastQueueId(WIFI_QOSDATA_QUEUE, *src, tid)
+            : (dest.IsGroup() ? MakeWifiGroupcastQueueId(WIFI_QOSDATA_QUEUE, dest, *src, tid)
+                              : MakeWifiUnicastQueueId(WIFI_QOSDATA_QUEUE, dest, tid));
     return PeekByQueueId(queueId, item);
 }
 
 Ptr<WifiMpdu>
 WifiMacQueue::PeekByQueueId(const WifiContainerQueueId& queueId, Ptr<const WifiMpdu> item) const
 {
-    NS_LOG_FUNCTION(this << item);
+    NS_LOG_FUNCTION(this << queueId << item);
     NS_ASSERT(!item || (item->IsQueued() && WifiMacQueueContainer::GetQueueId(item) == queueId));
 
     // Remove MPDUs with expired lifetime if we are looking for the first MPDU in the queue
@@ -384,7 +394,13 @@ WifiMacQueue::PeekFirstAvailable(uint8_t linkId, Ptr<const WifiMpdu> item) const
 Ptr<WifiMpdu>
 WifiMacQueue::Remove()
 {
-    return Remove(Peek());
+    if (auto queueId = m_scheduler->GetNext(m_ac, std::nullopt, false))
+    {
+        return Remove(GetContainer().GetQueue(queueId.value()).cbegin()->mpdu);
+    }
+
+    NS_LOG_DEBUG("The queue is empty");
+    return nullptr;
 }
 
 Ptr<WifiMpdu>
@@ -411,6 +427,17 @@ WifiMacQueue::Flush()
 }
 
 void
+WifiMacQueue::Flush(const WifiContainerQueueId& queueId)
+{
+    NS_LOG_FUNCTION(this << queueId);
+    const auto& queue = GetContainer().GetQueue(queueId);
+    while (!queue.empty())
+    {
+        DoRemove(queue.cbegin());
+    }
+}
+
+void
 WifiMacQueue::Replace(Ptr<const WifiMpdu> currentItem, Ptr<WifiMpdu> newItem)
 {
     NS_LOG_FUNCTION(this << *currentItem << *newItem);
@@ -428,6 +455,17 @@ WifiMacQueue::Replace(Ptr<const WifiMpdu> currentItem, Ptr<WifiMpdu> newItem)
     // The size of a WifiMacQueue is measured as number of packets. We dequeued
     // one packet, so there is certainly room for inserting one packet
     NS_ABORT_IF(!ret);
+}
+
+void
+WifiMacQueue::ReplaceAddresses(const WifiContainerQueueId& queueId,
+                               std::optional<Mac48Address> addr1,
+                               std::optional<Mac48Address> addr2)
+{
+    NS_LOG_FUNCTION(this << queueId << addr1 << addr2);
+
+    GetContainer().ReplaceAddresses(queueId, addr1, addr2);
+    m_scheduler->ChangeQueueIdAddress(m_ac, queueId, addr1, addr2);
 }
 
 uint32_t

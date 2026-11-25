@@ -8,8 +8,11 @@
 #ifndef NR_RRC_SAP_H
 #define NR_RRC_SAP_H
 
-#include <ns3/ptr.h>
-#include <ns3/simulator.h>
+#include "nr-qos-flow.h"
+
+#include "ns3/nr-export.h"
+#include "ns3/ptr.h"
+#include "ns3/simulator.h"
 
 #include <list>
 #include <stdint.h>
@@ -24,9 +27,9 @@ class NrPdcpSapProvider;
 class Packet;
 
 /**
- * \ingroup nr
+ * @ingroup nr
  *
- * \brief Class holding definition common to all UE/eNodeB SAP Users/Providers.
+ * @brief Class holding definition common to all UE/eNodeB SAP Users/Providers.
  *
  * See 3GPP TS 36.331 for reference.
  *
@@ -38,7 +41,7 @@ class Packet;
  * detailed doxygen documentation is omitted, so please refer to
  * 36.331 for the meaning of these data structures / fields.
  */
-class NrRrcSap
+class NR_EXPORT NrRrcSap
 {
   public:
     virtual ~NrRrcSap() = default;
@@ -48,36 +51,36 @@ class NrRrcSap
 
     // Information Elements
     /// PlmnIdentityInfo structure
-    struct PlmnIdentityInfo
+    struct NR_EXPORT PlmnIdentityInfo
     {
         uint32_t plmnIdentity; ///< PLMN identity
     };
 
     /// CellAccessRelatedInfo structure
-    struct CellAccessRelatedInfo
+    struct NR_EXPORT CellAccessRelatedInfo
     {
         PlmnIdentityInfo plmnIdentityInfo; ///< PLMN identity info
         uint32_t cellIdentity;             ///< cell identity
-        bool csgIndication;                ///< CSG indication
+        bool csgIndication{false};         ///< CSG indication
         uint32_t csgIdentity;              ///< CSG identity
     };
 
     /// CellSelectionInfo structure
-    struct CellSelectionInfo
+    struct NR_EXPORT CellSelectionInfo
     {
         int8_t qRxLevMin; ///< INTEGER (-70..-22), actual value = IE value * 2 [dBm].
         int8_t qQualMin;  ///< INTEGER (-34..-3), actual value = IE value [dB].
     };
 
     /// FreqInfo structure
-    struct FreqInfo
+    struct NR_EXPORT FreqInfo
     {
         uint32_t ulCarrierFreq; ///< UL carrier frequency
         uint16_t ulBandwidth;   ///< UL bandwidth
     };
 
     /// RlcConfig structure
-    struct RlcConfig
+    struct NR_EXPORT RlcConfig
     {
         /// the direction choice
         enum Direction
@@ -92,16 +95,17 @@ class NrRrcSap
     };
 
     /// LogicalChannelConfig structure
-    struct LogicalChannelConfig
+    struct NR_EXPORT LogicalChannelConfig
     {
         uint8_t priority;                ///< priority
+        NrQosFlow::FiveQi fiveQi;        ///< 5G QoS Identifier
         uint16_t prioritizedBitRateKbps; ///< prioritized bit rate Kbps
         uint16_t bucketSizeDurationMs;   ///< bucket size duration ms
         uint8_t logicalChannelGroup;     ///< logical channel group
     };
 
     /// SoundingRsUlConfigCommon structure
-    struct SoundingRsUlConfigCommon
+    struct NR_EXPORT SoundingRsUlConfigCommon
     {
         /// the config action
         enum Action
@@ -117,7 +121,7 @@ class NrRrcSap
     };
 
     /// SoundingRsUlConfigDedicated structure
-    struct SoundingRsUlConfigDedicated
+    struct NR_EXPORT SoundingRsUlConfigDedicated
     {
         /// the config action
         enum Action
@@ -133,20 +137,20 @@ class NrRrcSap
     };
 
     /// AntennaInfoDedicated structure
-    struct AntennaInfoDedicated
+    struct NR_EXPORT AntennaInfoDedicated
     {
         uint8_t transmissionMode; ///< transmission mode
     };
 
     /// PdschConfigCommon structure
-    struct PdschConfigCommon
+    struct NR_EXPORT PdschConfigCommon
     {
         int8_t referenceSignalPower; ///< INTEGER (-60..50),
         int8_t pb;                   ///< INTEGER (0..3),
     };
 
     /// PdschConfigDedicated structure
-    struct PdschConfigDedicated
+    struct NR_EXPORT PdschConfigDedicated
     {
         /**
          * P_A values, TS 36.331 6.3.2 PDSCH-Config
@@ -170,8 +174,8 @@ class NrRrcSap
     /**
      * Convert PDSCH config dedicated function
      *
-     * \param pdschConfigDedicated PdschConfigDedicated
-     * \returns double value
+     * @param pdschConfigDedicated PdschConfigDedicated
+     * @returns double value
      */
     static double ConvertPdschConfigDedicated2Double(PdschConfigDedicated pdschConfigDedicated)
     {
@@ -209,28 +213,28 @@ class NrRrcSap
     }
 
     /// PhysicalConfigDedicated structure
-    struct PhysicalConfigDedicated
+    struct NR_EXPORT PhysicalConfigDedicated
     {
-        bool haveSoundingRsUlConfigDedicated; ///< have sounding RS UL config dedicated?
+        bool haveSoundingRsUlConfigDedicated{false}; ///< have sounding RS UL config dedicated?
         SoundingRsUlConfigDedicated
             soundingRsUlConfigDedicated;           ///< sounding RS UL config dedicated
-        bool haveAntennaInfoDedicated;             ///< have antenna info dedicated?
+        bool haveAntennaInfoDedicated{false};      ///< have antenna info dedicated?
         AntennaInfoDedicated antennaInfo;          ///< antenna info
-        bool havePdschConfigDedicated;             ///< have PDSCH config dedicated?
+        bool havePdschConfigDedicated{false};      ///< have PDSCH config dedicated?
         PdschConfigDedicated pdschConfigDedicated; ///< PDSCH config dedicated
     };
 
     /// SrbToAddMod structure
-    struct SrbToAddMod
+    struct NR_EXPORT SrbToAddMod
     {
         uint8_t srbIdentity;                       ///< SB identity
         LogicalChannelConfig logicalChannelConfig; ///< logical channel config
     };
 
     /// DrbToAddMod structure
-    struct DrbToAddMod
+    struct NR_EXPORT DrbToAddMod
     {
-        uint8_t epsBearerIdentity;                 ///< EPS bearer identity
+        uint8_t qosFlowIdentity;                   ///< QoS flow identity
         uint8_t drbIdentity;                       ///< DRB identity
         RlcConfig rlcConfig;                       ///< RLC config
         uint8_t logicalChannelIdentity;            ///< logical channel identify
@@ -238,27 +242,27 @@ class NrRrcSap
     };
 
     /// PreambleInfo structure
-    struct PreambleInfo
+    struct NR_EXPORT PreambleInfo
     {
         uint8_t numberOfRaPreambles; ///< number of RA preambles
     };
 
     /// RaSupervisionInfo structure
-    struct RaSupervisionInfo
+    struct NR_EXPORT RaSupervisionInfo
     {
         uint8_t preambleTransMax;     ///< preamble transmit maximum
         uint8_t raResponseWindowSize; ///< RA response window size
     };
 
     /// TxFailParams structure
-    struct TxFailParam
+    struct NR_EXPORT TxFailParam
     {
         uint8_t connEstFailCount{
             0}; ///< Number of times that the UE detects T300 expiry on the same cell
     };
 
     /// RachConfigCommon structure
-    struct RachConfigCommon
+    struct NR_EXPORT RachConfigCommon
     {
         PreambleInfo preambleInfo;           ///< preamble info
         RaSupervisionInfo raSupervisionInfo; ///< RA supervision info
@@ -266,37 +270,93 @@ class NrRrcSap
     };
 
     /// RadioResourceConfigCommon structure
-    struct RadioResourceConfigCommon
+    struct NR_EXPORT RadioResourceConfigCommon
     {
         RachConfigCommon rachConfigCommon; ///< RACH config common
     };
 
     /// RadioResourceConfigCommonSib structure
-    struct RadioResourceConfigCommonSib
+    struct NR_EXPORT RadioResourceConfigCommonSib
     {
         RachConfigCommon rachConfigCommon;   ///< RACH config common
         PdschConfigCommon pdschConfigCommon; ///< PDSCH config common
     };
 
+    /// ServingCellConfigCommon structure (broadcast cell PHY configuration)
+    struct NR_EXPORT ServingCellConfigCommon
+    {
+        uint8_t numerology; // SubcarrierSpacing (0..5)
+
+        // SubcarrierSpacing of the cell's UL carrier. Equal to numerology for
+        // TDD or intra-carrier FDD; differs when the cell receives uplink on a
+        // separate carrier with its own numerology.
+        uint8_t ulNumerology;
+
+        // ARFCN of the cell's UL carrier (frequencyInfoUL in TS 38.331). Equal
+        // to the carrier's own ARFCN for TDD; points to the dedicated UL-only
+        // carrier for FDD, letting the UE derive its primary UL BWP without
+        // manual configuration.
+        uint32_t ulCarrierFreq;
+
+        uint8_t symbolsPerSlot; // 14 (normal CP), 12 (extended CP)
+
+        // DL/UL control symbols (approx. downlinkSymbolsNum/uplinkSymbolsNum from TDD pattern)
+
+        // Number of DL control symbols (scheduled forwards from first symbol)
+        uint8_t dlCtrlSymsNum;
+
+        // Number of DL control symbols (scheduled backwards from last symbol)
+        uint8_t ulCtrlSymsNum;
+
+        std::string tddPattern; // TDD pattern (Not following ASN.1 structure just yet)
+
+        // Number of RBs per RBG. Standard actually defines a bit to select between config1 and
+        // config2. We avoid it here because we have flexible rbOverhead numbers that cause weird
+        // rounding issues.
+        uint8_t rbgSize;
+    };
+
+    /// BwpConfig structure: describes one BWP/carrier of the serving cell
+    struct NR_EXPORT BwpConfig
+    {
+        uint32_t arfcn;                 ///< carrier ARFCN
+        ServingCellConfigCommon config; ///< PHY configuration of the carrier
+    };
+
+    /// QosFlowToBwp structure: maps a 5QI to the BWP (carrier ARFCN) serving it
+    struct NR_EXPORT QosFlowToBwp
+    {
+        uint8_t fiveQi;    ///< 5QI
+        uint32_t bwpArfcn; ///< ARFCN of the BWP serving flows of this 5QI
+    };
+
     /// RadioResourceConfigDedicated structure
-    struct RadioResourceConfigDedicated
+    struct NR_EXPORT RadioResourceConfigDedicated
     {
         std::list<SrbToAddMod> srbToAddModList;          ///< SRB to add mod list
         std::list<DrbToAddMod> drbToAddModList;          ///< DRB to add mod list
         std::list<uint8_t> drbToReleaseList;             ///< DRB to release list
-        bool havePhysicalConfigDedicated;                ///< have physical config dedicated?
+        bool havePhysicalConfigDedicated{false};         ///< have physical config dedicated?
         PhysicalConfigDedicated physicalConfigDedicated; ///< physical config dedicated
+
+        // All BWPs/carriers of the serving cell, so the UE can configure its
+        // extra BWPs and derive the UL pairing of DL-only (FDD) carriers
+        // without manual UE-side configuration
+        std::list<BwpConfig> bwpConfigList; ///< serving-cell BWP configurations
+        // 5QI -> serving BWP mappings, mirroring the gNB's BWP manager
+        // algorithm, so the UE routes uplink flows like the network expects
+        std::list<QosFlowToBwp> qosFlowToBwpList; ///< 5QI to BWP (ARFCN) mappings
     };
 
     /// QuantityConfig structure
-    struct QuantityConfig
+    struct NR_EXPORT QuantityConfig
     {
         uint8_t filterCoefficientRSRP; ///< filter coefficient RSRP
         uint8_t filterCoefficientRSRQ; ///< filter coefficient RSRQ
     };
 
     /// CellsToAddMod structure
-    struct CellsToAddMod
+    struct NR_EXPORT CellsToAddMod
     {
         uint8_t cellIndex;           ///< cell index
         uint16_t physCellId;         ///< Phy cell ID
@@ -304,22 +364,22 @@ class NrRrcSap
     };
 
     /// PhysCellIdRange structure
-    struct PhysCellIdRange
+    struct NR_EXPORT PhysCellIdRange
     {
-        uint16_t start; ///< starting cell ID
-        bool haveRange; ///< has a range?
-        uint16_t range; ///< the range
+        uint16_t start;        ///< starting cell ID
+        bool haveRange{false}; ///< has a range?
+        uint16_t range;        ///< the range
     };
 
     /// BlackCellsToAddMod structure
-    struct BlackCellsToAddMod
+    struct NR_EXPORT BlackCellsToAddMod
     {
         uint8_t cellIndex;               ///< cell index
         PhysCellIdRange physCellIdRange; ///< Phy cell ID range
     };
 
     /// MeasObjectEutra structure
-    struct MeasObjectEutra
+    struct NR_EXPORT MeasObjectEutra
     {
         uint32_t carrierFreq;                                 ///< carrier frequency
         uint16_t allowedMeasBandwidth;                        ///< allowed measure bandwidth
@@ -330,12 +390,12 @@ class NrRrcSap
         std::list<CellsToAddMod> cellsToAddModList;           ///< cells to add mod list
         std::list<uint8_t> blackCellsToRemoveList;            ///< black cells to remove list
         std::list<BlackCellsToAddMod> blackCellsToAddModList; ///< black cells to add mod list
-        bool haveCellForWhichToReportCGI; ///< have cell for which to report CGI?
-        uint16_t cellForWhichToReportCGI; ///< cell for which to report CGI
+        bool haveCellForWhichToReportCGI{false}; ///< have cell for which to report CGI?
+        uint16_t cellForWhichToReportCGI{0};     ///< cell for which to report CGI
     };
 
     /**
-     * \brief Threshold for event evaluation.
+     * @brief Threshold for event evaluation.
      *
      * For RSRP-based threshold, the actual value is (value - 140) dBm. While for
      * RSRQ-based threshold, the actual value is (value - 40) / 2 dB. This is in
@@ -343,7 +403,7 @@ class NrRrcSap
      *
      * \sa ns3::EutranMeasurementMapping
      */
-    struct ThresholdEutra
+    struct NR_EXPORT ThresholdEutra
     {
         /// Threshold enumeration
         enum
@@ -356,7 +416,7 @@ class NrRrcSap
     };
 
     /// Specifies criteria for triggering of an E-UTRA measurement reporting event.
-    struct ReportConfigEutra
+    struct NR_EXPORT ReportConfigEutra
     {
         /// Trigger enumeration
         enum
@@ -383,7 +443,7 @@ class NrRrcSap
         /// Indicates whether or not the UE shall initiate the measurement reporting procedure when
         /// the leaving condition is met for a cell in `cellsTriggeredList`, as specified in 5.5.4.1
         /// of 3GPP TS 36.331.
-        bool reportOnLeave;
+        bool reportOnLeave{false};
 
         /// Offset value for Event A3. An integer between -30 and 30. The actual value is (value *
         /// 0.5) dB.
@@ -475,21 +535,21 @@ class NrRrcSap
     }; // end of struct ReportConfigEutra
 
     /// MeasObjectToAddMod structure
-    struct MeasObjectToAddMod
+    struct NR_EXPORT MeasObjectToAddMod
     {
         uint8_t measObjectId;            ///< measure object ID
         MeasObjectEutra measObjectEutra; ///< measure object eutra
     };
 
     /// ReportConfigToAddMod structure
-    struct ReportConfigToAddMod
+    struct NR_EXPORT ReportConfigToAddMod
     {
         uint8_t reportConfigId;              ///< report config ID
         ReportConfigEutra reportConfigEutra; ///< report config eutra
     };
 
     /// MeasIdToAddMod structure
-    struct MeasIdToAddMod
+    struct NR_EXPORT MeasIdToAddMod
     {
         uint8_t measId;         ///< measure ID
         uint8_t measObjectId;   ///< measure object ID
@@ -497,7 +557,7 @@ class NrRrcSap
     };
 
     /// MeasGapConfig structure
-    struct MeasGapConfig
+    struct NR_EXPORT MeasGapConfig
     {
         /// the action type
         enum Action
@@ -521,7 +581,7 @@ class NrRrcSap
     };
 
     /// MobilityStateParameters structure
-    struct MobilityStateParameters
+    struct NR_EXPORT MobilityStateParameters
     {
         uint8_t tEvaluation;       ///< evaluation
         uint8_t tHystNormal;       ///< hyst normal
@@ -530,7 +590,7 @@ class NrRrcSap
     };
 
     /// SpeedStateScaleFactors structure
-    struct SpeedStateScaleFactors
+    struct NR_EXPORT SpeedStateScaleFactors
     {
         // 25 = oDot25, 50 = oDot5, 75 = oDot75, 100 = lDot0
         uint8_t sfMedium; ///< scale factor medium
@@ -538,7 +598,7 @@ class NrRrcSap
     };
 
     /// SpeedStatePars structure
-    struct SpeedStatePars
+    struct NR_EXPORT SpeedStatePars
     {
         /// the action type
         enum Action
@@ -554,7 +614,7 @@ class NrRrcSap
     };
 
     /// MeasConfig structure
-    struct MeasConfig
+    struct NR_EXPORT MeasConfig
     {
         std::list<uint8_t> measObjectToRemoveList;            ///< measure object to remove list
         std::list<MeasObjectToAddMod> measObjectToAddModList; ///< measure object to add mod list
@@ -562,53 +622,55 @@ class NrRrcSap
         std::list<ReportConfigToAddMod> reportConfigToAddModList; ///< report config to add mod list
         std::list<uint8_t> measIdToRemoveList;                    ///< measure ID to remove list
         std::list<MeasIdToAddMod> measIdToAddModList;             ///< measure ID to add mod list
-        bool haveQuantityConfig;                                  ///< have quantity config?
+        bool haveQuantityConfig{false};                           ///< have quantity config?
         QuantityConfig quantityConfig;                            ///< quantity config
-        bool haveMeasGapConfig;                                   ///< have measure gap config?
+        bool haveMeasGapConfig{false};                            ///< have measure gap config?
         MeasGapConfig measGapConfig;                              ///< measure gap config
-        bool haveSmeasure;                                        ///< have S measure?
+        bool haveSmeasure{false};                                 ///< have S measure?
         uint8_t sMeasure;                                         ///< S measure
-        bool haveSpeedStatePars;                                  ///< have speed state parameters?
+        bool haveSpeedStatePars{false};                           ///< have speed state parameters?
         SpeedStatePars speedStatePars;                            ///< speed state parameters
     };
 
     /// CarrierFreqEutra structure
-    struct CarrierFreqEutra
+    struct NR_EXPORT CarrierFreqEutra
     {
         uint32_t dlCarrierFreq; ///< DL carrier frequency
         uint32_t ulCarrierFreq; ///< UL carrier frequency
     };
 
     /// CarrierBandwidthEutra structure
-    struct CarrierBandwidthEutra
+    struct NR_EXPORT CarrierBandwidthEutra
     {
         uint16_t dlBandwidth; ///< DL bandwidth
         uint16_t ulBandwidth; ///< UL bandwidth
     };
 
     /// RachConfigDedicated structure
-    struct RachConfigDedicated
+    struct NR_EXPORT RachConfigDedicated
     {
         uint8_t raPreambleIndex;  ///< RA preamble index
         uint8_t raPrachMaskIndex; ///< RA PRACH mask index
     };
 
     /// MobilityControlInfo structure
-    struct MobilityControlInfo
+    struct NR_EXPORT MobilityControlInfo
     {
         uint16_t targetPhysCellId;                           ///< target Phy cell ID
-        bool haveCarrierFreq;                                ///< have carrier frequency?
+        bool haveCarrierFreq{false};                         ///< have carrier frequency?
         CarrierFreqEutra carrierFreq;                        ///< carrier frequency
-        bool haveCarrierBandwidth;                           ///< have carrier bandwidth?
+        bool haveCarrierBandwidth{false};                    ///< have carrier bandwidth?
         CarrierBandwidthEutra carrierBandwidth;              ///< carrier bandwidth
         uint16_t newUeIdentity;                              ///< new UE identity
         RadioResourceConfigCommon radioResourceConfigCommon; ///< radio resource config common
-        bool haveRachConfigDedicated;                        ///< Have RACH config dedicated?
+        bool haveRachConfigDedicated{false};                 ///< Have RACH config dedicated?
         RachConfigDedicated rachConfigDedicated;             ///< RACH config dedicated
+        bool haveServingCellConfigCommon{false}; ///< have target serving cell config common?
+        ServingCellConfigCommon servingCellConfigCommon; ///< target cell PHY configuration
     };
 
     /// ReestabUeIdentity structure
-    struct ReestabUeIdentity
+    struct NR_EXPORT ReestabUeIdentity
     {
         uint16_t cRnti;      ///< RNTI
         uint16_t physCellId; ///< Phy cell ID
@@ -623,35 +685,37 @@ class NrRrcSap
     };
 
     /// MasterInformationBlock structure
-    struct MasterInformationBlock
+    struct NR_EXPORT MasterInformationBlock
     {
+        int numerology;             ///< numerology
         uint16_t dlBandwidth;       ///< DL bandwidth
         uint16_t systemFrameNumber; ///< system frame number
     };
 
     /// SystemInformationBlockType1 structure
-    struct SystemInformationBlockType1
+    struct NR_EXPORT SystemInformationBlockType1
     {
-        CellAccessRelatedInfo cellAccessRelatedInfo; ///< cell access related info
-        CellSelectionInfo cellSelectionInfo;         ///< cell selection info
+        CellAccessRelatedInfo cellAccessRelatedInfo;     ///< cell access related info
+        CellSelectionInfo cellSelectionInfo;             ///< cell selection info
+        ServingCellConfigCommon servingCellConfigCommon; ///< cell configuration
     };
 
     /// SystemInformationBlockType2 structure
-    struct SystemInformationBlockType2
+    struct NR_EXPORT SystemInformationBlockType2
     {
         RadioResourceConfigCommonSib radioResourceConfigCommon; ///< radio resource config common
         FreqInfo freqInfo;                                      ///< frequency info
     };
 
     /// SystemInformation structure
-    struct SystemInformation
+    struct NR_EXPORT SystemInformation
     {
         bool haveSib2;                    ///< have SIB2?
         SystemInformationBlockType2 sib2; ///< SIB2
     };
 
     /// AsConfig structure
-    struct AsConfig
+    struct NR_EXPORT AsConfig
     {
         MeasConfig sourceMeasConfig;                            ///< source measure config
         RadioResourceConfigDedicated sourceRadioResourceConfig; ///< source radio resource config
@@ -665,42 +729,42 @@ class NrRrcSap
     };
 
     /// CgiInfo structure
-    struct CgiInfo
+    struct NR_EXPORT CgiInfo
     {
-        uint32_t plmnIdentity;                ///< PLMN identity
-        uint32_t cellIdentity;                ///< cell identity
-        uint16_t trackingAreaCode;            ///< tracking area code
-        std::list<uint32_t> plmnIdentityList; ///< PLMN identity list
+        uint32_t plmnIdentity{0};               ///< PLMN identity
+        uint32_t cellIdentity{0};               ///< cell identity
+        uint16_t trackingAreaCode{0};           ///< tracking area code
+        std::list<uint32_t> plmnIdentityList{}; ///< PLMN identity list
     };
 
     /// MeasResultPCell structure
-    struct MeasResultPCell
+    struct NR_EXPORT MeasResultPCell
     {
         uint8_t rsrpResult; ///< the RSRP result
         uint8_t rsrqResult; ///< the RSRQ result
     };
 
     /// MeasResultEutra structure
-    struct MeasResultEutra
+    struct NR_EXPORT MeasResultEutra
     {
-        uint16_t physCellId; ///< Phy cell ID
-        bool haveCgiInfo;    ///< have CGI info?
-        CgiInfo cgiInfo;     ///< CGI info
-        bool haveRsrpResult; ///< have RSRP result
-        uint8_t rsrpResult;  ///< RSRP result
-        bool haveRsrqResult; ///< have RSRQ result?
-        uint8_t rsrqResult;  ///< RSRQ result
+        uint16_t physCellId;        ///< Phy cell ID
+        bool haveCgiInfo{false};    ///< have CGI info?
+        CgiInfo cgiInfo;            ///< CGI info
+        bool haveRsrpResult{false}; ///< have RSRP result
+        uint8_t rsrpResult;         ///< RSRP result
+        bool haveRsrqResult{false}; ///< have RSRQ result?
+        uint8_t rsrqResult;         ///< RSRQ result
     };
 
     /// MeasResultSCell structure
-    struct MeasResultSCell
+    struct NR_EXPORT MeasResultSCell
     {
         uint8_t rsrpResult; ///< the RSRP result
         uint8_t rsrqResult; ///< the RSRQ result
     };
 
     /// MeasResultBestNeighCell structure
-    struct MeasResultBestNeighCell
+    struct NR_EXPORT MeasResultBestNeighCell
     {
         uint16_t physCellId; ///< physical cell ID
         uint8_t rsrpResult;  ///< the RSRP result
@@ -708,36 +772,36 @@ class NrRrcSap
     };
 
     /// MeasResultServFreq structure
-    struct MeasResultServFreq
+    struct NR_EXPORT MeasResultServFreq
     {
         uint16_t servFreqId;                             ///< serving cell index
-        bool haveMeasResultSCell;                        ///< have measResultSCell?
+        bool haveMeasResultSCell{false};                 ///< have measResultSCell?
         MeasResultSCell measResultSCell;                 ///< SCell measurement results
-        bool haveMeasResultBestNeighCell;                ///< have measResultBestNeighCell?
+        bool haveMeasResultBestNeighCell{false};         ///< have measResultBestNeighCell?
         MeasResultBestNeighCell measResultBestNeighCell; ///< best neighbor cell measurement results
     };
 
     /// MeasResults structure
-    struct MeasResults
+    struct NR_EXPORT MeasResults
     {
         uint8_t measId;                                 ///< measure ID
         MeasResultPCell measResultPCell;                ///< measurement result primary cell
-        bool haveMeasResultNeighCells;                  ///< have measure result neighbor cells
+        bool haveMeasResultNeighCells{false};           ///< have measure result neighbor cells
         std::list<MeasResultEutra> measResultListEutra; ///< measure result list eutra
-        bool haveMeasResultServFreqList;                ///< has measResultServFreqList-r10
+        bool haveMeasResultServFreqList{false};         ///< has measResultServFreqList-r10
         std::list<MeasResultServFreq> measResultServFreqList; ///< MeasResultServFreqList-r10
     };
 
     // Messages
 
     /// RrcConnectionRequest structure
-    struct RrcConnectionRequest
+    struct NR_EXPORT RrcConnectionRequest
     {
         uint64_t ueIdentity; ///< UE identity
     };
 
     /// RrcConnectionSetup structure
-    struct RrcConnectionSetup
+    struct NR_EXPORT RrcConnectionSetup
     {
         uint8_t rrcTransactionIdentifier; ///< RRC transaction identifier
         RadioResourceConfigDedicated
@@ -745,38 +809,38 @@ class NrRrcSap
     };
 
     /// RrcConnectionSetupCompleted structure
-    struct RrcConnectionSetupCompleted
+    struct NR_EXPORT RrcConnectionSetupCompleted
     {
         uint8_t rrcTransactionIdentifier; ///< RRC transaction identifier
     };
 
     /// CellIdentification structure
-    struct CellIdentification
+    struct NR_EXPORT CellIdentification
     {
         uint32_t physCellId;    ///< physical cell ID
         uint32_t dlCarrierFreq; ///< ARFCN - valueEUTRA
     };
 
     /// AntennaInfoCommon structure
-    struct AntennaInfoCommon
+    struct NR_EXPORT AntennaInfoCommon
     {
         uint16_t antennaPortsCount; ///< antenna ports count
     };
 
     /// UlPowerControlCommonSCell structure
-    struct UlPowerControlCommonSCell
+    struct NR_EXPORT UlPowerControlCommonSCell
     {
         uint16_t alpha; ///< alpha value
     };
 
     /// PrachConfigSCell structure
-    struct PrachConfigSCell
+    struct NR_EXPORT PrachConfigSCell
     {
         uint16_t index; ///< the index
     };
 
     /// NonUlConfiguration structure
-    struct NonUlConfiguration
+    struct NR_EXPORT NonUlConfiguration
     {
         // 3GPP TS 36.311 v.11.10 R11 pag.220
         /// 1: Cell characteristics
@@ -792,7 +856,7 @@ class NrRrcSap
     };
 
     /// UlConfiguration structure
-    struct UlConfiguration
+    struct NR_EXPORT UlConfiguration
     {
         FreqInfo ulFreqInfo;                                 ///< UL frequency info
         UlPowerControlCommonSCell ulPowerControlCommonSCell; ///< 3GPP TS 36.331 v.11.10 R11 pag.223
@@ -802,117 +866,118 @@ class NrRrcSap
     };
 
     /// AntennaInfoUl structure
-    struct AntennaInfoUl
+    struct NR_EXPORT AntennaInfoUl
     {
         uint8_t transmissionMode; ///< transmission mode
     };
 
     /// PuschConfigDedicatedSCell structure
-    struct PuschConfigDedicatedSCell
+    struct NR_EXPORT PuschConfigDedicatedSCell
     {
         /// 3GPP TS 36.331 v.11.10 R11 page 216
         uint16_t nPuschIdentity;
     };
 
     /// UlPowerControlDedicatedSCell structure
-    struct UlPowerControlDedicatedSCell
+    struct NR_EXPORT UlPowerControlDedicatedSCell
     {
         /// 3GPP TS 36.331 v.11.10 R11 page 234
         uint16_t pSrsOffset;
     };
 
     /// PhysicalConfigDedicatedSCell structure
-    struct PhysicalConfigDedicatedSCell
+    struct NR_EXPORT PhysicalConfigDedicatedSCell
     {
         // Non-Ul Configuration
-        bool haveNonUlConfiguration;       ///< have non UL configuration?
-        bool haveAntennaInfoDedicated;     ///< have antenna info dedicated?
-        AntennaInfoDedicated antennaInfo;  ///< antenna info dedicated
-        bool crossCarrierSchedulingConfig; ///< currently implemented as boolean variable -->
-                                           ///< implementing crossCarrierScheduling is out of the
-                                           ///< scope of this GSoC proposal
-        bool havePdschConfigDedicated;     ///< have PDSCH config dedicated?
+        bool haveNonUlConfiguration{false};       ///< have non UL configuration?
+        bool haveAntennaInfoDedicated{false};     ///< have antenna info dedicated?
+        AntennaInfoDedicated antennaInfo;         ///< antenna info dedicated
+        bool crossCarrierSchedulingConfig{false}; ///< currently implemented as boolean variable -->
+                                                  ///< implementing crossCarrierScheduling is out of
+                                                  ///< the scope of this GSoC proposal
+        bool havePdschConfigDedicated{false};     ///< have PDSCH config dedicated?
         PdschConfigDedicated pdschConfigDedicated; ///< PDSCH config dedicated
 
         // Ul Configuration
-        bool haveUlConfiguration;                           ///< have UL configuration?
-        bool haveAntennaInfoUlDedicated;                    ///< have antenna info UL dedicated?
+        bool haveUlConfiguration{false};                    ///< have UL configuration?
+        bool haveAntennaInfoUlDedicated{false};             ///< have antenna info UL dedicated?
         AntennaInfoDedicated antennaInfoUl;                 ///< antenna info UL
         PuschConfigDedicatedSCell pushConfigDedicatedSCell; ///< PUSCH config dedicated SCell
         UlPowerControlDedicatedSCell
-            ulPowerControlDedicatedSCell;     ///< UL power control dedicated SCell
-        bool haveSoundingRsUlConfigDedicated; ///< have sounding RS UL config dedicated?
+            ulPowerControlDedicatedSCell;            ///< UL power control dedicated SCell
+        bool haveSoundingRsUlConfigDedicated{false}; ///< have sounding RS UL config dedicated?
         SoundingRsUlConfigDedicated
             soundingRsUlConfigDedicated; ///< sounding RS UL config dedicated
     };
 
     /// RadioResourceConfigCommonSCell
-    struct RadioResourceConfigCommonSCell
+    struct NR_EXPORT RadioResourceConfigCommonSCell
     {
-        bool haveNonUlConfiguration;           ///< have non UL configuration?
+        bool haveNonUlConfiguration{false};    ///< have non UL configuration?
         NonUlConfiguration nonUlConfiguration; ///< non UL configuration
-        bool haveUlConfiguration;              ///< have UL configuration
+        bool haveUlConfiguration{false};       ///< have UL configuration
         UlConfiguration ulConfiguration;       ///< UL configuration
     };
 
     /// RadioResourceConfigDedicatedSCell structure
-    struct RadioResourceConfigDedicatedSCell
+    struct NR_EXPORT RadioResourceConfigDedicatedSCell
     {
         PhysicalConfigDedicatedSCell
             physicalConfigDedicatedSCell; ///< physical config dedicated SCell
     };
 
     /// SCellToAddMod structure
-    struct SCellToAddMod
+    struct NR_EXPORT SCellToAddMod
     {
         uint32_t sCellIndex;                   ///< SCell index
         CellIdentification cellIdentification; ///< cell identification
         RadioResourceConfigCommonSCell
-            radioResourceConfigCommonSCell;         ///< radio resource config common SCell
-        bool haveRadioResourceConfigDedicatedSCell; ///< have radio resource config dedicated SCell?
+            radioResourceConfigCommonSCell; ///< radio resource config common SCell
+        bool haveRadioResourceConfigDedicatedSCell{
+            false}; ///< have radio resource config dedicated SCell?
         RadioResourceConfigDedicatedSCell
             radioResourceConfigDedicatedSCell; ///< radio resource config dedicated SCell
     };
 
     /// NonCriticalExtensionConfiguration structure
-    struct NonCriticalExtensionConfiguration
+    struct NR_EXPORT NonCriticalExtensionConfiguration
     {
         std::list<SCellToAddMod> sCellToAddModList; ///< SCell to add mod list
         std::list<uint8_t> sCellToReleaseList;      ///< SCell to release list
     };
 
     /// RrcConnectionReconfiguration structure
-    struct RrcConnectionReconfiguration
+    struct NR_EXPORT RrcConnectionReconfiguration
     {
-        uint8_t rrcTransactionIdentifier;        ///< RRC transaction identifier
-        bool haveMeasConfig;                     ///< have measure config
-        MeasConfig measConfig;                   ///< measure config
-        bool haveMobilityControlInfo;            ///< have mobility control info
-        MobilityControlInfo mobilityControlInfo; ///< mobility control info
-        bool haveRadioResourceConfigDedicated;   ///< have radio resource config dedicated
+        uint8_t rrcTransactionIdentifier;             ///< RRC transaction identifier
+        bool haveMeasConfig{false};                   ///< have measure config
+        MeasConfig measConfig;                        ///< measure config
+        bool haveMobilityControlInfo{false};          ///< have mobility control info
+        MobilityControlInfo mobilityControlInfo;      ///< mobility control info
+        bool haveRadioResourceConfigDedicated{false}; ///< have radio resource config dedicated
         RadioResourceConfigDedicated
-            radioResourceConfigDedicated; ///< radio resource config dedicated
-        bool haveNonCriticalExtension;    ///< have critical extension?
+            radioResourceConfigDedicated;     ///< radio resource config dedicated
+        bool haveNonCriticalExtension{false}; ///< have critical extension?
         /// 3GPP TS 36.331 v.11.10 R11 Sec. 6.2.2 pag. 147 (also known as ETSI TS 136 331 v.11.10
         /// Feb-2015)
         NonCriticalExtensionConfiguration nonCriticalExtension;
     };
 
     /// RrcConnectionReconfigurationCompleted structure
-    struct RrcConnectionReconfigurationCompleted
+    struct NR_EXPORT RrcConnectionReconfigurationCompleted
     {
         uint8_t rrcTransactionIdentifier; ///< RRC transaction identifier
     };
 
     /// RrcConnectionReestablishmentRequest structure
-    struct RrcConnectionReestablishmentRequest
+    struct NR_EXPORT RrcConnectionReestablishmentRequest
     {
         ReestabUeIdentity ueIdentity;              ///< UE identity
         ReestablishmentCause reestablishmentCause; ///< reestablishment cause
     };
 
     /// RrcConnectionReestablishment structure
-    struct RrcConnectionReestablishment
+    struct NR_EXPORT RrcConnectionReestablishment
     {
         uint8_t rrcTransactionIdentifier; ///< RRC transaction identifier
         RadioResourceConfigDedicated
@@ -920,419 +985,445 @@ class NrRrcSap
     };
 
     /// RrcConnectionReestablishmentComplete structure
-    struct RrcConnectionReestablishmentComplete
+    struct NR_EXPORT RrcConnectionReestablishmentComplete
     {
         uint8_t rrcTransactionIdentifier; ///< RRC transaction identifier
     };
 
     /// RrcConnectionReestablishmentReject structure
-    struct RrcConnectionReestablishmentReject
+    struct NR_EXPORT RrcConnectionReestablishmentReject
     {
     };
 
     /// RrcConnectionRelease structure
-    struct RrcConnectionRelease
+    struct NR_EXPORT RrcConnectionRelease
     {
         uint8_t rrcTransactionIdentifier; ///< RRC transaction identifier
     };
 
     /// RrcConnectionReject structure
-    struct RrcConnectionReject
+    struct NR_EXPORT RrcConnectionReject
     {
         uint8_t waitTime; ///< wait time
     };
 
     /// HandoverPreparationInfo structure
-    struct HandoverPreparationInfo
+    struct NR_EXPORT HandoverPreparationInfo
     {
         AsConfig asConfig; ///< AS config
     };
 
     /// MeasurementReport structure
-    struct MeasurementReport
+    struct NR_EXPORT MeasurementReport
     {
         MeasResults measResults; ///< measure results
     };
 };
 
 /**
- * \brief Part of the RRC protocol. This Service Access Point (SAP) is used by
+ * @brief Part of the RRC protocol. This Service Access Point (SAP) is used by
  *        the UE RRC to send messages to the gNB. Each method defined in this
  *        class corresponds to the transmission of a message that is defined in
  *        Section 6.2.2 of TS 36.331.
  */
-class NrUeRrcSapUser : public NrRrcSap
+class NR_EXPORT NrUeRrcSapUser : public NrRrcSap
 {
   public:
     /// SetupParameters structure
-    struct SetupParameters
+    struct NR_EXPORT SetupParameters
     {
         NrRlcSapProvider* srb0SapProvider;  ///< SRB0 SAP provider
         NrPdcpSapProvider* srb1SapProvider; ///< SRB1 SAP provider
     };
 
     /**
-     * \brief Setup function
-     * \param params the setup parameters
+     * @brief Setup function
+     * @param params the setup parameters
      */
     virtual void Setup(SetupParameters params) = 0;
 
     /**
-     * \brief Send an _RRCConnectionRequest message to the serving eNodeB
+     * @brief Send an _RRCConnectionRequest message to the serving eNodeB
      *        during an RRC connection establishment procedure
      *        (Section 5.3.3 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void SendRrcConnectionRequest(RrcConnectionRequest msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionSetupComplete_ message to the serving eNodeB
+     * @brief Send an _RRCConnectionSetupComplete_ message to the serving eNodeB
      *        during an RRC connection establishment procedure
      *        (Section 5.3.3 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void SendRrcConnectionSetupCompleted(RrcConnectionSetupCompleted msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionReconfigurationComplete_ message to the serving eNodeB
+     * @brief Send an _RRCConnectionReconfigurationComplete_ message to the serving eNodeB
      *        during an RRC connection reconfiguration procedure
      *        (Section 5.3.5 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void SendRrcConnectionReconfigurationCompleted(
         RrcConnectionReconfigurationCompleted msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionReestablishmentRequest_ message to the serving eNodeB
+     * @brief Send an _RRCConnectionReestablishmentRequest_ message to the serving eNodeB
      *        during an RRC connection re-establishment procedure
      *        (Section 5.3.7 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void SendRrcConnectionReestablishmentRequest(
         RrcConnectionReestablishmentRequest msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionReestablishmentComplete_ message to the serving eNodeB
+     * @brief Send an _RRCConnectionReestablishmentComplete_ message to the serving eNodeB
      *        during an RRC connection re-establishment procedure
      *        (Section 5.3.7 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void SendRrcConnectionReestablishmentComplete(
         RrcConnectionReestablishmentComplete msg) = 0;
 
     /**
-     * \brief Send a _MeasurementReport_ message to the serving eNodeB
+     * @brief Send a _MeasurementReport_ message to the serving eNodeB
      *        during a measurement reporting procedure
      *        (Section 5.5.5 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void SendMeasurementReport(MeasurementReport msg) = 0;
 
     /**
-     * \brief Send UE context remove request function
+     * @brief Send UE context remove request function
      *
      * Request eNodeB to remove UE context once radio link failure or
      * random access failure is detected. It is needed since no RLF
      * detection mechanism at eNodeB is implemented.
      *
-     * \param rnti the C-RNTI of the UE
+     * @param rnti the C-RNTI of the UE
      */
     virtual void SendIdealUeContextRemoveRequest(uint16_t rnti) = 0;
+
+    /**
+     * @brief Notify the gNB that the UE switched its primary serving BWP.
+     *
+     * Same-cell BWP switching changes which BWP the UE listens to for its
+     * downlink. The gNB must learn this so it can route the UE's DL scheduling
+     * to the new BWP and keep data flowing; otherwise the UE and gNB
+     * desynchronize. This is an ideal (RNTI-carrying) indication, mirroring
+     * SendIdealUeContextRemoveRequest.
+     *
+     * @param rnti  the C-RNTI of the UE
+     * @param bwpId the new primary BWP/CC index the UE switched to
+     */
+    virtual void SendIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId) = 0;
 };
 
 /**
- * \brief Part of the RRC protocol. This Service Access Point (SAP) is used to
+ * @brief Part of the RRC protocol. This Service Access Point (SAP) is used to
  *        let the UE RRC receive a message from the gNB RRC. Each method defined
  *        in this class corresponds to the reception of a message that is
  *        defined in Section 6.2.2 of TS 36.331.
  */
-class NrUeRrcSapProvider : public NrRrcSap
+class NR_EXPORT NrUeRrcSapProvider : public NrRrcSap
 {
   public:
     /// CompleteSetupParameters structure
-    struct CompleteSetupParameters
+    struct NR_EXPORT CompleteSetupParameters
     {
         NrRlcSapUser* srb0SapUser;  ///< SRB0 SAP user
         NrPdcpSapUser* srb1SapUser; ///< SRB1 SAP user
     };
 
     /**
-     * \brief Complete setup function
-     * \param params the complete setup parameters
+     * @brief Complete setup function
+     * @param params the complete setup parameters
      */
     virtual void CompleteSetup(CompleteSetupParameters params) = 0;
 
     /**
-     * \brief Receive a _SystemInformation_ message from the serving eNodeB
+     * @brief Receive a _SystemInformation_ message from the serving eNodeB
      *        during a system information acquisition procedure
      *        (Section 5.2.2 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void RecvSystemInformation(SystemInformation msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionSetup_ message from the serving eNodeB
+     * @brief Receive an _RRCConnectionSetup_ message from the serving eNodeB
      *        during an RRC connection establishment procedure
      *        (Section 5.3.3 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionSetup(RrcConnectionSetup msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionReconfiguration_ message from the serving eNodeB
+     * @brief Receive an _RRCConnectionReconfiguration_ message from the serving eNodeB
      *        during an RRC connection reconfiguration procedure
      *        (Section 5.3.5 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionReconfiguration(RrcConnectionReconfiguration msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionReestablishment_ message from the serving eNodeB
+     * @brief Receive an _RRCConnectionReestablishment_ message from the serving eNodeB
      *        during an RRC connection re-establishment procedure
      *        (Section 5.3.7 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionReestablishment(RrcConnectionReestablishment msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionReestablishmentReject_ message from the serving eNodeB
+     * @brief Receive an _RRCConnectionReestablishmentReject_ message from the serving eNodeB
      *        during an RRC connection re-establishment procedure
      *        (Section 5.3.7 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionReestablishmentReject(RrcConnectionReestablishmentReject msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionRelease_ message from the serving eNodeB
+     * @brief Receive an _RRCConnectionRelease_ message from the serving eNodeB
      *        during an RRC connection release procedure
      *        (Section 5.3.8 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionRelease(RrcConnectionRelease msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionReject_ message from the serving eNodeB
+     * @brief Receive an _RRCConnectionReject_ message from the serving eNodeB
      *        during an RRC connection establishment procedure
      *        (Section 5.3.3 of TS 36.331).
-     * \param msg the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionReject(RrcConnectionReject msg) = 0;
 };
 
 /**
- * \brief Part of the RRC protocol. This Service Access Point (SAP) is used by
+ * @brief Part of the RRC protocol. This Service Access Point (SAP) is used by
  *        the gNB RRC to send messages to the UE RRC.  Each method defined in
  *        this class corresponds to the transmission of a message that is
  *        defined in Section 6.2.2 of TS 36.331.
  */
-class NrGnbRrcSapUser : public NrRrcSap
+class NR_EXPORT NrGnbRrcSapUser : public NrRrcSap
 {
   public:
     /// SetupUeParameters structure
-    struct SetupUeParameters
+    struct NR_EXPORT SetupUeParameters
     {
         NrRlcSapProvider* srb0SapProvider;  ///< SRB0 SAP provider
         NrPdcpSapProvider* srb1SapProvider; ///< SRB1 SAP provider
     };
 
     /**
-     * \brief Setup UE function
-     * \param rnti the RNTI
-     * \param params the setup UE parameters
+     * @brief Setup UE function
+     * @param rnti the RNTI
+     * @param params the setup UE parameters
      */
     virtual void SetupUe(uint16_t rnti, SetupUeParameters params) = 0;
     /**
-     * \brief Remove UE function
-     * \param rnti the RNTI
+     * @brief Remove UE function
+     * @param rnti the RNTI
      */
     virtual void RemoveUe(uint16_t rnti) = 0;
 
     /**
-     * \brief Send a _SystemInformation_ message to all attached UEs
+     * @brief Send a _SystemInformation_ message to all attached UEs
      *        during a system information acquisition procedure
      *        (Section 5.2.2 of TS 36.331).
-     * \param cellId cell ID
-     * \param msg the message
+     * @param cellId cell ID
+     * @param msg the message
      */
     virtual void SendSystemInformation(uint16_t cellId, SystemInformation msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionSetup_ message to a UE
+     * @brief Send an _RRCConnectionSetup_ message to a UE
      *        during an RRC connection establishment procedure
      *        (Section 5.3.3 of TS 36.331).
-     * \param rnti the RNTI of the destination UE
-     * \param msg the message
+     * @param rnti the RNTI of the destination UE
+     * @param msg the message
      */
     virtual void SendRrcConnectionSetup(uint16_t rnti, RrcConnectionSetup msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionReconfiguration_ message to a UE
+     * @brief Send an _RRCConnectionReconfiguration_ message to a UE
      *        during an RRC connection reconfiguration procedure
      *        (Section 5.3.5 of TS 36.331).
-     * \param rnti the RNTI of the destination UE
-     * \param msg the message
+     * @param rnti the RNTI of the destination UE
+     * @param msg the message
      */
     virtual void SendRrcConnectionReconfiguration(uint16_t rnti,
                                                   RrcConnectionReconfiguration msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionReestablishment_ message to a UE
+     * @brief Send an _RRCConnectionReestablishment_ message to a UE
      *        during an RRC connection re-establishment procedure
      *        (Section 5.3.7 of TS 36.331).
-     * \param rnti the RNTI of the destination UE
-     * \param msg the message
+     * @param rnti the RNTI of the destination UE
+     * @param msg the message
      */
     virtual void SendRrcConnectionReestablishment(uint16_t rnti,
                                                   RrcConnectionReestablishment msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionReestablishmentReject_ message to a UE
+     * @brief Send an _RRCConnectionReestablishmentReject_ message to a UE
      *        during an RRC connection re-establishment procedure
      *        (Section 5.3.7 of TS 36.331).
-     * \param rnti the RNTI of the destination UE
-     * \param msg the message
+     * @param rnti the RNTI of the destination UE
+     * @param msg the message
      */
     virtual void SendRrcConnectionReestablishmentReject(uint16_t rnti,
                                                         RrcConnectionReestablishmentReject msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionRelease_ message to a UE
+     * @brief Send an _RRCConnectionRelease_ message to a UE
      *        during an RRC connection release procedure
      *        (Section 5.3.8 of TS 36.331).
-     * \param rnti the RNTI of the destination UE
-     * \param msg the message
+     * @param rnti the RNTI of the destination UE
+     * @param msg the message
      */
     virtual void SendRrcConnectionRelease(uint16_t rnti, RrcConnectionRelease msg) = 0;
 
     /**
-     * \brief Send an _RRCConnectionReject_ message to a UE
+     * @brief Send an _RRCConnectionReject_ message to a UE
      *        during an RRC connection establishment procedure
      *        (Section 5.3.3 of TS 36.331).
-     * \param rnti the RNTI of the destination UE
-     * \param msg the message
+     * @param rnti the RNTI of the destination UE
+     * @param msg the message
      */
     virtual void SendRrcConnectionReject(uint16_t rnti, RrcConnectionReject msg) = 0;
 
     /**
-     * \brief Encode handover prepration information
-     * \param msg HandoverPreparationInfo
-     * \returns the packet
+     * @brief Encode handover prepration information
+     * @param msg HandoverPreparationInfo
+     * @returns the packet
      */
     virtual Ptr<Packet> EncodeHandoverPreparationInformation(HandoverPreparationInfo msg) = 0;
     /**
-     * \brief Decode handover prepration information
-     * \param p the packet
-     * \returns HandoverPreparationInfo
+     * @brief Decode handover prepration information
+     * @param p the packet
+     * @returns HandoverPreparationInfo
      */
     virtual HandoverPreparationInfo DecodeHandoverPreparationInformation(Ptr<Packet> p) = 0;
     /**
-     * \brief Encode handover command
-     * \param msg RrcConnectionReconfiguration
-     * \returns the packet
+     * @brief Encode handover command
+     * @param msg RrcConnectionReconfiguration
+     * @returns the packet
      */
     virtual Ptr<Packet> EncodeHandoverCommand(RrcConnectionReconfiguration msg) = 0;
     /**
-     * \brief Decode handover command
-     * \param p the packet
-     * \returns RrcConnectionReconfiguration
+     * @brief Decode handover command
+     * @param p the packet
+     * @returns RrcConnectionReconfiguration
      */
     virtual RrcConnectionReconfiguration DecodeHandoverCommand(Ptr<Packet> p) = 0;
 };
 
 /**
- * \brief Part of the RRC protocol. This Service Access Point (SAP) is used to
+ * @brief Part of the RRC protocol. This Service Access Point (SAP) is used to
  *        let the gNB RRC receive a message from a UE RRC.  Each method defined
  *        in this class corresponds to the reception of a message that is
  *        defined in Section 6.2.2 of TS 36.331.
  */
-class NrGnbRrcSapProvider : public NrRrcSap
+class NR_EXPORT NrGnbRrcSapProvider : public NrRrcSap
 {
   public:
     /// CompleteSetupUeParameters structure
-    struct CompleteSetupUeParameters
+    struct NR_EXPORT CompleteSetupUeParameters
     {
         NrRlcSapUser* srb0SapUser;  ///< SRB0 SAP user
         NrPdcpSapUser* srb1SapUser; ///< SRB1 SAP user
     };
 
     /**
-     * \brief Complete setup UE function
-     * \param rnti the RNTI of UE which sent the message
-     * \param params CompleteSetupUeParameters
+     * @brief Complete setup UE function
+     * @param rnti the RNTI of UE which sent the message
+     * @param params CompleteSetupUeParameters
      */
     virtual void CompleteSetupUe(uint16_t rnti, CompleteSetupUeParameters params) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionRequest_ message from a UE
+     * @brief Receive an _RRCConnectionRequest_ message from a UE
      *        during an RRC connection establishment procedure
      *        (Section 5.3.3 of TS 36.331).
-     * \param rnti the RNTI of UE which sent the message
-     * \param msg the message
+     * @param rnti the RNTI of UE which sent the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionRequest(uint16_t rnti, RrcConnectionRequest msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionSetupComplete_ message from a UE
+     * @brief Receive an _RRCConnectionSetupComplete_ message from a UE
      *        during an RRC connection establishment procedure
      *        (Section 5.3.3 of TS 36.331).
-     * \param rnti the RNTI of UE which sent the message
-     * \param msg the message
+     * @param rnti the RNTI of UE which sent the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionSetupCompleted(uint16_t rnti,
                                                  RrcConnectionSetupCompleted msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionReconfigurationComplete_ message from a UE
+     * @brief Receive an _RRCConnectionReconfigurationComplete_ message from a UE
      *        during an RRC connection reconfiguration procedure
      *        (Section 5.3.5 of TS 36.331).
-     * \param rnti the RNTI of UE which sent the message
-     * \param msg the message
+     * @param rnti the RNTI of UE which sent the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionReconfigurationCompleted(
         uint16_t rnti,
         RrcConnectionReconfigurationCompleted msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionReestablishmentRequest_ message from a UE
+     * @brief Receive an _RRCConnectionReestablishmentRequest_ message from a UE
      *        during an RRC connection re-establishment procedure
      *        (Section 5.3.7 of TS 36.331).
-     * \param rnti the RNTI of UE which sent the message
-     * \param msg the message
+     * @param rnti the RNTI of UE which sent the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionReestablishmentRequest(
         uint16_t rnti,
         RrcConnectionReestablishmentRequest msg) = 0;
 
     /**
-     * \brief Receive an _RRCConnectionReestablishmentComplete_ message from a UE
+     * @brief Receive an _RRCConnectionReestablishmentComplete_ message from a UE
      *        during an RRC connection re-establishment procedure
      *        (Section 5.3.7 of TS 36.331).
-     * \param rnti the RNTI of UE which sent the message
-     * \param msg the message
+     * @param rnti the RNTI of UE which sent the message
+     * @param msg the message
      */
     virtual void RecvRrcConnectionReestablishmentComplete(
         uint16_t rnti,
         RrcConnectionReestablishmentComplete msg) = 0;
 
     /**
-     * \brief Receive a _MeasurementReport_ message from a UE
+     * @brief Receive a _MeasurementReport_ message from a UE
      *        during a measurement reporting procedure
      *        (Section 5.5.5 of TS 36.331).
-     * \param rnti the RNTI of UE which sent the message
-     * \param msg the message
+     * @param rnti the RNTI of UE which sent the message
+     * @param msg the message
      */
     virtual void RecvMeasurementReport(uint16_t rnti, MeasurementReport msg) = 0;
 
     /**
-     * \brief Receive ideal UE context remove request from the UE RRC.
+     * @brief Receive ideal UE context remove request from the UE RRC.
      *
      * Receive the notification from UE to remove the UE context
      * once radio link failure or random access failure is detected.
      * It is needed since no RLF detection mechanism at eNodeB is implemented.
      *
-     * \param rnti the C-RNTI of the UE
+     * @param rnti the C-RNTI of the UE
      */
     virtual void RecvIdealUeContextRemoveRequest(uint16_t rnti) = 0;
+
+    /**
+     * @brief Receive the UE's same-cell primary-BWP switch indication.
+     *
+     * The UE notifies the gNB that it moved its primary serving BWP to another
+     * BWP of the SAME cell. The gNB updates its per-UE primary-BWP bookkeeping
+     * and re-points the UE's DL scheduling to the indicated BWP.
+     *
+     * @param rnti  the C-RNTI of the UE
+     * @param bwpId the new primary BWP/CC index the UE switched to
+     */
+    virtual void RecvIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId) = 0;
 };
 
 ////////////////////////////////////
@@ -1351,7 +1442,7 @@ class MemberNrUeRrcSapUser : public NrUeRrcSapUser
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrUeRrcSapUser(C* owner);
 
@@ -1369,6 +1460,7 @@ class MemberNrUeRrcSapUser : public NrUeRrcSapUser
         RrcConnectionReestablishmentComplete msg) override;
     void SendMeasurementReport(MeasurementReport msg) override;
     void SendIdealUeContextRemoveRequest(uint16_t rnti) override;
+    void SendIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId) override;
 
   private:
     C* m_owner; ///< the owner class
@@ -1439,6 +1531,13 @@ MemberNrUeRrcSapUser<C>::SendIdealUeContextRemoveRequest(uint16_t rnti)
     m_owner->DoSendIdealUeContextRemoveRequest(rnti);
 }
 
+template <class C>
+void
+MemberNrUeRrcSapUser<C>::SendIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId)
+{
+    m_owner->DoSendIdealBwpSwitchIndication(rnti, bwpId);
+}
+
 /**
  * Template for the implementation of the NrUeRrcSapProvider as a member
  * of an owner class of type C to which all methods are forwarded
@@ -1450,7 +1549,7 @@ class MemberNrUeRrcSapProvider : public NrUeRrcSapProvider
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrUeRrcSapProvider(C* owner);
 
@@ -1546,7 +1645,7 @@ class MemberNrGnbRrcSapUser : public NrGnbRrcSapUser
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrGnbRrcSapUser(C* owner);
 
@@ -1685,7 +1784,7 @@ class MemberNrGnbRrcSapProvider : public NrGnbRrcSapProvider
     /**
      * Constructor
      *
-     * \param owner
+     * @param owner
      */
     MemberNrGnbRrcSapProvider(C* owner);
 
@@ -1706,6 +1805,7 @@ class MemberNrGnbRrcSapProvider : public NrGnbRrcSapProvider
         RrcConnectionReestablishmentComplete msg) override;
     void RecvMeasurementReport(uint16_t rnti, MeasurementReport msg) override;
     void RecvIdealUeContextRemoveRequest(uint16_t rnti) override;
+    void RecvIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId) override;
 
   private:
     C* m_owner; ///< the owner class
@@ -1778,6 +1878,13 @@ void
 MemberNrGnbRrcSapProvider<C>::RecvIdealUeContextRemoveRequest(uint16_t rnti)
 {
     Simulator::ScheduleNow(&C::DoRecvIdealUeContextRemoveRequest, m_owner, rnti);
+}
+
+template <class C>
+void
+MemberNrGnbRrcSapProvider<C>::RecvIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId)
+{
+    Simulator::ScheduleNow(&C::DoRecvIdealBwpSwitchIndication, m_owner, rnti, bwpId);
 }
 
 } // namespace ns3

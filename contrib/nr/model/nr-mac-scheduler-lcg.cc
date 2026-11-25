@@ -4,9 +4,9 @@
 
 #include "nr-mac-scheduler-lcg.h"
 
-#include "nr-eps-bearer.h"
+#include "nr-qos-flow.h"
 
-#include <ns3/log.h>
+#include "ns3/log.h"
 
 namespace ns3
 {
@@ -16,14 +16,30 @@ NS_LOG_COMPONENT_DEFINE("NrMacSchedulerLCG");
 NrMacSchedulerLC::NrMacSchedulerLC(const nr::LogicalChannelConfigListElement_s& conf)
     : m_id(conf.m_logicalChannelIdentity)
 {
-    NrEpsBearer bearer(static_cast<NrEpsBearer::Qci>(conf.m_qci));
+    NrQosFlow flow(static_cast<NrQosFlow::FiveQi>(conf.m_fiveQi));
 
-    m_delayBudget = MilliSeconds(bearer.GetPacketDelayBudgetMs());
-    m_resourceType = bearer.GetResourceType();
-    m_PER = bearer.GetPacketErrorLossRate();
-    m_qci = conf.m_qci;
-    m_priority = bearer.GetPriority();
+    m_delayBudget = MilliSeconds(flow.GetPacketDelayBudgetMs());
+    m_resourceType = flow.GetResourceType();
+    m_PER = flow.GetPacketErrorLossRate();
+    m_fiveQi = conf.m_fiveQi;
+    m_priority = flow.GetPriority();
     m_eRabGuaranteedBitrateDl = conf.m_eRabGuaranteedBitrateDl;
+}
+
+NrMacSchedulerLC::NrMacSchedulerLC(const NrMacSchedulerLC& o)
+{
+    m_id = o.m_id;
+    m_rlcTransmissionQueueSize = o.m_rlcTransmissionQueueSize;
+    m_rlcTransmissionQueueHolDelay = o.m_rlcTransmissionQueueHolDelay;
+    m_rlcRetransmissionHolDelay = o.m_rlcRetransmissionHolDelay;
+    m_rlcRetransmissionQueueSize = o.m_rlcRetransmissionQueueSize;
+    m_rlcStatusPduSize = o.m_rlcStatusPduSize;
+    m_delayBudget = o.m_delayBudget;
+    m_PER = o.m_PER;
+    m_resourceType = o.m_resourceType;
+    m_fiveQi = o.m_fiveQi;
+    m_priority = o.m_priority;
+    m_eRabGuaranteedBitrateDl = o.m_eRabGuaranteedBitrateDl;
 }
 
 void
@@ -31,9 +47,11 @@ NrMacSchedulerLC::Update(const NrMacSchedSapProvider::SchedDlRlcBufferReqParamet
 {
     NS_LOG_FUNCTION(this);
     NS_ASSERT(params.m_logicalChannelIdentity == m_id);
+
     m_rlcTransmissionQueueSize = params.m_rlcTransmissionQueueSize;
     m_rlcRetransmissionQueueSize = params.m_rlcRetransmissionQueueSize;
     m_rlcStatusPduSize = params.m_rlcStatusPduSize;
+
     m_rlcRetransmissionHolDelay = params.m_rlcRetransmissionHolDelay;
     m_rlcTransmissionQueueHolDelay = params.m_rlcTransmissionQueueHolDelay;
 }
@@ -66,6 +84,22 @@ NrMacSchedulerLCG::NumOfLC() const
 {
     NS_LOG_FUNCTION(this);
     return static_cast<uint32_t>(m_lcMap.size());
+}
+
+uint32_t
+NrMacSchedulerLCG::NumOfActiveLC() const
+{
+    NS_LOG_FUNCTION(this);
+
+    uint32_t count = 0;
+    for (const auto& lc : m_lcMap)
+    {
+        if (GetTotalSizeOfLC(lc.first) > 0)
+        {
+            ++count;
+        }
+    }
+    return count;
 }
 
 bool
@@ -118,6 +152,24 @@ NrMacSchedulerLCG::GetTotalSizeOfLC(uint8_t lcId) const
     return m_lcMap.at(lcId)->GetTotalSize();
 }
 
+uint32_t
+NrMacSchedulerLCG::GetTotalSizeOfLCPlusOverheads(uint8_t lcId, bool isDl) const
+{
+    NS_LOG_FUNCTION(this);
+    NS_ABORT_IF(m_lcMap.empty());
+    uint32_t lcIdSize = m_lcMap.at(lcId)->GetTotalSize();
+    uint32_t rlcOverhead = 2; // minimum RLC overhead due to header
+    if (lcId == 1)
+    {
+        // for SRB1 (using RLC AM) it's better to
+        // overestimate RLC overhead rather than
+        // underestimate it and risk unneeded
+        // segmentation which increases delay
+        rlcOverhead = 4;
+    }
+    return lcIdSize > 0 ? lcIdSize + rlcOverhead + MAC_SUBHEADER_SIZE : 0;
+}
+
 std::vector<uint8_t>
 NrMacSchedulerLCG::GetLCId() const
 {
@@ -146,10 +198,10 @@ NrMacSchedulerLCG::GetActiveLCIds() const
 }
 
 uint8_t
-NrMacSchedulerLCG::GetQci(uint8_t lcId) const
+NrMacSchedulerLCG::GetFiveQi(uint8_t lcId) const
 {
     NS_LOG_FUNCTION(this);
-    return m_lcMap.at(lcId)->m_qci;
+    return m_lcMap.at(lcId)->m_fiveQi;
 }
 
 std::unique_ptr<NrMacSchedulerLC>&
@@ -258,6 +310,15 @@ void
 NrMacSchedulerLCG::ReleaseLC(uint8_t lcId)
 {
     m_lcMap.erase(lcId);
+}
+
+NrMacSchedulerLCG::NrMacSchedulerLCG(const NrMacSchedulerLCG& other)
+{
+    m_id = other.m_id;
+    for (const auto& [key, val] : other.m_lcMap)
+    {
+        m_lcMap[key] = std::make_unique<NrMacSchedulerLC>(*val);
+    }
 }
 
 } // namespace ns3

@@ -6,20 +6,29 @@
 #
 # Contains jobs to check the ns-3 coding style and perform lint checking.
 
+# REUSE license checking
+reuse:
+  stage: code-linting
+  image:
+    name: fsfe/reuse:latest
+    entrypoint: [""]
+  script:
+    - reuse lint
+
 # Clang-format
 check-style-clang-format:
   stage: code-linting
-  image: ubuntu:latest
+  image: alpine:latest
   before_script:
-    - apt update
-    - DEBIAN_FRONTEND=noninteractive apt install -y
-      python3
-      clang-format-15
-      git
+    - apk update
+    - apk add git python3
+    - python3 -m venv .venv
+    - source ./.venv/bin/activate
+    - pip install clang-format==20.1.0
   script:
     - git clone -b $NS3_RELEASE_VERSION --depth=1 $NS3_REPOSITORY_URL
     - ln -s ${PWD} ns-3-dev/contrib/nr
-    - pushd ns-3-dev
+    - cd ns-3-dev
     - python3 utils/check-style-clang-format.py contrib/nr/model
     - python3 utils/check-style-clang-format.py contrib/nr/helper
     - python3 utils/check-style-clang-format.py contrib/nr/utils
@@ -27,32 +36,54 @@ check-style-clang-format:
     - python3 utils/check-style-clang-format.py contrib/nr/test
     - python3 utils/check-style-clang-format.py --no-formatting contrib/nr/doc
     - python3 utils/check-style-clang-format.py --no-formatting contrib/nr/tutorial
-    - popd
+    - cd ../
     - rm -rf ns-3-dev
   timeout: 1h
 
 # Check cmake format
 cmake-format:
   stage: code-linting
-  image: python:latest
+  image: alpine:latest
+  rules:
+    # Always run when a pipeline is started manually from the web UI.
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    # Otherwise only run when CMake files change.
+    - changes:
+        - "**/CMakeLists.txt"
+        - "**/*.cmake"
   before_script:
+    - apk update
+    - apk add git python3 g++
+    - python3 -m venv .venv
+    - source ./.venv/bin/activate
     - pip install pyyaml cmake cmake-format ninja
   script:
     - git clone -b $NS3_RELEASE_VERSION --depth=1 $NS3_REPOSITORY_URL
     - mkdir -p ns-3-dev/contrib/nr/
     - ln -s ${PWD} ns-3-dev/contrib/nr
-    - pushd ns-3-dev
+    - cd ns-3-dev
     - ./ns3 configure --enable-modules=core
     - ./ns3 build cmake-format-check
-    - popd
+    - cd ../
     - rm -rf ns-3-dev
   timeout: 1h
 
 # Check Python format
 python-format:
   stage: code-linting
-  image: python:latest
+  image: alpine:latest
+  rules:
+    # Always run when a pipeline is started manually from the web UI.
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    # Otherwise only run when Python files or their formatting config change.
+    - changes:
+        - "**/*.py"
+        - "**/pyproject.toml"
   before_script:
+    - apk update
+    - apk add git python3
+    - python3 -m venv .venv
+    - source ./.venv/bin/activate
     - pip install black isort
   script:
     - black --check .
@@ -62,8 +93,12 @@ python-format:
 # Spell checking
 spell-check:
   stage: code-linting
-  image: python:latest
+  image: alpine:latest
   before_script:
+    - apk update
+    - apk add git python3
+    - python3 -m venv .venv
+    - source ./.venv/bin/activate
     # Python <3.11 also requires the 'tomli' package
     - pip install codespell
   script:
@@ -78,15 +113,70 @@ spell-check:
     - codespell -f -C0 ./
   timeout: 1h
 
-# Clang-tidy
-clang-tidy-17:
+# Cyclomatic complexity and duplicate-block gate (lizard).
+#
+# The baseline is computed on the fly from a fresh checkout of the upstream
+# default branch ($CI_DEFAULT_BRANCH, i.e. master): there are no magic numbers
+# to maintain. The job fails only when the change raises the maximum
+# cyclomatic complexity or the number of duplicate code blocks above what that
+# branch already has. Duplicate blocks are only counted when they involve a
+# file the change actually touches, so pre-existing duplication elsewhere in
+# the module never blocks an unrelated MR. See
+# tools/lizard/check-complexity.py for details.
+complexity:
   stage: code-linting
-  image: ubuntu:rolling
+  image: alpine:latest
+  rules:
+    # Run in every merge-request pipeline whose changes (against the MR
+    # target branch) touch C++ sources.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "**/*.cc"
+        - "**/*.h"
+        - "**/*.hpp"
+      allow_failure: true
+    # Always run when a pipeline is started manually from the web UI.
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    # Branch pipelines: only run when C++ sources change.
+    - changes:
+        - "**/*.cc"
+        - "**/*.h"
+        - "**/*.hpp"
+      allow_failure: true
+    # Any other pipeline: offer the job as an optional manual run that does
+    # not block the pipeline while waiting to be started.
+    - when: manual
+      allow_failure: true
+  before_script:
+    - apk update
+    - apk add git python3
+    - python3 -m venv .venv
+    - source ./.venv/bin/activate
+    - pip install lizard==1.23.0
+  script:
+    # Clone the upstream default branch once and reuse it as the baseline so we
+    # don't pay for a second clone inside the script.
+    - git clone --depth=1 --branch $CI_DEFAULT_BRANCH https://gitlab.com/cttc-lena/nr.git nr-baseline
+    - ./tools/lizard/check-complexity.py --baseline-dir nr-baseline
+    - rm -rf nr-baseline
+  timeout: 1h
+  interruptible: true
+
+# Clang-tidy
+clang-tidy-19:
+  stage: code-linting
+  image: ubuntu:latest
+  rules:
+    - changes:
+        - "**/*.cc"
+        - "**/*.h"
+    - when: manual
+      allow_failure: true
   before_script:
     - apt update
     - DEBIAN_FRONTEND=noninteractive apt install -y
       clang cmake
-      clang-tidy clang-tidy-17
+      clang-tidy clang-tidy-19
       git libsqlite3-dev libeigen3-dev
   script:
     - git clone -b $NS3_RELEASE_VERSION --depth=1 $NS3_REPOSITORY_URL
@@ -96,7 +186,7 @@ clang-tidy-17:
     - echo "Trimming compile_commands.json to filter out non-nr code"
     - ./contrib/nr/tools/trim_compile_commands.py ./cmake-cache/compile_commands.json
     - echo "Running full clang-tidy for nr"
-    - run-clang-tidy-17 -p cmake-cache/ -quiet 1> ../clang-tidy-output.log 2> /dev/null
+    - run-clang-tidy-19 -p cmake-cache/ -quiet 1> ../clang-tidy-output.log 2> /dev/null
     # Check job results
     - (! egrep -v "file not found \[clang-diagnostic-error\]" ../clang-tidy-output.log | egrep -A3 "error:|warning:|note:")
     - echo "No clang-tidy errors found"
@@ -113,8 +203,12 @@ clang-tidy-17:
 # Check commit format and style
 check-commit-message:
   stage: code-linting
-  image: python:latest
+  image: alpine:latest
   before_script:
+    - apk update
+    - apk add git python3
+    - python3 -m venv .venv
+    - source ./.venv/bin/activate
     - pip install GitPython
   script:
     # Check source code and commit messages
@@ -125,7 +219,10 @@ check-commit-message:
 # Check for emacs line presence
 emacs-line:
   stage: code-linting
-  image: ubuntu:latest
+  image: alpine:latest
+  before_script:
+    - apk update
+    - apk add grep
   script:
     - if ( egrep -rn --include="*.h" --include="*.cc" --include="*.c" --include="*.py" --include="*.rst" "c-file-style:|py-indent-offset:" ) ; then
       echo "Found Emacs lines on the above C/C++, Python and RST files" ;
@@ -136,3 +233,72 @@ emacs-line:
       fi
   timeout: 1h
   interruptible: true
+
+# Check for header module include in module sources
+header-module-include:
+  stage: code-linting
+  image: alpine:latest
+  before_script:
+    - apk update
+    - apk add grep
+  script:
+    - if ( egrep -rn --include="*.h" --include="*.cc" "#include \"ns3/nr-module.h\"" ./model ./helper ./utils ) ; then
+      echo "Found nr-module.h includes on the above nr module source files. Replace with actual nr headers." ;
+      exit 1 ;
+      else
+      echo "No incorrect use of nr-module.h header found. Keep up with the good work :)" ;
+      exit 0 ;
+      fi
+  timeout: 1h
+  interruptible: true
+
+# Check for dead urls
+check-dead-urls:
+  stage: code-linting
+  image: alpine:latest
+  before_script:
+    - apk update
+    - apk add git python3
+    - python3 -m venv .venv
+    - source ./.venv/bin/activate
+    - pip install httpx[http2]
+  script:
+    - echo 'nameserver 1.1.1.1' > /etc/resolv.conf
+    - ./tools/check-dead-urls.py ./
+  timeout: 1h
+  allow_failure: true
+
+# MR review: an agent (Claude Code) driven by the self-hosted LLM reviews the merge
+# request: scope and how to split it, references to earlier code (rejection), hard to
+# read constructs, undocumented changes, messages and documentation matching the code,
+# duplicate functions, brevity of documentation and notes. See
+# tools/mr-triage/mr-triage.py. The agent and its proxy are pip packages, installed by
+# the job: the job sandbox of the runners cannot build container images. REVIEW_LLM_URL
+# is the base URL of an OpenAI-compatible API; it defaults to the job variable below and
+# can be overridden in the CI/CD settings of the project or as a pipeline variable. The
+# job log has the verdict and the reason for it; the artifact review.md is the full
+# review. The job fails if the MR is rejected. It runs on CTTC runners.
+mr-triage:
+  stage: code-linting
+  image: python:3.12
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  before_script:
+    - pip install -q --root-user-action=ignore
+      claude-agent-sdk==0.2.183 "litellm[proxy]==1.109.1"
+  script:
+    - git fetch -q origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" || true
+    - python3 -I tools/mr-triage/mr-triage.py
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - review.md
+  variables:
+    GIT_DEPTH: 0
+    REVIEW_LLM_URL: http://100.91.142.120:30000/v1
+  timeout: 3h
+  allow_failure: true
+  interruptible: true
+  tags:
+    - CTTC

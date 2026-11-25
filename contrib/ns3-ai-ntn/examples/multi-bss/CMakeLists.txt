@@ -8,6 +8,9 @@ build_lib_example(
             auto-mcs-wifi-manager.cc
             tgax-residential-propagation-loss-model.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
+    ${libntn-constellation}
+    ${libntn-cho}
             ${libns3-ai-ntn}
             ${libcore}
             ${libwifi}
@@ -32,4 +35,6 @@ target_link_libraries(ns3ai_multibss_py PRIVATE
 )
 
 # Build Python interface along with C++ lib
-add_dependencies(ns3ai_multibss ns3ai_multibss_py)
+if(TARGET ns3ai_multibss)
+  add_dependencies(ns3ai_multibss ns3ai_multibss_py)
+endif()

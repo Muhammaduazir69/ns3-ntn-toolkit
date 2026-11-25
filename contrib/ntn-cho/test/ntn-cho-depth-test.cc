@@ -50,7 +50,7 @@ class CondEventIeConformanceTest : public TestCase
 {
   public:
     CondEventIeConformanceTest()
-        : TestCase("TS 38.331 condEventT1/D1: units, ranges, clamping, strict entry conditions")
+        : TestCase("TS 38.331 condEventT1-D1: units, ranges, clamping, strict entry conditions")
     {
     }
 
@@ -340,7 +340,7 @@ class KpiRecorderOnRealNrHandoverTest : public TestCase
 {
   public:
     KpiRecorderOnRealNrHandoverTest()
-        : TestCase("Cross-module: KPI recorder on two real NR X2 handovers (C/U-plane, ping-pong)")
+        : TestCase("Cross-module: KPI recorder on two real NR X2 handovers (C-U-plane, ping-pong)")
     {
     }
 
@@ -424,7 +424,7 @@ class CondEventsOnMovingUeTest : public TestCase
 {
   public:
     CondEventsOnMovingUeTest()
-        : TestCase("TS 38.331 D1/T1 on a moving UE: entry instants from the geometry and the UTC clock")
+        : TestCase("TS 38.331 D1-T1 on a moving UE: entry instants from the geometry and the UTC clock")
     {
     }
 

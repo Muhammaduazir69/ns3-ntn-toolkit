@@ -8,8 +8,8 @@
 
 #include "nr-common.h"
 
-#include <ns3/double.h>
-#include <ns3/log.h>
+#include "ns3/double.h"
+#include "ns3/log.h"
 
 #include <algorithm>
 #include <list>
@@ -42,14 +42,15 @@ NrA3RsrpHandoverAlgorithm::GetTypeId()
             .SetParent<NrHandoverAlgorithm>()
             .SetGroupName("Nr")
             .AddConstructor<NrA3RsrpHandoverAlgorithm>()
-            .AddAttribute(
-                "Hysteresis",
-                "Handover margin (hysteresis) in dB "
-                "(rounded to the nearest multiple of 0.5 dB)",
-                DoubleValue(3.0),
-                MakeDoubleAccessor(&NrA3RsrpHandoverAlgorithm::m_hysteresisDb),
-                MakeDoubleChecker<uint8_t>(0.0, 15.0)) // Hysteresis IE value range is [0..30] as
-                                                       // per Section 6.3.5 of 3GPP TS 36.331
+            .AddAttribute("Hysteresis",
+                          "Handover margin (A3 offset) in dB (rounded to the nearest 0.5 dB). "
+                          "A non-negative value is applied as the A3 hysteresis IE [0..15]; a "
+                          "negative value (e.g. TR 36.839 Set 5 a3-offset = -1 dB) is applied "
+                          "as the signed A3 offset IE [-15..15], which a plain hysteresis "
+                          "cannot represent.",
+                          DoubleValue(3.0),
+                          MakeDoubleAccessor(&NrA3RsrpHandoverAlgorithm::m_hysteresisDb),
+                          MakeDoubleChecker<double>(-15.0, 15.0))
             .AddAttribute("TimeToTrigger",
                           "Time during which neighbour cell's RSRP "
                           "must continuously higher than serving cell's RSRP "
@@ -57,7 +58,24 @@ NrA3RsrpHandoverAlgorithm::GetTypeId()
                           TimeValue(MilliSeconds(256)), // 3GPP time-to-trigger median value as per
                                                         // Section 6.3.5 of 3GPP TS 36.331
                           MakeTimeAccessor(&NrA3RsrpHandoverAlgorithm::m_timeToTrigger),
-                          MakeTimeChecker());
+                          MakeTimeChecker())
+            .AddAttribute("MinTargetRsrpDbm",
+                          "Target-admission floor: a neighbour is not selected as a handover "
+                          "target unless its reported RSRP is at least this level (dBm). Avoids "
+                          "handing a UE into a cell too weak to serve it (which would immediately "
+                          "radio-link-fail). -140 dBm (the default) disables the floor.",
+                          DoubleValue(-140.0),
+                          MakeDoubleAccessor(&NrA3RsrpHandoverAlgorithm::m_minTargetRsrpDbm),
+                          MakeDoubleChecker<double>(-140.0, -44.0))
+            .AddAttribute("MinTargetRsrqDb",
+                          "Interference-aware target-admission floor: a neighbour is not "
+                          "selected as a handover target unless its reported RSRQ is at least "
+                          "this level (dB). RSRQ tracks SINR/interference, so this rejects "
+                          "high-RSRP but low-SINR cells that would immediately radio-link-fail "
+                          "after a handover. -100 dB (the default) disables the floor.",
+                          DoubleValue(-100.0),
+                          MakeDoubleAccessor(&NrA3RsrpHandoverAlgorithm::m_minTargetRsrqDb),
+                          MakeDoubleChecker<double>(-100.0, -3.0));
     return tid;
 }
 
@@ -80,15 +98,27 @@ NrA3RsrpHandoverAlgorithm::DoInitialize()
 {
     NS_LOG_FUNCTION(this);
 
-    uint8_t hysteresisIeValue =
-        nr::EutranMeasurementMapping::ActualHysteresis2IeValue(m_hysteresisDb);
+    // A non-negative margin is applied as hysteresis (existing behaviour). A
+    // negative margin (e.g. TR 36.839 Set 5 a3-offset = -1 dB) cannot be a
+    // hysteresis (unsigned IE), so it is applied as the signed A3 offset instead.
+    int8_t a3OffsetIeValue = 0;
+    uint8_t hysteresisIeValue = 0;
+    if (m_hysteresisDb >= 0.0)
+    {
+        hysteresisIeValue = nr::EutranMeasurementMapping::ActualHysteresis2IeValue(m_hysteresisDb);
+    }
+    else
+    {
+        a3OffsetIeValue = nr::EutranMeasurementMapping::ActualA3Offset2IeValue(m_hysteresisDb);
+    }
     NS_LOG_LOGIC(this << " requesting Event A3 measurements"
-                      << " (hysteresis=" << (uint16_t)hysteresisIeValue << ")"
+                      << " (hysteresis=" << (uint16_t)hysteresisIeValue
+                      << " a3Offset=" << (int16_t)a3OffsetIeValue << ")"
                       << " (ttt=" << m_timeToTrigger.As(Time::MS) << ")");
 
     NrRrcSap::ReportConfigEutra reportConfig;
     reportConfig.eventId = NrRrcSap::ReportConfigEutra::EVENT_A3;
-    reportConfig.a3Offset = 0;
+    reportConfig.a3Offset = a3OffsetIeValue;
     reportConfig.hysteresis = hysteresisIeValue;
     reportConfig.timeToTrigger = m_timeToTrigger.GetMilliSeconds();
     reportConfig.reportOnLeave = false;
@@ -122,13 +152,28 @@ NrA3RsrpHandoverAlgorithm::DoReportUeMeas(uint16_t rnti, NrRrcSap::MeasResults m
         uint16_t bestNeighbourCellId = 0;
         uint8_t bestNeighbourRsrp = 0;
 
+        // Target-admission floors (in report range units): reject a neighbour whose RSRP
+        // is below MinTargetRsrpDbm (coverage) or whose RSRQ is below MinTargetRsrqDb
+        // (interference / SINR), so a UE is not handed into a cell too weak to serve it
+        // (which would immediately radio-link-fail). At the defaults (-140 dBm / -100 dB)
+        // both ranges are 0, so the checks never exclude anything. RSRQ is the effective
+        // signal in a dense co-channel HetNet, where the problem cells have good RSRP but
+        // low SINR.
+        const uint8_t minTargetRsrpRange =
+            nr::EutranMeasurementMapping::Dbm2RsrpRange(m_minTargetRsrpDbm);
+        const uint8_t minTargetRsrqRange =
+            nr::EutranMeasurementMapping::Db2RsrqRange(m_minTargetRsrqDb);
+
         for (auto it = measResults.measResultListEutra.begin();
              it != measResults.measResultListEutra.end();
              ++it)
         {
             if (it->haveRsrpResult)
             {
-                if ((bestNeighbourRsrp < it->rsrpResult) && IsValidNeighbour(it->physCellId))
+                if ((bestNeighbourRsrp < it->rsrpResult) &&
+                    (it->rsrpResult >= minTargetRsrpRange) &&
+                    (!it->haveRsrqResult || it->rsrqResult >= minTargetRsrqRange) &&
+                    IsValidNeighbour(it->physCellId))
                 {
                     bestNeighbourCellId = it->physCellId;
                     bestNeighbourRsrp = it->rsrpResult;
@@ -164,7 +209,7 @@ NrA3RsrpHandoverAlgorithm::IsValidNeighbour(uint16_t cellId)
     NS_LOG_FUNCTION(this << cellId);
 
     /**
-     * \todo In the future, this function can be expanded to validate whether the
+     * @todo In the future, this function can be expanded to validate whether the
      *       neighbour cell is a valid target cell, e.g., taking into account the
      *       NRT in ANR and whether it is a CSG cell with closed access.
      */

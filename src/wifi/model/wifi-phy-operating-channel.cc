@@ -10,6 +10,7 @@
 #include "wifi-phy-operating-channel.h"
 
 #include "wifi-phy-common.h"
+#include "wifi-utils.h"
 
 #include "ns3/assert.h"
 #include "ns3/log.h"
@@ -26,237 +27,245 @@ NS_LOG_COMPONENT_DEFINE("WifiPhyOperatingChannel");
 const std::set<FrequencyChannelInfo> WifiPhyOperatingChannel::m_frequencyChannels = {{
     // 2.4 GHz channels
     //  802.11b uses width of 22, while OFDM modes use width of 20
-    {1, 2412, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {1, 2412, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {2, 2417, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {2, 2417, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {3, 2422, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {3, 2422, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {4, 2427, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {4, 2427, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {5, 2432, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {5, 2432, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {6, 2437, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {6, 2437, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {7, 2442, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {7, 2442, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {8, 2447, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {8, 2447, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {9, 2452, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {9, 2452, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {10, 2457, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {10, 2457, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {11, 2462, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {11, 2462, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {12, 2467, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {12, 2467, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {13, 2472, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
-    {13, 2472, 20, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {1, MHz_u{2412}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {1, MHz_u{2412}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {2, MHz_u{2417}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {2, MHz_u{2417}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {3, MHz_u{2422}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {3, MHz_u{2422}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {4, MHz_u{2427}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {4, MHz_u{2427}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {5, MHz_u{2432}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {5, MHz_u{2432}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {6, MHz_u{2437}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {6, MHz_u{2437}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {7, MHz_u{2442}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {7, MHz_u{2442}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {8, MHz_u{2447}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {8, MHz_u{2447}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {9, MHz_u{2452}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {9, MHz_u{2452}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {10, MHz_u{2457}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {10, MHz_u{2457}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {11, MHz_u{2462}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {11, MHz_u{2462}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {12, MHz_u{2467}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {12, MHz_u{2467}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {13, MHz_u{2472}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {13, MHz_u{2472}, MHz_u{20}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
     // Only defined for 802.11b
-    {14, 2484, 22, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
+    {14, MHz_u{2484}, MHz_u{22}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::DSSS},
     // 40 MHz channels
-    {3, 2422, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {4, 2427, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {5, 2432, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {6, 2437, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {7, 2442, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {8, 2447, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {9, 2452, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {10, 2457, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
-    {11, 2462, 40, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {3, MHz_u{2422}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {4, MHz_u{2427}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {5, MHz_u{2432}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {6, MHz_u{2437}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {7, MHz_u{2442}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {8, MHz_u{2447}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {9, MHz_u{2452}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {10, MHz_u{2457}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
+    {11, MHz_u{2462}, MHz_u{40}, WIFI_PHY_BAND_2_4GHZ, FrequencyChannelType::OFDM},
 
     // Now the 5 GHz channels used for 802.11a/n/ac/ax/be
     // 20 MHz channels
-    {36, 5180, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {40, 5200, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {44, 5220, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {48, 5240, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {52, 5260, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {56, 5280, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {60, 5300, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {64, 5320, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {100, 5500, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {104, 5520, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {108, 5540, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {112, 5560, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {116, 5580, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {120, 5600, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {124, 5620, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {128, 5640, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {132, 5660, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {136, 5680, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {140, 5700, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {144, 5720, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {149, 5745, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {153, 5765, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {157, 5785, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {161, 5805, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {165, 5825, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {169, 5845, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {173, 5865, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {177, 5885, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {181, 5905, 20, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {36, MHz_u{5180}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {40, MHz_u{5200}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {44, MHz_u{5220}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {48, MHz_u{5240}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {52, MHz_u{5260}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {56, MHz_u{5280}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {60, MHz_u{5300}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {64, MHz_u{5320}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {100, MHz_u{5500}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {104, MHz_u{5520}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {108, MHz_u{5540}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {112, MHz_u{5560}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {116, MHz_u{5580}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {120, MHz_u{5600}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {124, MHz_u{5620}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {128, MHz_u{5640}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {132, MHz_u{5660}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {136, MHz_u{5680}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {140, MHz_u{5700}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {144, MHz_u{5720}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {149, MHz_u{5745}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {153, MHz_u{5765}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {157, MHz_u{5785}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {161, MHz_u{5805}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {165, MHz_u{5825}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {169, MHz_u{5845}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {173, MHz_u{5865}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {177, MHz_u{5885}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {181, MHz_u{5905}, MHz_u{20}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
     // 40 MHz channels
-    {38, 5190, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {46, 5230, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {54, 5270, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {62, 5310, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {102, 5510, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {110, 5550, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {118, 5590, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {126, 5630, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {134, 5670, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {142, 5710, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {151, 5755, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {159, 5795, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {167, 5835, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {175, 5875, 40, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {38, MHz_u{5190}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {46, MHz_u{5230}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {54, MHz_u{5270}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {62, MHz_u{5310}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {102, MHz_u{5510}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {110, MHz_u{5550}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {118, MHz_u{5590}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {126, MHz_u{5630}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {134, MHz_u{5670}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {142, MHz_u{5710}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {151, MHz_u{5755}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {159, MHz_u{5795}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {167, MHz_u{5835}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {175, MHz_u{5875}, MHz_u{40}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
     // 80 MHz channels
-    {42, 5210, 80, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {58, 5290, 80, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {106, 5530, 80, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {122, 5610, 80, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {138, 5690, 80, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {155, 5775, 80, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {171, 5855, 80, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {42, MHz_u{5210}, MHz_u{80}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {58, MHz_u{5290}, MHz_u{80}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {106, MHz_u{5530}, MHz_u{80}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {122, MHz_u{5610}, MHz_u{80}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {138, MHz_u{5690}, MHz_u{80}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {155, MHz_u{5775}, MHz_u{80}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {171, MHz_u{5855}, MHz_u{80}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
     // 160 MHz channels
-    {50, 5250, 160, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {114, 5570, 160, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
-    {163, 5815, 160, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {50, MHz_u{5250}, MHz_u{160}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {114, MHz_u{5570}, MHz_u{160}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
+    {163, MHz_u{5815}, MHz_u{160}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::OFDM},
 
     // 802.11p 10 MHz channels at the 5.855-5.925 band
-    {172, 5860, 10, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {174, 5870, 10, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {176, 5880, 10, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {178, 5890, 10, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {180, 5900, 10, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {182, 5910, 10, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {184, 5920, 10, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {172, MHz_u{5860}, MHz_u{10}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {174, MHz_u{5870}, MHz_u{10}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {176, MHz_u{5880}, MHz_u{10}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {178, MHz_u{5890}, MHz_u{10}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {180, MHz_u{5900}, MHz_u{10}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {182, MHz_u{5910}, MHz_u{10}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {184, MHz_u{5920}, MHz_u{10}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
 
     // 802.11p 5 MHz channels at the 5.855-5.925 band (for simplification, we consider the same
     // center frequencies as the 10 MHz channels)
-    {171, 5860, 5, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {173, 5870, 5, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {175, 5880, 5, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {177, 5890, 5, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {179, 5900, 5, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {181, 5910, 5, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
-    {183, 5920, 5, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {171, MHz_u{5860}, MHz_u{5}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {173, MHz_u{5870}, MHz_u{5}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {175, MHz_u{5880}, MHz_u{5}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {177, MHz_u{5890}, MHz_u{5}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {179, MHz_u{5900}, MHz_u{5}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {181, MHz_u{5910}, MHz_u{5}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
+    {183, MHz_u{5920}, MHz_u{5}, WIFI_PHY_BAND_5GHZ, FrequencyChannelType::CH_80211P},
 
     // Now the 6 GHz channels for 802.11ax/be
     // 20 MHz channels
-    {1, 5955, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {5, 5975, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {9, 5995, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {13, 6015, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {17, 6035, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {21, 6055, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {25, 6075, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {29, 6095, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {33, 6115, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {37, 6135, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {41, 6155, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {45, 6175, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {49, 6195, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {53, 6215, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {57, 6235, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {61, 6255, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {65, 6275, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {69, 6295, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {73, 6315, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {77, 6335, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {81, 6355, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {85, 6375, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {89, 6395, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {93, 6415, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {97, 6435, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {101, 6455, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {105, 6475, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {109, 6495, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {113, 6515, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {117, 6535, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {121, 6555, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {125, 6575, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {129, 6595, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {133, 6615, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {137, 6635, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {141, 6655, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {145, 6675, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {149, 6695, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {153, 6715, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {157, 6735, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {161, 6755, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {165, 6775, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {169, 6795, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {173, 6815, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {177, 6835, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {181, 6855, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {185, 6875, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {189, 6895, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {193, 6915, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {197, 6935, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {201, 6955, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {205, 6975, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {209, 6995, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {213, 7015, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {217, 7035, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {221, 7055, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {225, 7075, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {229, 7095, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {233, 7115, 20, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {1, MHz_u{5955}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {5, MHz_u{5975}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {9, MHz_u{5995}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {13, MHz_u{6015}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {17, MHz_u{6035}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {21, MHz_u{6055}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {25, MHz_u{6075}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {29, MHz_u{6095}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {33, MHz_u{6115}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {37, MHz_u{6135}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {41, MHz_u{6155}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {45, MHz_u{6175}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {49, MHz_u{6195}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {53, MHz_u{6215}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {57, MHz_u{6235}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {61, MHz_u{6255}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {65, MHz_u{6275}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {69, MHz_u{6295}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {73, MHz_u{6315}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {77, MHz_u{6335}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {81, MHz_u{6355}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {85, MHz_u{6375}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {89, MHz_u{6395}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {93, MHz_u{6415}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {97, MHz_u{6435}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {101, MHz_u{6455}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {105, MHz_u{6475}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {109, MHz_u{6495}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {113, MHz_u{6515}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {117, MHz_u{6535}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {121, MHz_u{6555}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {125, MHz_u{6575}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {129, MHz_u{6595}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {133, MHz_u{6615}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {137, MHz_u{6635}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {141, MHz_u{6655}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {145, MHz_u{6675}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {149, MHz_u{6695}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {153, MHz_u{6715}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {157, MHz_u{6735}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {161, MHz_u{6755}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {165, MHz_u{6775}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {169, MHz_u{6795}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {173, MHz_u{6815}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {177, MHz_u{6835}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {181, MHz_u{6855}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {185, MHz_u{6875}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {189, MHz_u{6895}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {193, MHz_u{6915}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {197, MHz_u{6935}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {201, MHz_u{6955}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {205, MHz_u{6975}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {209, MHz_u{6995}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {213, MHz_u{7015}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {217, MHz_u{7035}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {221, MHz_u{7055}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {225, MHz_u{7075}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {229, MHz_u{7095}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {233, MHz_u{7115}, MHz_u{20}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
     // 40 MHz channels
-    {3, 5965, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {11, 6005, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {19, 6045, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {27, 6085, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {35, 6125, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {43, 6165, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {51, 6205, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {59, 6245, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {67, 6285, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {75, 6325, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {83, 6365, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {91, 6405, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {99, 6445, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {107, 6485, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {115, 6525, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {123, 6565, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {131, 6605, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {139, 6645, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {147, 6685, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {155, 6725, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {163, 6765, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {171, 6805, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {179, 6845, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {187, 6885, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {195, 6925, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {203, 6965, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {211, 7005, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {219, 7045, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {227, 7085, 40, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {3, MHz_u{5965}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {11, MHz_u{6005}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {19, MHz_u{6045}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {27, MHz_u{6085}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {35, MHz_u{6125}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {43, MHz_u{6165}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {51, MHz_u{6205}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {59, MHz_u{6245}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {67, MHz_u{6285}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {75, MHz_u{6325}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {83, MHz_u{6365}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {91, MHz_u{6405}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {99, MHz_u{6445}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {107, MHz_u{6485}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {115, MHz_u{6525}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {123, MHz_u{6565}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {131, MHz_u{6605}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {139, MHz_u{6645}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {147, MHz_u{6685}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {155, MHz_u{6725}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {163, MHz_u{6765}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {171, MHz_u{6805}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {179, MHz_u{6845}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {187, MHz_u{6885}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {195, MHz_u{6925}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {203, MHz_u{6965}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {211, MHz_u{7005}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {219, MHz_u{7045}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {227, MHz_u{7085}, MHz_u{40}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
     // 80 MHz channels
-    {7, 5985, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {23, 6065, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {39, 6145, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {55, 6225, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {71, 6305, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {87, 6385, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {103, 6465, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {119, 6545, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {135, 6625, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {151, 6705, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {167, 6785, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {183, 6865, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {199, 6945, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {215, 7025, 80, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {7, MHz_u{5985}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {23, MHz_u{6065}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {39, MHz_u{6145}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {55, MHz_u{6225}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {71, MHz_u{6305}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {87, MHz_u{6385}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {103, MHz_u{6465}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {119, MHz_u{6545}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {135, MHz_u{6625}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {151, MHz_u{6705}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {167, MHz_u{6785}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {183, MHz_u{6865}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {199, MHz_u{6945}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {215, MHz_u{7025}, MHz_u{80}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
     // 160 MHz channels
-    {15, 6025, 160, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {47, 6185, 160, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {79, 6345, 160, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {111, 6505, 160, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {143, 6665, 160, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {175, 6825, 160, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
-    {207, 6985, 160, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {15, MHz_u{6025}, MHz_u{160}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {47, MHz_u{6185}, MHz_u{160}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {79, MHz_u{6345}, MHz_u{160}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {111, MHz_u{6505}, MHz_u{160}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {143, MHz_u{6665}, MHz_u{160}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {175, MHz_u{6825}, MHz_u{160}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {207, MHz_u{6985}, MHz_u{160}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    // 320 MHz-1 channels
+    {31, MHz_u{6105}, MHz_u{320}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {95, MHz_u{6425}, MHz_u{320}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {159, MHz_u{6745}, MHz_u{320}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    // 320 MHz-2 channels
+    {63, MHz_u{6265}, MHz_u{320}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {127, MHz_u{6585}, MHz_u{320}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
+    {191, MHz_u{6905}, MHz_u{320}, WIFI_PHY_BAND_6GHZ, FrequencyChannelType::OFDM},
 }};
 
 std::ostream&
@@ -265,6 +274,12 @@ operator<<(std::ostream& os, const FrequencyChannelInfo& info)
     os << "{" << +info.number << " " << info.frequency << " " << info.width << " " << info.band
        << "}";
     return os;
+}
+
+const std::set<FrequencyChannelInfo>&
+WifiPhyOperatingChannel::GetFrequencyChannels()
+{
+    return m_frequencyChannels;
 }
 
 bool
@@ -369,7 +384,7 @@ WifiPhyOperatingChannel::Set(const std::vector<FrequencyChannelInfo>& segments,
     if ((channelIts.size() > 2) ||
         ((channelIts.size() == 2) &&
          !std::all_of(channelIts.cbegin(), channelIts.cend(), [](const auto& channel) {
-             return channel->width == 80;
+             return channel->width == MHz_u{80};
          })))
     {
         throw std::runtime_error("WifiPhyOperatingChannel is invalid: only 80+80MHz is "
@@ -384,7 +399,7 @@ void
 WifiPhyOperatingChannel::SetDefault(MHz_u width, WifiStandard standard, WifiPhyBand band)
 {
     NS_LOG_FUNCTION(this << width << standard << band);
-    Set({{GetDefaultChannelNumber(width, standard, band), 0, width, band}}, standard);
+    Set({{GetDefaultChannelNumber(width, standard, band), MHz_u{0}, width, band}}, standard);
 }
 
 uint8_t
@@ -398,13 +413,14 @@ WifiPhyOperatingChannel::GetDefaultChannelNumber(
     auto prevSegmentChannelIt = m_frequencyChannels.end();
     if (previousChannelNumber)
     {
-        prevSegmentChannelIt = FindFirst(*previousChannelNumber, 0, width, standard, band, start);
+        prevSegmentChannelIt =
+            FindFirst(*previousChannelNumber, MHz_u{0}, width, standard, band, start);
         if (prevSegmentChannelIt != m_frequencyChannels.end())
         {
             start = std::next(prevSegmentChannelIt);
         }
     }
-    auto channelIt = FindFirst(0, 0, width, standard, band, start);
+    auto channelIt = FindFirst(0, MHz_u{0}, width, standard, band, start);
     if (prevSegmentChannelIt != m_frequencyChannels.end() && channelIt != m_frequencyChannels.end())
     {
         const auto prevFreq = prevSegmentChannelIt->frequency;
@@ -417,7 +433,7 @@ WifiPhyOperatingChannel::GetDefaultChannelNumber(
         {
             // segments are contiguous to each others, find next segment to make sure they are
             // not contiguous
-            channelIt = FindFirst(0, 0, width, standard, band, std::next(channelIt));
+            channelIt = FindFirst(0, MHz_u{0}, width, standard, band, std::next(channelIt));
         }
     }
     if (channelIt != m_frequencyChannels.end())
@@ -445,11 +461,11 @@ WifiPhyOperatingChannel::FindFirst(uint8_t number,
         {
             return false;
         }
-        if (frequency != 0 && channel.frequency != frequency)
+        if (frequency != MHz_u{0} && channel.frequency != frequency)
         {
             return false;
         }
-        if (width != 0 && channel.width != width)
+        if (width != MHz_u{0} && channel.width != width)
         {
             return false;
         }
@@ -573,7 +589,7 @@ WifiPhyOperatingChannel::GetTotalWidth() const
     NS_ASSERT(IsSet());
     return std::accumulate(m_channelIts.cbegin(),
                            m_channelIts.cend(),
-                           0,
+                           MHz_u{0},
                            [](MHz_u sum, const auto& channel) { return sum + channel->width; });
 }
 
@@ -598,6 +614,8 @@ WifiPhyOperatingChannel::GetWidthType() const
     case 160:
         return (m_channelIts.size() == 2) ? WifiChannelWidthType::CW_80_PLUS_80MHZ
                                           : WifiChannelWidthType::CW_160MHZ;
+    case 320:
+        return WifiChannelWidthType::CW_320MHZ;
     case 2160:
         return WifiChannelWidthType::CW_2160MHZ;
     case 0:
@@ -619,7 +637,7 @@ WifiPhyOperatingChannel::GetPrimaryChannelIndex(MHz_u primaryChannelWidth) const
 
     // the index of primary40 is half the index of primary20; the index of
     // primary80 is half the index of primary40, ...
-    MHz_u width = 20;
+    MHz_u width{20};
     uint8_t index = m_primary20Index;
 
     while (width < primaryChannelWidth)
@@ -644,7 +662,8 @@ WifiPhyOperatingChannel::SetPrimary20Index(uint8_t index)
 {
     NS_LOG_FUNCTION(this << +index);
 
-    NS_ABORT_MSG_IF(index > 0 && index >= GetTotalWidth() / 20, "Primary20 index out of range");
+    NS_ABORT_MSG_IF(index > 0 && index >= Count20MHzSubchannels(GetTotalWidth()),
+                    "Primary20 index out of range");
     m_primary20Index = index;
 }
 
@@ -737,7 +756,7 @@ WifiPhyOperatingChannel::GetPrimaryChannel(MHz_u primaryChannelWidth) const
     WifiPhyOperatingChannel primaryChannel(primaryChanIt);
 
     const auto primaryIndex = m_primary20Index - (GetPrimaryChannelIndex(primaryChannelWidth) *
-                                                  (primaryChannelWidth / 20));
+                                                  Count20MHzSubchannels(primaryChannelWidth));
     primaryChannel.SetPrimary20Index(primaryIndex);
 
     return primaryChannel;
@@ -752,7 +771,7 @@ WifiPhyOperatingChannel::GetAll20MHzChannelIndicesInPrimary(MHz_u width) const
         return {};
     }
 
-    MHz_u currWidth = 20;
+    MHz_u currWidth{20};
     std::set<uint8_t> indices;
     indices.insert(m_primary20Index);
 
@@ -775,13 +794,13 @@ std::set<uint8_t>
 WifiPhyOperatingChannel::GetAll20MHzChannelIndicesInSecondary(
     const std::set<uint8_t>& primaryIndices) const
 {
-    if (primaryIndices.empty() || GetTotalWidth() == 20)
+    if (primaryIndices.empty() || GetTotalWidth() == MHz_u{20})
     {
         return {};
     }
 
     uint8_t size = 1;
-    MHz_u primaryWidth = 20;
+    MHz_u primaryWidth{20};
 
     // find the width of the primary channel corresponding to the size of the given set
     while (size != primaryIndices.size())
@@ -807,58 +826,40 @@ WifiPhyOperatingChannel::GetAll20MHzChannelIndicesInSecondary(
 }
 
 std::set<uint8_t>
-WifiPhyOperatingChannel::Get20MHzIndicesCoveringRu(HeRu::RuSpec ru, MHz_u width) const
+WifiPhyOperatingChannel::Get20MHzIndicesCoveringRu(WifiRu::RuSpec ru, MHz_u width) const
 {
-    auto ruType = ru.GetRuType();
+    const auto ruType = WifiRu::GetRuType(ru);
 
-    NS_ASSERT_MSG(HeRu::GetBandwidth(ruType) <= width,
+    NS_ASSERT_MSG(WifiRu::GetBandwidth(ruType) <= width,
                   "No RU of type " << ruType << " is contained in a " << width << " MHz channel");
     NS_ASSERT_MSG(width <= GetTotalWidth(),
                   "The given width (" << width << " MHz) exceeds the operational width ("
                                       << GetTotalWidth() << ")");
 
-    // trivial case: 2x996-tone RU
-    if (ruType == HeRu::RU_2x996_TONE)
-    {
-        return {0, 1, 2, 3, 4, 5, 6, 7};
-    }
-
     // handle first the special case of center 26-tone RUs
-    if (ruType == HeRu::RU_26_TONE && ru.GetIndex() == 19)
+    if (const auto ruIndex = WifiRu::GetIndex(ru); ruType == RuType::RU_26_TONE && ruIndex == 19)
     {
-        NS_ASSERT_MSG(width >= 80,
+        NS_ASSERT_MSG(WifiRu::IsHe(ru), "Center 26-tone RUs can only be used with HE");
+        NS_ASSERT_MSG(width >= MHz_u{80},
                       "26-tone RU with index 19 is only present in channels of at least 80 MHz");
         // the center 26-tone RU in an 80 MHz channel is not fully covered by
         // any 20 MHz channel, but by the two central 20 MHz channels in the 80 MHz channel
-        auto indices = ru.GetPrimary80MHz() ? GetAll20MHzChannelIndicesInPrimary(80)
-                                            : GetAll20MHzChannelIndicesInSecondary(80);
+        auto indices = std::get<HeRu::RuSpec>(ru).GetPrimary80MHz()
+                           ? GetAll20MHzChannelIndicesInPrimary(MHz_u{80})
+                           : GetAll20MHzChannelIndicesInSecondary(MHz_u{80});
         indices.erase(indices.begin());
         indices.erase(std::prev(indices.end()));
         return indices;
     }
 
-    auto ruIndex = ru.GetIndex();
-
-    if (ruType == HeRu::RU_26_TONE && ruIndex > 19)
+    auto ruPhyIndex = WifiRu::GetPhyIndex(ru, width, m_primary20Index);
+    if (ruType == RuType::RU_26_TONE && ruPhyIndex > 19)
     {
-        // "ignore" the center 26-tone RU in an 80 MHz channel
-        ruIndex--;
-    }
-
-    // if the RU refers to a 160 MHz channel, we have to update the RU index (which
-    // refers to an 80 MHz channel) if the RU is not in the lower 80 MHz channel
-    if (width == 160)
-    {
-        bool primary80IsLower80 = (m_primary20Index < 4);
-        if (primary80IsLower80 != ru.GetPrimary80MHz())
+        // "ignore" the center 26-tone RUs in 80 MHz channels
+        ruPhyIndex--;
+        if (ruPhyIndex > 37)
         {
-            auto nRusIn80MHz = HeRu::GetNRus(80, ruType);
-            // "ignore" the center 26-tone RU in an 80 MHz channel
-            if (ruType == HeRu::RU_26_TONE)
-            {
-                nRusIn80MHz--;
-            }
-            ruIndex += nRusIn80MHz;
+            ruPhyIndex -= (ruPhyIndex - 19) / 37;
         }
     }
 
@@ -866,29 +867,38 @@ WifiPhyOperatingChannel::Get20MHzIndicesCoveringRu(HeRu::RuSpec ru, MHz_u width)
 
     switch (ruType)
     {
-    case HeRu::RU_26_TONE:
-    case HeRu::RU_52_TONE:
-    case HeRu::RU_106_TONE:
-    case HeRu::RU_242_TONE:
+    case RuType::RU_26_TONE:
+    case RuType::RU_52_TONE:
+    case RuType::RU_106_TONE:
+    case RuType::RU_242_TONE:
         n20MHzChannels = 1;
         break;
-    case HeRu::RU_484_TONE:
+    case RuType::RU_484_TONE:
         n20MHzChannels = 2;
         break;
-    case HeRu::RU_996_TONE:
+    case RuType::RU_996_TONE:
         n20MHzChannels = 4;
+        break;
+    case RuType::RU_2x996_TONE:
+        n20MHzChannels = 8;
+        break;
+    case RuType::RU_4x996_TONE:
+        n20MHzChannels = 16;
         break;
     default:
         NS_ABORT_MSG("Unhandled RU type: " << ruType);
     }
 
-    auto nRusInCoveringChannel = HeRu::GetNRus(n20MHzChannels * 20, ruType);
+    auto nRusInCoveringChannel =
+        WifiRu::GetNRus(n20MHzChannels * MHz_u{20},
+                        ruType,
+                        WifiRu::IsHe(ru) ? WIFI_MOD_CLASS_HE : WIFI_MOD_CLASS_EHT);
     // compute the index (starting at 0) of the covering channel within the given width
-    std::size_t indexOfCoveringChannelInGivenWidth = (ruIndex - 1) / nRusInCoveringChannel;
+    std::size_t indexOfCoveringChannelInGivenWidth = (ruPhyIndex - 1) / nRusInCoveringChannel;
 
     // expand the index of the covering channel in the indices of its constituent
     // 20 MHz channels (within the given width)
-    NS_ASSERT(indexOfCoveringChannelInGivenWidth < 8); // max number of 20 MHz channels
+    NS_ASSERT(indexOfCoveringChannelInGivenWidth < 16); // max number of 20 MHz channels
     std::set<uint8_t> indices({static_cast<uint8_t>(indexOfCoveringChannelInGivenWidth)});
 
     while (n20MHzChannels > 1)
@@ -904,7 +914,7 @@ WifiPhyOperatingChannel::Get20MHzIndicesCoveringRu(HeRu::RuSpec ru, MHz_u width)
     }
 
     // finally, add the appropriate offset if width is less than the operational channel width
-    auto offset = GetPrimaryChannelIndex(width) * width / 20;
+    auto offset = GetPrimaryChannelIndex(width) * Count20MHzSubchannels(width);
 
     if (offset > 0)
     {
@@ -947,18 +957,23 @@ operator<<(std::ostream& os, const WifiPhyOperatingChannel& channel)
         {
             if (numSegments > 1)
             {
-                os << "segment " << segmentId << " ";
+                os << "segment " << segmentId << " {";
             }
-            os << "channel " << +channel.GetNumber() << " frequency " << channel.GetFrequency()
-               << " width " << channel.GetWidth() << " band " << channel.GetPhyBand();
-            if ((segmentId == 0) && (static_cast<uint16_t>(channel.GetTotalWidth()) % 20 == 0))
+            os << "channel " << +channel.GetNumber(segmentId) << " frequency "
+               << channel.GetFrequency(segmentId) << " width " << channel.GetWidth(segmentId);
+            if (numSegments > 1)
             {
-                os << " primary20 " << +channel.GetPrimaryChannelIndex(20);
+                os << "}";
             }
             if (segmentId < numSegments - 1)
             {
                 os << " ";
             }
+        }
+        os << " band " << channel.GetPhyBand();
+        if (static_cast<uint16_t>(channel.GetTotalWidth()) % 20 == 0)
+        {
+            os << " primary20 " << +channel.GetPrimaryChannelIndex(MHz_u{20});
         }
     }
     else

@@ -5,18 +5,19 @@
 #include "nr-gnb-net-device.h"
 
 #include "bandwidth-part-gnb.h"
+#include "bwp-manager-algorithm.h"
 #include "bwp-manager-gnb.h"
+#include "nr-epc-gnb-application.h"
 #include "nr-gnb-component-carrier-manager.h"
 #include "nr-gnb-mac.h"
 #include "nr-gnb-phy.h"
 #include "nr-gnb-rrc.h"
 
-#include <ns3/abort.h>
-#include <ns3/ipv4-l3-protocol.h>
-#include <ns3/ipv6-l3-protocol.h>
-#include <ns3/log.h>
-#include <ns3/object-map.h>
-#include <ns3/pointer.h>
+#include "ns3/abort.h"
+#include "ns3/iana-ieee802-numbers.h"
+#include "ns3/log.h"
+#include "ns3/object-map.h"
+#include "ns3/pointer.h"
 
 namespace ns3
 {
@@ -46,7 +47,12 @@ NrGnbNetDevice::GetTypeId()
                           "The RRC layer associated with the gNB",
                           PointerValue(),
                           MakePointerAccessor(&NrGnbNetDevice::m_rrc),
-                          MakePointerChecker<NrGnbRrc>());
+                          MakePointerChecker<NrGnbRrc>())
+            .AddAttribute("NrHandoverAlgorithm",
+                          "The handover algorithm associated to this GnbNetDevice",
+                          PointerValue(),
+                          MakePointerAccessor(&NrGnbNetDevice::m_handoverAlgorithm),
+                          MakePointerChecker<NrHandoverAlgorithm>());
     return tid;
 }
 
@@ -97,15 +103,19 @@ NrGnbNetDevice::GetNrFhControl()
 
 void
 NrGnbNetDevice::RouteIngoingCtrlMsgs(const std::list<Ptr<NrControlMessage>>& msgList,
-                                     uint8_t sourceBwpId)
+                                     uint32_t sourceBwpArfcn)
 {
     NS_LOG_FUNCTION(this);
 
     for (const auto& msg : msgList)
     {
-        uint8_t bwpId = DynamicCast<BwpManagerGnb>(m_componentCarrierManager)
-                            ->RouteIngoingCtrlMsgs(msg, sourceBwpId);
-        m_ccMap.at(bwpId)->GetPhy()->PhyCtrlMessagesReceived(msg);
+        uint32_t bwpArfcn = DynamicCast<BwpManagerGnb>(m_componentCarrierManager)
+                                ->RouteIngoingCtrlMsgs(msg, sourceBwpArfcn);
+        auto bwpIt = std::find_if(m_ccMap.begin(), m_ccMap.end(), [bwpArfcn](const auto& bwp) {
+            return bwp.second->GetArfcn() == bwpArfcn;
+        });
+        NS_ASSERT_MSG(bwpIt != m_ccMap.end(), "gNB missing BWP with ARFCN: " << bwpArfcn);
+        bwpIt->second->GetPhy()->PhyCtrlMessagesReceived(msg);
     }
 }
 
@@ -134,9 +144,10 @@ void
 NrGnbNetDevice::DoInitialize()
 {
     NS_LOG_FUNCTION(this);
-    m_rrc->Initialize();
-
-    NrNetDevice::DoInitialize();
+    if (!m_isCellConfigured)
+    {
+        ConfigureCell();
+    }
 }
 
 void
@@ -183,16 +194,16 @@ NrGnbNetDevice::GetCellId() const
 }
 
 std::vector<uint16_t>
-NrGnbNetDevice::GetCellIds() const
+NrGnbNetDevice::GetBwpIds() const
 {
-    std::vector<uint16_t> cellIds;
+    std::vector<uint16_t> bwpIds;
 
-    cellIds.reserve(m_ccMap.size());
+    bwpIds.reserve(m_ccMap.size());
     for (auto& it : m_ccMap)
     {
-        cellIds.push_back(it.second->GetCellId());
+        bwpIds.push_back(it.second->GetBwpId());
     }
-    return cellIds;
+    return bwpIds;
 }
 
 void
@@ -203,17 +214,10 @@ NrGnbNetDevice::SetCellId(uint16_t cellId)
 }
 
 uint16_t
-NrGnbNetDevice::GetBwpId(uint8_t index) const
+NrGnbNetDevice::GetCellId(uint8_t index) const
 {
     NS_LOG_FUNCTION(this);
     return m_ccMap.at(index)->GetCellId();
-}
-
-uint16_t
-NrGnbNetDevice::GetEarfcn(uint8_t index) const
-{
-    NS_LOG_FUNCTION(this);
-    return m_ccMap.at(index)->GetDlEarfcn(); // Ul or Dl doesn't matter, they are the same
 }
 
 void
@@ -232,10 +236,10 @@ bool
 NrGnbNetDevice::DoSend(Ptr<Packet> packet, const Address& dest, uint16_t protocolNumber)
 {
     NS_LOG_FUNCTION(this << packet << dest << protocolNumber);
-    NS_ABORT_MSG_IF(protocolNumber != Ipv4L3Protocol::PROT_NUMBER &&
-                        protocolNumber != Ipv6L3Protocol::PROT_NUMBER,
-                    "unsupported protocol " << protocolNumber
-                                            << ", only IPv4 and IPv6 are supported");
+    NS_ABORT_MSG_IF(protocolNumber != iana::ieee802numbers::IPV4 &&
+                        protocolNumber != iana::ieee802numbers::IPV6 &&
+                        protocolNumber != NrEpcGnbApplication::UNSTRUCTURED_SOCKET_PROTOCOL,
+                    "unsupported protocol " << protocolNumber);
 
     NS_LOG_INFO("Forward received packet to RRC Layer");
     m_txTrace(packet, dest);
@@ -244,31 +248,99 @@ NrGnbNetDevice::DoSend(Ptr<Packet> packet, const Address& dest, uint16_t protoco
 }
 
 void
+NrGnbNetDevice::ForwardUnclassifiedUp(Ptr<Packet> p)
+{
+    NS_LOG_FUNCTION(this << p);
+    // An uplink packet that is not IP belongs to an unstructured PDU session, so it
+    // rides the unstructured socket up to the gNB application, which routes
+    // it by the QoS flow tag it carries rather than by its contents.
+    ForwardUp(p, NrEpcGnbApplication::UNSTRUCTURED_SOCKET_PROTOCOL);
+}
+
+void
 NrGnbNetDevice::UpdateConfig()
 {
     NS_LOG_FUNCTION(this);
+    // No longer does anything; replaced by ConfigureCell()
+}
 
-    NS_ASSERT(!m_ccMap.empty());
+void
+NrGnbNetDevice::ConfigureCell()
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT_MSG(!m_isCellConfigured, "ConfigureCell() has already been called");
+    NS_ASSERT_MSG(!m_ccMap.empty(), "Component carrier map is empty");
+    m_isCellConfigured = true;
 
-    std::map<uint8_t, Ptr<BandwidthPartGnb>> ccPhyConfMap;
-    for (const auto& i : m_ccMap)
+    // Route the outgoing (DL) messages of any UL-only carrier through the
+    // cell's first DL-capable carrier, unless an explicit mapping was
+    // configured (mixed TDD/FDD carrier aggregation setups pair them manually)
+    auto bwpManager = DynamicCast<BwpManagerGnb>(m_componentCarrierManager);
+    auto dlCcIt = std::find_if(m_ccMap.begin(), m_ccMap.end(), [](const auto& cc) {
+        return cc.second->GetPhy()->HasDlSlot();
+    });
+    if (bwpManager && dlCcIt != m_ccMap.end())
     {
-        Ptr<BandwidthPartGnb> c = i.second;
-        ccPhyConfMap.insert(std::pair<uint8_t, Ptr<BandwidthPartGnb>>(i.first, c));
+        for (const auto& cc : m_ccMap)
+        {
+            if (!cc.second->GetPhy()->HasDlSlot() && !bwpManager->HasOutputLink(cc.first))
+            {
+                bwpManager->SetOutputLink(cc.first, dlCcIt->first);
+            }
+        }
     }
 
-    m_rrc->ConfigureCell(ccPhyConfMap);
+    // Advertise the QoS flow to BWP mapping to UEs in dedicated RRC config, by
+    // carrier ARFCN (BWP indices need not coincide between gNB and UE)
+    if (bwpManager)
+    {
+        auto algo = DynamicCast<const BwpManagerAlgorithmStatic>(bwpManager->GetAlgorithm());
+        if (algo)
+        {
+            std::map<uint8_t, uint32_t> qosFlowToBwpArfcn;
+            for (const auto& [fiveQi, bwpIndex] : algo->GetBwpMap())
+            {
+                if (bwpIndex != BwpManagerAlgorithm::NO_BWP_ASSIGNED && bwpIndex < m_ccMap.size())
+                {
+                    qosFlowToBwpArfcn[fiveQi] = GetBwpArfcn(bwpIndex);
+                }
+            }
+            m_rrc->SetQosFlowToBwpArfcn(qosFlowToBwpArfcn);
+        }
+
+        // Pair each DL carrier with the UL carrier that receives for it by
+        // inverting the output links (UL-only source -> DL target), so UEs
+        // learn the UL pairing of every DL-only carrier over RRC, including
+        // manually paired mixed TDD/FDD carrier aggregation setups
+        std::map<uint32_t, uint32_t> ulCarrierPairing;
+        for (const auto& [sourceBwp, outputBwp] : bwpManager->GetOutputLinks())
+        {
+            if (m_ccMap.count(outputBwp) && !m_ccMap.at(sourceBwp)->GetPhy()->HasDlSlot())
+            {
+                ulCarrierPairing[GetBwpArfcn(outputBwp)] = GetBwpArfcn(sourceBwp);
+            }
+        }
+        m_rrc->SetUlCarrierPairing(ulCarrierPairing);
+    }
+
+    m_rrc->ConfigureCell(m_ccMap);
+    m_handoverAlgorithm->Initialize();
+}
+
+bool
+NrGnbNetDevice::IsCellConfigured() const
+{
+    return m_isCellConfigured;
 }
 
 uint16_t
-NrGnbNetDevice::GetCellIdDlBandwidth(uint16_t cellId) const
+NrGnbNetDevice::GetBwpDlBandwidth(uint16_t bwpId) const
 {
-    NS_ASSERT_MSG(m_rrc->HasCellId(cellId), "Unknown cellId");
-    if (m_rrc->HasCellId(cellId))
+    if (m_rrc->HasBwpId(bwpId))
     {
         for (const auto& [key, cc] : m_ccMap)
         {
-            if (cc->GetCellId() == cellId)
+            if (cc->GetBwpId() == bwpId)
             {
                 return cc->GetDlBandwidth();
             }
@@ -278,14 +350,14 @@ NrGnbNetDevice::GetCellIdDlBandwidth(uint16_t cellId) const
 }
 
 uint16_t
-NrGnbNetDevice::GetCellIdUlBandwidth(uint16_t cellId) const
+NrGnbNetDevice::GetBwpUlBandwidth(uint16_t bwpId) const
 {
-    NS_ASSERT_MSG(m_rrc->HasCellId(cellId), "Unknown cellId");
-    if (m_rrc->HasCellId(cellId))
+    NS_ASSERT_MSG(m_rrc->HasBwpId(bwpId), "Unknown bwpId");
+    if (m_rrc->HasBwpId(bwpId))
     {
         for (const auto& [key, cc] : m_ccMap)
         {
-            if (cc->GetCellId() == cellId)
+            if (cc->GetBwpId() == bwpId)
             {
                 return cc->GetUlBandwidth();
             }
@@ -295,37 +367,33 @@ NrGnbNetDevice::GetCellIdUlBandwidth(uint16_t cellId) const
 }
 
 uint32_t
-NrGnbNetDevice::GetCellIdDlEarfcn(uint16_t cellId) const
+NrGnbNetDevice::GetBwpArfcn(uint16_t bwpId) const
 {
-    NS_ASSERT_MSG(m_rrc->HasCellId(cellId), "Unknown cellId");
-    if (m_rrc->HasCellId(cellId))
+    NS_ASSERT_MSG(m_rrc->HasBwpId(bwpId), "Unknown bwpId");
+    if (m_rrc->HasBwpId(bwpId))
     {
         for (const auto& [key, cc] : m_ccMap)
         {
-            if (cc->GetCellId() == cellId)
+            if (cc->GetBwpId() == bwpId)
             {
-                return cc->GetDlEarfcn();
+                return cc->GetArfcn();
             }
         }
     }
     return 0;
 }
 
-uint32_t
-NrGnbNetDevice::GetCellIdUlEarfcn(uint16_t cellId) const
+uint16_t
+NrGnbNetDevice::GetArfcnBwpId(uint32_t arfcn) const
 {
-    NS_ASSERT_MSG(m_rrc->HasCellId(cellId), "Unknown cellId");
-    if (m_rrc->HasCellId(cellId))
+    for (std::size_t i = 0; i < m_ccMap.size(); i++)
     {
-        for (const auto& [key, cc] : m_ccMap)
+        if (m_ccMap.at(i)->GetArfcn() == arfcn)
         {
-            if (cc->GetCellId() == cellId)
-            {
-                return cc->GetUlEarfcn();
-            }
+            return (uint16_t)i;
         }
     }
-    return 0;
+    NS_ABORT_MSG("gNB should have the searched arfcn");
 }
 
 } // namespace ns3

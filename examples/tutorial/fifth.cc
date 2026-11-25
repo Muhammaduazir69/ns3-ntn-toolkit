@@ -54,8 +54,8 @@ NS_LOG_COMPONENT_DEFINE("FifthScriptExample");
 /**
  * Congestion window change callback
  *
- * \param oldCwnd Old congestion window.
- * \param newCwnd New congestion window.
+ * @param oldCwnd Old congestion window.
+ * @param newCwnd New congestion window.
  */
 static void
 CwndChange(uint32_t oldCwnd, uint32_t newCwnd)
@@ -66,7 +66,7 @@ CwndChange(uint32_t oldCwnd, uint32_t newCwnd)
 /**
  * Rx drop callback
  *
- * \param p The dropped packet.
+ * @param p The dropped packet.
  */
 static void
 RxDrop(Ptr<const Packet> p)
@@ -106,6 +106,11 @@ main(int argc, char* argv[])
     devices.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(em));
 
     InternetStackHelper stack;
+
+    // Disabling IPv6 because it is not necessary to show what we want to demonstrate here.
+    // Note: Normal networks typically have both IPv4 and IPv6 enabled.
+    stack.SetIpv6StackInstall(false);
+
     stack.Install(nodes);
 
     Ipv4AddressHelper address;

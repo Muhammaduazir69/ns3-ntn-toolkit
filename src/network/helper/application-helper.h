@@ -12,9 +12,9 @@
 #include "application-container.h"
 #include "node-container.h"
 
-#include <ns3/address.h>
-#include <ns3/attribute.h>
-#include <ns3/object-factory.h>
+#include "ns3/address.h"
+#include "ns3/attribute.h"
+#include "ns3/object-factory.h"
 
 #include <string>
 
@@ -22,7 +22,7 @@ namespace ns3
 {
 
 /**
- * \brief A helper to make it easier to instantiate an application on a set of nodes.
+ * @brief A helper to make it easier to instantiate an application on a set of nodes.
  */
 class ApplicationHelper
 {

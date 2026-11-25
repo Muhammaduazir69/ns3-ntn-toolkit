@@ -69,7 +69,7 @@ NS_LOG_COMPONENT_DEFINE("WifiPhyRxTraceExample");
 /**
  * Function called when a packet is received.
  *
- * \param socket The receiving socket.
+ * @param socket The receiving socket.
  */
 void
 ReceivePacket(Ptr<Socket> socket)
@@ -94,10 +94,10 @@ ReceiveObssPacket(Ptr<Socket> socket)
 /**
  * Generate traffic.
  *
- * \param socket The sending socket.
- * \param pktSize The packet size.
- * \param pktCount The packet count.
- * \param pktInterval The interval between two packets.
+ * @param socket The sending socket.
+ * @param pktSize The packet size.
+ * @param pktCount The packet count.
+ * @param pktInterval The interval between two packets.
  */
 static void
 GeneratePacket(Ptr<Socket> socket, uint32_t pktSize, uint32_t pktCount, Time pktInterval)
@@ -134,7 +134,7 @@ main(int argc, char* argv[])
     double distance = 1;        // meters
     bool enableTwoBss = false;  // whether to enable a second (non-traced) BSS
     double distanceTwoBss = 10; // meters (distance between APs if enableTwoBss is true)
-    Time interval = Seconds(1.0);
+    Time interval = Seconds(1);
     bool verbose = true;
     bool logging = false;
 
@@ -303,7 +303,7 @@ main(int argc, char* argv[])
     rxTraceHelper.Stop(stopTime);
 
     Simulator::ScheduleWithContext(source->GetNode()->GetId(),
-                                   Seconds(1.0),
+                                   Seconds(1),
                                    &GeneratePacket,
                                    source,
                                    packetSize,

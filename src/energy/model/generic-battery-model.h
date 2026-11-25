@@ -14,9 +14,11 @@
 
 #include "energy-source.h"
 
-#include <ns3/event-id.h>
-#include <ns3/nstime.h>
-#include <ns3/traced-value.h>
+#include "ns3/event-id.h"
+#include "ns3/nstime.h"
+#include "ns3/traced-value.h"
+
+#include <array>
 
 namespace ns3
 {
@@ -24,7 +26,7 @@ namespace energy
 {
 
 /**
- * \ingroup energy
+ * @ingroup energy
  *
  *  Battery types.
  *  These are grouped according to their chemical characteristics
@@ -38,9 +40,9 @@ enum GenericBatteryType
 };
 
 /**
- * \ingroup energy
+ * @ingroup energy
  *
- *  Battery models that described the parameters of the the battery presets.
+ *  Battery models that described the parameters of the battery presets.
  */
 enum BatteryModel
 {
@@ -52,9 +54,9 @@ enum BatteryModel
 };
 
 /**
- * \ingroup energy
+ * @ingroup energy
  *
- *  The structure containing the the parameter values that describe a
+ *  The structure containing the parameter values that describe a
  *  battery preset.
  */
 struct BatteryPresets
@@ -73,79 +75,91 @@ struct BatteryPresets
 };
 
 /**
- * \ingroup energy
+ * @ingroup energy
  *
  *  Contains the values that form the battery presents available in this module.
  */
-static BatteryPresets g_batteryPreset[] = {{NIMH_NICD,
-                                            "Panasonic HHR650D | NiMH | 1.2V 6.5Ah | Size: D",
-                                            1.39,
-                                            7.0,
-                                            1.18,
-                                            6.25,
-                                            1.28,
-                                            1.3,
-                                            0.0046,
-                                            1.3,
-                                            1.0},
-                                           {LEADACID,
-                                            "CSB GP1272 | Lead Acid | 12V 7.2Ah",
-                                            12.8,
-                                            7.2,
-                                            11.5,
-                                            4.5,
-                                            12.5,
-                                            2,
-                                            0.056,
-                                            0.36,
-                                            8.0},
-                                           {LION_LIPO,
-                                            "Panasonic CGR18650DA | Li-Ion | 3.6V 2.45Ah | Size: A",
-                                            4.17,
-                                            2.33,
-                                            3.57,
-                                            2.14,
-                                            3.714,
-                                            1.74,
-                                            0.0830,
-                                            0.466,
-                                            3.0},
-                                           {LEADACID,
-                                            "Rs PRO LGP12100 | Lead Acid | 12V 100Ah",
-                                            12.60,
-                                            130,
-                                            12.44,
-                                            12.3,
-                                            12.52,
-                                            12,
-                                            0.00069,
-                                            5,
-                                            11},
-                                           {NIMH_NICD,
-                                            "PANASONIC N-700AAC | NiCd | 1.2V 700mAh | Size: AA",
-                                            1.38,
-                                            0.790,
-                                            1.17,
-                                            0.60,
-                                            1.25,
-                                            0.24,
-                                            0.016,
-                                            0.7,
-                                            0.8}};
+static const auto g_batteryPreset = std::to_array<BatteryPresets>({
+    {
+        NIMH_NICD,
+        "Panasonic HHR650D | NiMH | 1.2V 6.5Ah | Size: D",
+        1.39,
+        7.0,
+        1.18,
+        6.25,
+        1.28,
+        1.3,
+        0.0046,
+        1.3,
+        1.0,
+    },
+    {
+        LEADACID,
+        "CSB GP1272 | Lead Acid | 12V 7.2Ah",
+        12.8,
+        7.2,
+        11.5,
+        4.5,
+        12.5,
+        2,
+        0.056,
+        0.36,
+        8.0,
+    },
+    {
+        LION_LIPO,
+        "Panasonic CGR18650DA | Li-Ion | 3.6V 2.45Ah | Size: A",
+        4.17,
+        2.33,
+        3.57,
+        2.14,
+        3.714,
+        1.74,
+        0.0830,
+        0.466,
+        3.0,
+    },
+    {
+        LEADACID,
+        "Rs PRO LGP12100 | Lead Acid | 12V 100Ah",
+        12.60,
+        130,
+        12.44,
+        12.3,
+        12.52,
+        12,
+        0.00069,
+        5,
+        11,
+    },
+    {
+        NIMH_NICD,
+        "PANASONIC N-700AAC | NiCd | 1.2V 700mAh | Size: AA",
+        1.38,
+        0.790,
+        1.17,
+        0.60,
+        1.25,
+        0.24,
+        0.016,
+        0.7,
+        0.8,
+    },
+});
 
 /**
- * \ingroup energy
- * \brief A generic battery model for  Li-Ion, NiCd, NiMh and Lead acid batteries
+ * @ingroup energy
+ * @brief A generic battery model for  Li-Ion, NiCd, NiMh and Lead acid batteries
  *
  * The generic battery model can be used to describe the discharge behavior of
- * the battery chemestries supported by the model.
+ * the battery chemistries supported by the model.
  */
 class GenericBatteryModel : public EnergySource
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return The object TypeId.
+     * @brief Get the type ID.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
@@ -159,21 +173,21 @@ class GenericBatteryModel : public EnergySource
      * in the battery. This is because the battery cannot be used until Voltage = 0, only until
      * it reaches the cutoff voltage.
      *
-     * \return The initial energy stored in the fully charged battery, in Joules.
+     * @return The initial energy stored in the fully charged battery, in Joules.
      */
     double GetInitialEnergy() const override;
 
     /**
      * Implements GetSupplyVoltage.
      *
-     * \return Supply voltage at the energy source.
+     * @return Supply voltage at the energy source.
      */
     double GetSupplyVoltage() const override;
 
     /**
      * Implements GetRemainingEnergy.
      *
-     * \return Remaining energy in energy source, in Joules
+     * @return Remaining energy in energy source, in Joules
      */
     double GetRemainingEnergy() override;
 
@@ -181,7 +195,7 @@ class GenericBatteryModel : public EnergySource
      * Implements GetEnergyFraction. For the generic battery model, energy fraction
      * is equivalent to the remaining usable capacity (i.e. The SoC).
      *
-     * \return Energy fraction.
+     * @return Energy fraction.
      */
     double GetEnergyFraction() override;
 
@@ -193,7 +207,7 @@ class GenericBatteryModel : public EnergySource
     /**
      * This function sets the interval between each energy update.
      *
-     * \param interval Energy update interval.
+     * @param interval Energy update interval.
      */
     void SetEnergyUpdateInterval(Time interval);
 
@@ -203,7 +217,7 @@ class GenericBatteryModel : public EnergySource
      *  be set to a value bigger than the rated capacity (fully discharged) or
      *  less than 0 (fully charged).
      *
-     *  \param drainedCapacity The capacity drained so far in the battery.
+     *  @param drainedCapacity The capacity drained so far in the battery.
      */
     void SetDrainedCapacity(double drainedCapacity);
 
@@ -211,7 +225,7 @@ class GenericBatteryModel : public EnergySource
      * Obtain the amount of drained capacity from the battery based on the
      * integral of the current over time (Coulomb counting method).
      *
-     * \return The drainedCapacity (Ah)
+     * @return The drainedCapacity (Ah)
      */
     double GetDrainedCapacity() const;
 
@@ -219,12 +233,12 @@ class GenericBatteryModel : public EnergySource
      *  Calculates an estimate of the State of Charge (SoC).
      *  In essence, the amount of usable capacity remaining in the battery (%).
      *
-     *  \return The percentage of usable capacity remaining in the battery.
+     *  @return The percentage of usable capacity remaining in the battery.
      */
     double GetStateOfCharge() const;
 
     /**
-     * \return The interval between each energy update.
+     * @return The interval between each energy update.
      */
     Time GetEnergyUpdateInterval() const;
 
@@ -261,16 +275,16 @@ class GenericBatteryModel : public EnergySource
      *  It consider different discharge curves for different discharge currents
      *  and the remaining energy of the battery.
      *
-     *  \param current The actual discharge current value (+i).
-     *  \return The voltage of the battery.
+     *  @param current The actual discharge current value (+i).
+     *  @return The voltage of the battery.
      */
     double GetVoltage(double current);
 
     /**
      *  Obtain the battery voltage as a result of a charge current.
      *
-     *  \param current The actual charge current value (-i).
-     *  \return The voltage of the battery.
+     *  @param current The actual charge current value (-i).
+     *  @return The voltage of the battery.
      */
     double GetChargeVoltage(double current);
 

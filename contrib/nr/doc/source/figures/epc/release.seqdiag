@@ -1,0 +1,20 @@
+diagram {
+   edge_length = 180;
+   Ue; Gnb; Mme; Sgw; Pgw;
+
+   Gnb ->> Ue [label="RRC Connection Release"]
+   Ue => Ue [label="NrEpcUeNas\n-> OFF;\nDisconnect()"]
+   Gnb => Gnb [label="ideal UE-context\nremove request"]
+
+   === S1-AP release + GTP-C delete (per active flow) ===
+   Gnb ->> Mme [label="S1-AP E-RAB Release Ind"]
+   Mme ->> Sgw [label="Delete Flow Cmd (S11)"]
+   Sgw ->> Pgw [label="Delete Flow Cmd (S5)"]
+   Sgw <<- Pgw [label="Delete Flow Req (S5)"]
+   Mme <<- Sgw [label="Delete Flow Req (S11)"]
+   Mme ->> Sgw [label="Delete Flow Rsp (S11)"]
+   Sgw ->> Pgw [label="Delete Flow Rsp (S5)\n(PGW drops flow / QoS rule)"]
+
+   === Local gNB cleanup (in parallel with the GTP-C chain) ===
+   Gnb => Gnb [label="RemoveUe;\nfree RRC/MAC/PHY\n+ S1-U state"]
+}

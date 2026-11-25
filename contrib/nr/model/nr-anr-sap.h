@@ -9,24 +9,26 @@
 
 #include "nr-rrc-sap.h"
 
+#include "ns3/nr-export.h"
+
 namespace ns3
 {
 
 /**
- * \brief Service Access Point (SAP) offered by the ANR instance to the eNodeB
+ * @brief Service Access Point (SAP) offered by the ANR instance to the eNodeB
  *        RRC instance.
  *
  * This is the *ANR SAP Provider*, i.e., the part of the SAP that contains the
  * ANR (Automatic Neighbour Relation) methods called by the eNodeB RRC instance.
  */
-class NrAnrSapProvider
+class NR_EXPORT NrAnrSapProvider
 {
   public:
     virtual ~NrAnrSapProvider() = default;
 
     /**
-     * \brief Send a UE measurement report to the ANC instance.
-     * \param measResults a single report of one measurement identity
+     * @brief Send a UE measurement report to the ANC instance.
+     * @param measResults a single report of one measurement identity
      *
      * The received measurement report is a result of the UE measurement
      * configuration previously configured by calling
@@ -36,33 +38,33 @@ class NrAnrSapProvider
     virtual void ReportUeMeas(NrRrcSap::MeasResults measResults) = 0;
 
     /**
-     * \brief Add a new Neighbour Relation entry.
-     * \param cellId the Physical Cell ID of the new neighbouring cell
+     * @brief Add a new Neighbour Relation entry.
+     * @param cellId the Physical Cell ID of the new neighbouring cell
      */
     virtual void AddNeighbourRelation(uint16_t cellId) = 0;
 
     /**
-     * \brief Get the value of *No Remove* field of a neighbouring cell from the
+     * @brief Get the value of *No Remove* field of a neighbouring cell from the
      *        Neighbour Relation Table (NRT).
-     * \param cellId the Physical Cell ID of the neighbouring cell of interest
-     * \return if true, the Neighbour Relation shall *not* be removed from the NRT
+     * @param cellId the Physical Cell ID of the neighbouring cell of interest
+     * @return if true, the Neighbour Relation shall *not* be removed from the NRT
      */
     virtual bool GetNoRemove(uint16_t cellId) const = 0;
 
     /**
-     * \brief Get the value of *No HO* field of a neighbouring cell from the
+     * @brief Get the value of *No HO* field of a neighbouring cell from the
      *        Neighbour Relation Table (NRT).
-     * \param cellId the Physical Cell ID of the neighbouring cell of interest
-     * \return if true, the Neighbour Relation shall *not* be used by the eNodeB
+     * @param cellId the Physical Cell ID of the neighbouring cell of interest
+     * @return if true, the Neighbour Relation shall *not* be used by the eNodeB
      *         for handover reasons
      */
     virtual bool GetNoHo(uint16_t cellId) const = 0;
 
     /**
-     * \brief Get the value of *No X2* field of a neighbouring cell from the
+     * @brief Get the value of *No X2* field of a neighbouring cell from the
      *        Neighbour Relation Table (NRT).
-     * \param cellId the Physical Cell ID of the neighbouring cell of interest
-     * \return if true, the Neighbour Relation shall *not* use an X2 interface in
+     * @param cellId the Physical Cell ID of the neighbouring cell of interest
+     * @return if true, the Neighbour Relation shall *not* use an X2 interface in
      *         order to initiate procedures towards the eNodeB parenting the
      *         target cell
      */
@@ -71,22 +73,22 @@ class NrAnrSapProvider
 }; // end of class NrAnrSapProvider
 
 /**
- * \brief Service Access Point (SAP) offered by the eNodeB RRC instance to the
+ * @brief Service Access Point (SAP) offered by the eNodeB RRC instance to the
  *        ANR instance.
  *
  * This is the *ANR SAP User*, i.e., the part of the SAP that contains the
  * eNodeB RRC methods called by the ANR (Automatic Neighbour Relation) instance.
  */
-class NrAnrSapUser
+class NR_EXPORT NrAnrSapUser
 {
   public:
     virtual ~NrAnrSapUser() = default;
 
     /**
-     * \brief Request a certain reporting configuration to be fulfilled by the UEs
+     * @brief Request a certain reporting configuration to be fulfilled by the UEs
      *        attached to the eNodeB entity.
-     * \param reportConfig the UE measurement reporting configuration
-     * \return the measurement identity associated with this newly added
+     * @param reportConfig the UE measurement reporting configuration
+     * @return the measurement identity associated with this newly added
      *         reporting configuration
      *
      * The eNodeB RRC entity is expected to configure the same reporting
@@ -95,14 +97,14 @@ class NrAnrSapUser
      * configuration, the eNodeB RRC entity shall forward this report to the ANC
      * instance through the NrAnrSapProvider::ReportUeMeas SAP function.
      *
-     * \note This function is only valid before the simulation begins.
+     * @note This function is only valid before the simulation begins.
      */
     virtual uint8_t AddUeMeasReportConfigForAnr(NrRrcSap::ReportConfigEutra reportConfig) = 0;
 
 }; // end of class NrAnrSapUser
 
 /**
- * \brief Template for the implementation of the NrAnrSapProvider as a member
+ * @brief Template for the implementation of the NrAnrSapProvider as a member
  *        of an owner class of type C to which all methods are forwarded.
  */
 template <class C>
@@ -112,7 +114,7 @@ class MemberNrAnrSapProvider : public NrAnrSapProvider
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrAnrSapProvider(C* owner);
 
@@ -173,7 +175,7 @@ MemberNrAnrSapProvider<C>::GetNoX2(uint16_t cellId) const
 }
 
 /**
- * \brief Template for the implementation of the NrAnrSapUser as a member of an
+ * @brief Template for the implementation of the NrAnrSapUser as a member of an
  *        owner class of type C to which all methods are forwarded.
  */
 template <class C>
@@ -183,7 +185,7 @@ class MemberNrAnrSapUser : public NrAnrSapUser
     /**
      * Constructor
      *
-     * \param owner the owner class
+     * @param owner the owner class
      */
     MemberNrAnrSapUser(C* owner);
 

@@ -5,6 +5,9 @@
  *          Mathieu Lacage <mathieu.lacage@sophia.inria.fr>
  */
 
+#ifndef MODEL_NODE_CREATOR_H
+#define MODEL_NODE_CREATOR_H
+
 #include "attribute-iterator.h"
 
 #include <gtk/gtk.h>
@@ -19,13 +22,13 @@ enum
 };
 
 /**
- * \ingroup configstore
- * \brief A class used in the implementation of the GtkConfigStore
+ * @ingroup configstore
+ * @brief A class used in the implementation of the GtkConfigStore
  */
 struct ModelNode
 {
     /**
-     * \brief node type structure
+     * @brief node type structure
      */
     enum
     {
@@ -47,8 +50,8 @@ struct ModelNode
 };
 
 /**
- * \ingroup configstore
- * \brief ModelCreator class
+ * @ingroup configstore
+ * @brief ModelCreator class
  *
  */
 class ModelCreator : public AttributeIterator
@@ -58,7 +61,7 @@ class ModelCreator : public AttributeIterator
 
     /**
      * Allocate attribute tree
-     * \param treestore GtkTreeStore *
+     * @param treestore GtkTreeStore *
      */
     void Build(GtkTreeStore* treestore);
 
@@ -80,7 +83,7 @@ class ModelCreator : public AttributeIterator
     void DoEndVisitArrayItem() override;
     /**
      * Add item to attribute tree
-     * \param node The model node
+     * @param node The model node
      */
     void Add(ModelNode* node);
     /// Remove current tree item
@@ -90,3 +93,5 @@ class ModelCreator : public AttributeIterator
     std::vector<GtkTreeIter*> m_iters; ///< attribute tree item
 };
 } // namespace ns3
+
+#endif // MODEL_NODE_CREATOR_H

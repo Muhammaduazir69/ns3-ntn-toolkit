@@ -1,0 +1,35 @@
+diagram {
+   edge_length = 340;
+   span_height = 18;
+   Ue; SrcGnb; TgtGnb; Mme;
+
+   === Source cell: handover decision ===
+   Ue ->> SrcGnb [label="MeasurementReport (A3 / A2-A4 event)"]
+   SrcGnb => SrcGnb [label="TriggerHandover /\nExecuteHandover"]
+
+   === X2 handover preparation ===
+   SrcGnb ->> TgtGnb [label="X2 HANDOVER REQUEST (HandoverPreparationInfo)"]
+   SrcGnb => SrcGnb [label="state -> HANDOVER_PREPARATION"]
+   TgtGnb => TgtGnb [label="admission;\nAddUe(HANDOVER_JOINING);\nallocate NC-RA preamble;\nbuild HO command"]
+   TgtGnb ->> SrcGnb [label="X2 HANDOVER REQUEST ACK\n(RRCConnectionReconfiguration = HO command,\ntarget ServingCellConfigCommon =>\ninter-numerology re-tune)"]
+   TgtGnb => TgtGnb [label="arm HANDOVER_JOINING timer\n(200 ms)"]
+
+   === Source relays command and forwards data ===
+   SrcGnb ->> Ue [label="RRCConnectionReconfiguration (HO command)"]
+   SrcGnb => SrcGnb [label="state -> HANDOVER_LEAVING;\narm leaving timer (500 ms)"]
+   SrcGnb ->> TgtGnb [label="X2 SN STATUS TRANSFER (AM DRBs)"]
+   SrcGnb ->> TgtGnb [label="X2-U data forwarding\n(buffered at target while JOINING)"]
+
+   === UE re-tunes and accesses the target ===
+   Ue => Ue [label="re-tune target BWP to\ntarget numerology;\n(ReconfigureFromSib1);\nPHY slot re-stamp"]
+   Ue ->> TgtGnb [label="non-contention RACH (dedicated preamble)"]
+   Ue ->> TgtGnb [label="RRCConnectionReconfigurationCompleted"]
+   TgtGnb => TgtGnb [label="state -> HANDOVER_PATH_SWITCH;\ndebuffer to PDCP"]
+
+   === Path switch and source release ===
+   TgtGnb ->> Mme [label="PATH SWITCH REQUEST"]
+   TgtGnb <<- Mme [label="PATH SWITCH REQUEST ACK"]
+   TgtGnb ->> SrcGnb [label="X2 UE CONTEXT RELEASE"]
+   TgtGnb => TgtGnb [label="state -> CONNECTED_NORMALLY\n(HandoverEndOk)"]
+   SrcGnb => SrcGnb [label="RemoveUe\n(cancel leaving timer)"]
+}

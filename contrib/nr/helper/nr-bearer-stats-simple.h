@@ -9,6 +9,7 @@
 
 #include "ns3/basic-data-calculators.h"
 #include "ns3/nr-common.h"
+#include "ns3/nr-export.h"
 #include "ns3/object.h"
 #include "ns3/uinteger.h"
 
@@ -19,18 +20,18 @@ namespace ns3
 {
 
 /*
- * \ingroup helpers
+ * @ingroup helpers
  *
  * Defines the minimum set of functions that RLC or PDC stats class should implement.
  * See also NrBearerStatsSimple and NrBearerStatsSimple.
  */
-class NrBearerStatsBase : public Object
+class NR_EXPORT NrBearerStatsBase : public Object
 {
   public:
     // Inherited from ns3::Object
     /**
      *  Register this type.
-     *  \return The object TypeId.
+     *  @return The object TypeId.
      */
     static TypeId GetTypeId();
     void DoDispose() override;
@@ -93,9 +94,9 @@ class NrBearerStatsBase : public Object
 };
 
 /**
- * \ingroup helpers
+ * @ingroup helpers
  *
- * \brief
+ * @brief
  *
  * This class writes RLC or PDC statistics to separate files:
  *   - DL TX statistics
@@ -103,7 +104,7 @@ class NrBearerStatsBase : public Object
  *   - UL TX statistics
  *   - UL RX statistics
  */
-class NrBearerStatsSimple : public NrBearerStatsBase
+class NR_EXPORT NrBearerStatsSimple : public NrBearerStatsBase
 {
   public:
     /**
@@ -124,7 +125,7 @@ class NrBearerStatsSimple : public NrBearerStatsBase
     // Inherited from ns3::Object
     /**
      *  Register this type.
-     *  \return The object TypeId.
+     *  @return The object TypeId.
      */
     static TypeId GetTypeId();
     void DoDispose() override;

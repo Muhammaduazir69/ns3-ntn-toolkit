@@ -155,7 +155,7 @@ void
 ContactGraphScheduler::Stop()
 {
     m_running = false;
-    if (m_tickEvent.IsRunning())
+    if (m_tickEvent.IsPending())
     {
         Simulator::Cancel(m_tickEvent);
     }

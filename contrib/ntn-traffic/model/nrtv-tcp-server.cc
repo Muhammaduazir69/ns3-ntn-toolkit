@@ -239,7 +239,7 @@ NrtvTcpServer::NewConnectionCreatedCallback(Ptr<Socket> socket, const Address& a
 {
     NS_LOG_FUNCTION(this << socket << address);
 
-    Ptr<NrtvVideoWorker> worker = Create<NrtvVideoWorker>(socket);
+    Ptr<NrtvVideoWorker> worker = CreateObject<NrtvVideoWorker>(socket);
     worker->SetTxCallback(MakeCallback(&NrtvTcpServer::NotifyTxSlice, this));
     worker->SetVideoCompletedCallback(MakeCallback(&NrtvTcpServer::NotifyVideoCompleted, this));
     m_workers[socket] = worker;

@@ -11,16 +11,17 @@
 
 #include "ns3/abort.h"
 
+#include <compare>
 #include <limits>
 
 namespace ns3
 {
 
 /**
- * \ingroup seq-counters
- * \class LollipopCounter
+ * @ingroup seq-counters
+ * @class LollipopCounter
  *
- * \brief Template class implementing a Lollipop counter as defined in \RFC{8505}, \RFC{6550}, and
+ * @brief Template class implementing a Lollipop counter as defined in \RFC{8505}, \RFC{6550}, and
  * [Perlman83].
  *
  * A Lollipop counter is a counter that solves initialization and
@@ -50,7 +51,7 @@ namespace ns3
  * Computer Networks 7: pp. 395-405, DOI 10.1016/0376-5075(83)90034-X, 1983,
  * <https://web.archive.org/web/20180723135334/http://pbg.cs.illinois.edu/courses/cs598fa09/readings/p83.pdf>.
  *
- * \tparam T \explicit The type being used for the counter.
+ * @tparam T @explicit The type being used for the counter.
  */
 template <class T>
 class LollipopCounter
@@ -64,7 +65,7 @@ class LollipopCounter
      */
     LollipopCounter()
     {
-        NS_ABORT_MSG_UNLESS(std::is_unsigned<T>::value,
+        NS_ABORT_MSG_UNLESS(std::is_unsigned_v<T>,
                             "Lollipop counters must be defined on unsigned integer types");
 
         uint16_t numberofDigits = std::numeric_limits<T>::digits;
@@ -78,8 +79,8 @@ class LollipopCounter
      *
      * The Sequence Window is set to the default value.
      *
-     * \param val the initial value of the Lollipop Counter
-     * \tparam T \deduced The type being used for the counter.
+     * @param val the initial value of the Lollipop Counter
+     * @tparam T @deduced The type being used for the counter.
      */
     LollipopCounter(T val)
     {
@@ -92,8 +93,8 @@ class LollipopCounter
     /**
      * Assignment.
      *
-     * \param [in] o Value to assign to this LollipopCounter.
-     * \returns This LollipopCounter.
+     * @param [in] o Value to assign to this LollipopCounter.
+     * @returns This LollipopCounter.
      */
     inline LollipopCounter& operator=(const LollipopCounter& o)
     {
@@ -116,7 +117,7 @@ class LollipopCounter
      * The counter is reset to maxValue - m_sequenceWindow +1, where
      * maxValue is the maximum number allowed by the underlying type.
      *
-     * \param numberOfBits number of bits to use in the Sequence Window
+     * @param numberOfBits number of bits to use in the Sequence Window
      */
     void SetSequenceWindowSize(uint16_t numberOfBits)
     {
@@ -143,8 +144,8 @@ class LollipopCounter
      * Sequence Window is equal to 2^N where N is (by default) half the number
      * of digits of the underlying type.
      *
-     * \param val counter to compare
-     * \returns true if the counters are comparable.
+     * @param val counter to compare
+     * @returns true if the counters are comparable.
      */
     bool IsComparable(const LollipopCounter& val) const
     {
@@ -167,7 +168,7 @@ class LollipopCounter
     /**
      * Checks if a counter is in its starting region.
      *
-     * \returns true if a counter is in its starting region.
+     * @returns true if a counter is in its starting region.
      */
     bool IsInit() const
     {
@@ -176,11 +177,11 @@ class LollipopCounter
 
     /**
      * Arithmetic operator equal-to
-     * \param [in] lhs Left hand argument
-     * \param [in] rhs Right hand argument
-     * \return The result of the operator.
+     * @param [in] lhs Left hand argument
+     * @param [in] rhs Right hand argument
+     * @return The result of the operator.
      */
-    friend bool operator==(const LollipopCounter& lhs, const LollipopCounter& rhs)
+    friend constexpr bool operator==(const LollipopCounter& lhs, const LollipopCounter& rhs)
     {
         NS_ABORT_MSG_IF(lhs.m_sequenceWindow != rhs.m_sequenceWindow,
                         "Can not compare two Lollipop Counters with different sequence windows");
@@ -189,19 +190,25 @@ class LollipopCounter
     }
 
     /**
-     * Arithmetic operator greater-than
-     * \param [in] lhs Left hand argument
-     * \param [in] rhs Right hand argument
-     * \return The result of the operator.
+     * Spaceship comparison operator. All the other comparison operators
+     * are automatically generated from this one.
+     *
+     * Note that the comparison is a ``std::partial_ordering``, as two
+     * lollipop counters could be not comparable, @see IsComparable() for details.
+     *
+     * @param [in] lhs Left hand argument
+     * @param [in] rhs Right hand argument
+     * @returns The result of the comparison.
      */
-    friend bool operator>(const LollipopCounter& lhs, const LollipopCounter& rhs)
+    friend constexpr std::partial_ordering operator<=>(const LollipopCounter& lhs,
+                                                       const LollipopCounter& rhs)
     {
         NS_ABORT_MSG_IF(lhs.m_sequenceWindow != rhs.m_sequenceWindow,
                         "Can not compare two Lollipop Counters with different sequence windows");
 
         if (lhs.m_value == rhs.m_value)
         {
-            return false;
+            return std::partial_ordering::equivalent;
         }
 
         if ((lhs.m_value <= m_circularRegion && rhs.m_value <= m_circularRegion) ||
@@ -213,14 +220,17 @@ class LollipopCounter
             if (absDiff > lhs.m_sequenceWindow)
             {
                 // They are desynchronized - comparison is impossible.
-                // return false because we can not return anything else.
-                return false;
+                return std::partial_ordering::unordered;
             }
 
             // They are synchronized - comparison according to RFC1982.
             T serialRegion = ((m_circularRegion >> 1) + 1);
-            return (((lhs.m_value < rhs.m_value) && ((rhs.m_value - lhs.m_value) > serialRegion)) ||
-                    ((lhs.m_value > rhs.m_value) && ((lhs.m_value - rhs.m_value) < serialRegion)));
+            if (((lhs.m_value < rhs.m_value) && ((rhs.m_value - lhs.m_value) > serialRegion)) ||
+                ((lhs.m_value > rhs.m_value) && ((lhs.m_value - rhs.m_value) < serialRegion)))
+            {
+                return std::partial_ordering::greater;
+            }
+            return std::partial_ordering::less;
         }
 
         // One counter is in the "high" region and the other is in the in the "lower" region
@@ -240,52 +250,30 @@ class LollipopCounter
             difference = rhs.m_value - lhs.m_value;
         }
 
-        T distance = (m_maxValue - difference) +
-                     1; // this is guaranteed to be positive and between [1...m_lollipopMaxValue].
-        if (distance > lhs.m_sequenceWindow)
+        // this is guaranteed to be positive and between [1...m_lollipopMaxValue].
+        T distance = (m_maxValue - difference) + 1;
+        if (distance <= lhs.m_sequenceWindow)
         {
-            return lhsIsHigher;
-        }
-        else
-        {
-            return !lhsIsHigher;
+            lhsIsHigher = !lhsIsHigher;
         }
 
-        // this should never be reached.
-        return false;
-    }
-
-    /**
-     * Arithmetic operator less-than
-     * \param [in] lhs Left hand argument
-     * \param [in] rhs Right hand argument
-     * \return The result of the operator.
-     */
-    friend bool operator<(const LollipopCounter& lhs, const LollipopCounter& rhs)
-    {
-        if (!lhs.IsComparable(rhs))
+        if (lhsIsHigher)
         {
-            return false;
+            return std::partial_ordering::greater;
         }
-
-        if (lhs > rhs || lhs == rhs)
-        {
-            return false;
-        }
-
-        return true;
+        return std::partial_ordering::less;
     }
 
     /**
      * Prefix increment operator
-     * \param [in] val LollipopCounter to be incremented
-     * \return The result of the Prefix increment.
+     * @param [in] val LollipopCounter to be incremented
+     * @return The result of the Prefix increment.
      */
     friend LollipopCounter operator++(LollipopCounter& val) // prefix ++
     {
         val.m_value++;
 
-        if (val.m_value == val.m_circularRegion + 1)
+        if (val.m_value == m_circularRegion + 1)
         {
             val.m_value = 0;
         }
@@ -295,9 +283,9 @@ class LollipopCounter
 
     /**
      * Postfix increment operator
-     * \param [in] val LollipopCounter to be incremented
-     * \param [in] noop ignored argument (used to mark it as a postfix, blame c++).
-     * \return The result of the Postfix increment.
+     * @param [in] val LollipopCounter to be incremented
+     * @param [in] noop ignored argument (used to mark it as a postfix, blame c++).
+     * @return The result of the Postfix increment.
      */
     friend LollipopCounter operator++(LollipopCounter& val, int noop) // postfix ++
     {
@@ -309,7 +297,7 @@ class LollipopCounter
     /**
      * Get the counter value.
      *
-     * \return the counter value.
+     * @return the counter value.
      */
     T GetValue() const
     {
@@ -319,9 +307,9 @@ class LollipopCounter
     /**
      * Output streamer for LollipopCounter.
      *
-     * \param [in,out] os The output stream.
-     * \param [in] counter The LollipopCounter to print.
-     * \returns The stream.
+     * @param [in,out] os The output stream.
+     * @param [in] counter The LollipopCounter to print.
+     * @returns The stream.
      */
     friend std::ostream& operator<<(std::ostream& os, const LollipopCounter& counter)
     {
@@ -338,8 +326,8 @@ class LollipopCounter
      * the smallest circular distance between two numbers.
      *
      * Arithmetic operator.
-     * \param [in] val Counter to compute the difference against
-     * \return The result of the difference.
+     * @param [in] val Counter to compute the difference against
+     * @return The result of the difference.
      */
     T AbsoluteMagnitudeOfDifference(const LollipopCounter& val) const
     {
@@ -365,12 +353,12 @@ class LollipopCounter
 };
 
 /**
- * \ingroup seq-counters
+ * @ingroup seq-counters
  * 8 bit Lollipop Counter.
  */
 typedef LollipopCounter<uint8_t> LollipopCounter8;
 /**
- * \ingroup seq-counters
+ * @ingroup seq-counters
  * 16 bit Lollipop Counter.
  */
 typedef LollipopCounter<uint16_t> LollipopCounter16;

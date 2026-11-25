@@ -21,15 +21,15 @@
 using namespace ns3;
 
 /**
- * \ingroup dhcp
- * \defgroup dhcp-test DHCP module tests
+ * @ingroup dhcp
+ * @defgroup dhcp-test DHCP module tests
  */
 
 /**
- * \ingroup dhcp-test
- * \ingroup tests
+ * @ingroup dhcp-test
+ * @ingroup tests
  *
- * \brief DHCP basic tests
+ * @brief DHCP basic tests
  */
 class DhcpTestCase : public TestCase
 {
@@ -38,8 +38,8 @@ class DhcpTestCase : public TestCase
     ~DhcpTestCase() override;
     /**
      * Triggered by an address lease on a client.
-     * \param context The test name.
-     * \param newAddress The leased address.
+     * @param context The test name.
+     * @param newAddress The leased address.
      */
     void LeaseObtained(std::string context, const Ipv4Address& newAddress);
 
@@ -97,8 +97,8 @@ DhcpTestCase::DoRun()
                                                                       Ipv4Address("172.30.0.10"),
                                                                       Ipv4Address("172.30.0.15"),
                                                                       Ipv4Address("172.30.0.17"));
-    dhcpServerApp.Start(Seconds(0.0));
-    dhcpServerApp.Stop(Seconds(20.0));
+    dhcpServerApp.Start(Seconds(0));
+    dhcpServerApp.Stop(Seconds(20));
 
     DynamicCast<DhcpServer>(dhcpServerApp.Get(0))
         ->AddStaticDhcpEntry(devNet.Get(3)->GetAddress(), Ipv4Address("172.30.0.14"));
@@ -109,8 +109,8 @@ DhcpTestCase::DoRun()
     dhcpClientNetDevs.Add(devNet.Get(3));
 
     ApplicationContainer dhcpClientApps = dhcpHelper.InstallDhcpClient(dhcpClientNetDevs);
-    dhcpClientApps.Start(Seconds(1.0));
-    dhcpClientApps.Stop(Seconds(20.0));
+    dhcpClientApps.Start(Seconds(1));
+    dhcpClientApps.Stop(Seconds(20));
 
     dhcpClientApps.Get(0)->TraceConnect("NewLease",
                                         "0",
@@ -122,7 +122,7 @@ DhcpTestCase::DoRun()
                                         "2",
                                         MakeCallback(&DhcpTestCase::LeaseObtained, this));
 
-    Simulator::Stop(Seconds(21.0));
+    Simulator::Stop(Seconds(21));
 
     Simulator::Run();
 
@@ -145,10 +145,10 @@ DhcpTestCase::DoRun()
 }
 
 /**
- * \ingroup dhcp-test
- * \ingroup tests
+ * @ingroup dhcp-test
+ * @ingroup tests
  *
- * \brief DHCP TestSuite
+ * @brief DHCP TestSuite
  */
 class DhcpTestSuite : public TestSuite
 {

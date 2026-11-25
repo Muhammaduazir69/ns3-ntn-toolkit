@@ -137,6 +137,11 @@ FdNetDevice::GetTypeId()
                             "This is a non-promiscuous trace,",
                             MakeTraceSourceAccessor(&FdNetDevice::m_macRxTrace),
                             "ns3::Packet::TracedCallback")
+            .AddTraceSource("MacRxDrop",
+                            "A packet has been dropped by this device because no "
+                            "protocol handler consumed it.",
+                            MakeTraceSourceAccessor(&FdNetDevice::m_macRxDropTrace),
+                            "ns3::Packet::TracedCallback")
 
             //
             // Trace sources designed to simulate a packet sniffer facility (tcpdump).
@@ -179,7 +184,7 @@ FdNetDevice::DoInitialize()
 {
     NS_LOG_FUNCTION(this);
     Start(m_tStart);
-    if (m_tStop != Seconds(0))
+    if (!m_tStop.IsZero())
     {
         Stop(m_tStop);
     }
@@ -326,12 +331,12 @@ FdNetDevice::ReceiveCallback(uint8_t* buf, ssize_t len)
 }
 
 /**
- * \ingroup fd-net-device
- * \brief Synthesize PI header for the kernel
- * \param buf the buffer to add the header to
- * \param len the buffer length
+ * @ingroup fd-net-device
+ * @brief Synthesize PI header for the kernel
+ * @param buf the buffer to add the header to
+ * @param len the buffer length
  *
- * \todo Consider having a instance member m_packetBuffer and using memmove
+ * @todo Consider having a instance member m_packetBuffer and using memmove
  * instead of memcpy to add the PI header. It might be faster in this case
  * to use memmove and avoid the extra mallocs.
  */
@@ -372,10 +377,10 @@ AddPIHeader(uint8_t*& buf, size_t& len)
 }
 
 /**
- * \ingroup fd-net-device
- * \brief Removes PI header
- * \param buf the buffer to add the header to
- * \param len the buffer length
+ * @ingroup fd-net-device
+ * @brief Removes PI header
+ * @param buf the buffer to add the header to
+ * @param len the buffer length
  */
 static void
 RemovePIHeader(uint8_t*& buf, ssize_t& len)
@@ -539,7 +544,11 @@ FdNetDevice::ForwardUp()
     {
         m_snifferTrace(originalPacket);
         m_macRxTrace(originalPacket);
-        m_rxCallback(this, packet, protocol, source);
+        if (!m_rxCallback(this, packet, protocol, source))
+        {
+            NS_LOG_INFO("Drop packet due to no protocol handler");
+            m_macRxDropTrace(originalPacket);
+        }
     }
 }
 
@@ -712,6 +721,15 @@ uint16_t
 FdNetDevice::GetMtu() const
 {
     return m_mtu;
+}
+
+uint16_t
+FdNetDevice::GetPaddingThreshold() const
+{
+    // All encapsulation modes are Ethernet framings: the peer pads the
+    // data field to 46 octets and this device does not strip the padding
+    // on reception.
+    return 46;
 }
 
 bool

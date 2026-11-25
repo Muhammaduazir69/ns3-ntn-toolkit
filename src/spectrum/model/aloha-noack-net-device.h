@@ -9,17 +9,17 @@
 #ifndef ALOHA_NOACK_NET_DEVICE_H
 #define ALOHA_NOACK_NET_DEVICE_H
 
+#include "ns3/address.h"
+#include "ns3/callback.h"
+#include "ns3/generic-phy.h"
+#include "ns3/mac48-address.h"
+#include "ns3/net-device.h"
+#include "ns3/node.h"
+#include "ns3/nstime.h"
+#include "ns3/packet.h"
+#include "ns3/ptr.h"
 #include "ns3/queue-fwd.h"
-#include <ns3/address.h>
-#include <ns3/callback.h>
-#include <ns3/generic-phy.h>
-#include <ns3/mac48-address.h>
-#include <ns3/net-device.h>
-#include <ns3/node.h>
-#include <ns3/nstime.h>
-#include <ns3/packet.h>
-#include <ns3/ptr.h>
-#include <ns3/traced-callback.h>
+#include "ns3/traced-callback.h"
 
 #include <cstring>
 
@@ -31,7 +31,7 @@ class Channel;
 class SpectrumErrorModel;
 
 /**
- * \ingroup spectrum
+ * @ingroup spectrum
  *
  * This devices implements the following features:
  *  - layer 3 protocol multiplexing
@@ -57,8 +57,8 @@ class AlohaNoackNetDevice : public NetDevice
     };
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -180,6 +180,7 @@ class AlohaNoackNetDevice : public NetDevice
     TracedCallback<Ptr<const Packet>> m_macTxDropTrace;    //!< Tx Drop trace
     TracedCallback<Ptr<const Packet>> m_macPromiscRxTrace; //!< Promiscuous Rx trace
     TracedCallback<Ptr<const Packet>> m_macRxTrace;        //!< Rx trace
+    TracedCallback<Ptr<const Packet>> m_macRxDropTrace;    //!< Rx Drop trace (no protocol handler)
 
     Ptr<Node> m_node;       //!< Node owning this NetDevice
     Ptr<Channel> m_channel; //!< Channel

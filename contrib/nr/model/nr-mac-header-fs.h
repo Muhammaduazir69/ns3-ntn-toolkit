@@ -5,16 +5,17 @@
 #ifndef NR_MAC_HEADER_FS_H
 #define NR_MAC_HEADER_FS_H
 
+#include "ns3/nr-export.h"
 #include "ns3/packet.h"
 
 namespace ns3
 {
 
 /**
- * \ingroup ue-mac
- * \ingroup gnb-mac
+ * @ingroup ue-mac
+ * @ingroup gnb-mac
  *
- * \brief Mac Fixed-Size Header
+ * @brief Mac Fixed-Size Header
  *
  * The header consists of 8 bits, in which the first two are 0, and the last
  * six contains the Logical Channel ID. As the values for LCID are different
@@ -23,7 +24,7 @@ namespace ns3
  *
  * The header representation is as follows:
  *
- * \verbatim
+ * @verbatim
  +-----+-----+-------------------------------------------------+
  |     |     |                                                 |
  |  0  |  0  |                     m_lcId                      |   Oct 1
@@ -41,71 +42,71 @@ namespace ns3
  *
  * <b>Users, don't use this header directly: you've been warned.</b>
  *
- * \internal
+ * @internal
  *
  * The header should be prefixed to some fixed-size data, such as short-bsr.
  */
-class NrMacHeaderFs : public Header
+class NR_EXPORT NrMacHeaderFs : public Header
 {
   public:
     /**
-     * \brief GetTypeId
-     * \return the type id of the object
+     * @brief GetTypeId
+     * @return the type id of the object
      */
     static TypeId GetTypeId();
     /**
-     * \brief GetInstanceTypeId
-     * \return the instance type id
+     * @brief GetInstanceTypeId
+     * @return the instance type id
      */
     TypeId GetInstanceTypeId() const override;
 
     /**
-     * \brief Constructor
+     * @brief Constructor
      */
     NrMacHeaderFs();
 
     /**
-     * \brief Serialize on a buffer
-     * \param start start position
+     * @brief Serialize on a buffer
+     * @param start start position
      */
     void Serialize(Buffer::Iterator start) const override;
     /**
-     * \brief Deserialize from a buffer
-     * \param start start position
-     * \return the number of bytes read from the buffer
+     * @brief Deserialize from a buffer
+     * @param start start position
+     * @return the number of bytes read from the buffer
      */
     uint32_t Deserialize(Buffer::Iterator start) override;
     /**
-     * \brief Get the serialized size
-     * \return 1
+     * @brief Get the serialized size
+     * @return 1
      */
     uint32_t GetSerializedSize() const override;
     /**
-     * \brief Print the struct on a ostream
-     * \param os ostream
+     * @brief Print the struct on a ostream
+     * @param os ostream
      */
     void Print(std::ostream& os) const override;
 
     static const uint8_t PADDING = 63; //!< Padding
 
     /**
-     * \brief Set the LC ID
-     * \param lcId LC ID
+     * @brief Set the LC ID
+     * @param lcId LC ID
      *
      * It will assert if the value is not inside the vector of allowed ones.
      */
     virtual void SetLcId(uint8_t lcId);
 
     /**
-     * \brief Retrieve the LC ID of this header
-     * \return the LC ID
+     * @brief Retrieve the LC ID of this header
+     * @return the LC ID
      */
     uint8_t GetLcId() const;
 
     /**
-     * \brief IsEqual
-     * \param o another instance
-     * \return true if this and o are equal, false otherwise
+     * @brief IsEqual
+     * @param o another instance
+     * @return true if this and o are equal, false otherwise
      */
     bool operator==(const NrMacHeaderFs& o) const;
 

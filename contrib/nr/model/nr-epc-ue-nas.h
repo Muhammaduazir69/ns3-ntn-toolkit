@@ -8,11 +8,14 @@
 #define NR_EPC_UE_NAS_H
 
 #include "nr-as-sap.h"
-#include "nr-epc-tft-classifier.h"
-#include "nr-eps-bearer.h"
+#include "nr-qos-flow.h"
+#include "nr-qos-rule-classifier.h"
 
-#include <ns3/object.h>
-#include <ns3/traced-callback.h>
+#include "ns3/nr-export.h"
+#include "ns3/object.h"
+#include "ns3/traced-callback.h"
+
+#include <map>
 
 namespace ns3
 {
@@ -20,7 +23,7 @@ namespace ns3
 class NrEpcHelper;
 class NetDevice;
 
-class NrEpcUeNas : public Object
+class NR_EXPORT NrEpcUeNas : public Object
 {
     /// allow MemberNrAsSapUser<NrEpcUeNas> class friend access
     friend class MemberNrAsSapUser<NrEpcUeNas>;
@@ -39,82 +42,85 @@ class NrEpcUeNas : public Object
     // inherited from Object
     void DoDispose() override;
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     /**
      *
-     * \param dev the UE NetDevice
+     * @param dev the UE NetDevice
      */
     void SetDevice(Ptr<NetDevice> dev);
 
     /**
      *
      *
-     * \param imsi the unique UE identifier
+     * @param imsi the unique UE identifier
      */
     void SetImsi(uint64_t imsi);
 
     /**
      *
-     * \param csgId Closed Subscriber Group identity
+     * @param csgId Closed Subscriber Group identity
      */
     void SetCsgId(uint32_t csgId);
 
     /**
      *
-     * \return csgId Closed Subscriber Group identity
+     * @return csgId Closed Subscriber Group identity
      */
     uint32_t GetCsgId() const;
 
     /**
      * Set the AS SAP provider to interact with the NAS entity
      *
-     * \param s the AS SAP provider
+     * @param s the AS SAP provider
      */
     void SetAsSapProvider(NrAsSapProvider* s);
 
     /**
      *
      *
-     * \return the AS SAP user exported by this RRC
+     * @return the AS SAP user exported by this RRC
      */
     NrAsSapUser* GetAsSapUser();
 
     /**
      * set the callback used to forward data packets up the stack
      *
-     * \param cb the callback
-     */
-    void SetForwardUpCallback(Callback<void, Ptr<Packet>> cb);
-
-    /**
-     * \brief Causes NAS to tell AS to find a suitable cell and camp to it.
+     * The callback receives the protocol number of an unstructured session, or zero
+     * for an IP session, whose protocol is carried by the packet itself.
      *
-     * \param dlEarfcn the DL frequency of the gNB
+     * @param cb the callback
      */
-    void StartCellSelection(uint32_t dlEarfcn);
+    void SetForwardUpCallback(Callback<void, Ptr<Packet>, uint16_t> cb);
 
     /**
-     * \brief Causes NAS to tell AS to go to ACTIVE state.
+     * @brief Causes NAS to tell AS to find a suitable cell and camp to it.
+     *
+     * @param arfcn the DL frequency of the gNB
+     */
+    void StartCellSelection(uint32_t arfcn);
+
+    /**
+     * @brief Causes NAS to tell AS to go to ACTIVE state.
      *
      * The end result is equivalent with EMM Registered + ECM Connected states.
      */
     void Connect();
 
     /**
-     * \brief Causes NAS to tell AS to camp to a specific cell and go to ACTIVE
+     * @brief Causes NAS to tell AS to camp to a specific cell and go to ACTIVE
      *        state.
-     * \param cellId the id of the gNB to camp on
-     * \param dlEarfcn the DL frequency of the gNB
+     * @param cellId the id of the gNB to camp on
+     * @param arfcn the DL frequency of the gNB
      *
      * The end result is equivalent with EMM Registered + ECM Connected states.
      * Since RRC Idle Mode cell selection is not supported yet, we force the UE
      * RRC to be camped on a specific gNB.
      */
-    void Connect(uint16_t cellId, uint32_t dlEarfcn);
+    void Connect(uint16_t cellId, uint32_t arfcn);
 
     /**
      * instruct the NAS to disconnect
@@ -123,20 +129,24 @@ class NrEpcUeNas : public Object
     void Disconnect();
 
     /**
-     * Activate an EPS bearer
+     * Activate an QoS flow
      *
-     * \param bearer the characteristics of the bearer to be created
-     * \param tft the TFT identifying the traffic that will go on this bearer
+     * @param flow the characteristics of the flow to be created
+     * @param rule the QoS rule identifying the traffic that will go on this flow
      */
-    void ActivateEpsBearer(NrEpsBearer bearer, Ptr<NrEpcTft> tft);
+    void ActivateQosFlow(NrQosFlow flow, Ptr<NrQosRule> rule);
 
     /**
-     * Enqueue an IP packet on the proper bearer for uplink transmission
+     * Enqueue a packet on the proper QoS flow for uplink transmission
      *
-     * \param p the packet
-     * \param protocolNumber the protocol number of the packet
+     * An IPv4 or IPv6 packet is classified by matching the packet filters of
+     * the IP sessions against its header. Any other protocol is dispatched to
+     * the unstructured session activated for that protocol, if there is one.
      *
-     * \return true if successful, false if an error occurred
+     * @param p the packet
+     * @param protocolNumber the protocol number of the packet
+     *
+     * @return true if successful, false if an error occurred
      */
     bool Send(Ptr<Packet> p, uint16_t protocolNumber);
 
@@ -156,15 +166,15 @@ class NrEpcUeNas : public Object
     };
 
     /**
-     * \return The current state
+     * @return The current state
      */
     State GetState() const;
 
     /**
      * TracedCallback signature for state change events.
      *
-     * \param [in] oldState The old State.
-     * \param [in] newState the new State.
+     * @param [in] oldState The old State.
+     * @param [in] newState the new State.
      */
     typedef void (*StateTracedCallback)(const State oldState, const State newState);
 
@@ -176,22 +186,26 @@ class NrEpcUeNas : public Object
     void DoNotifyConnectionFailed();
     /// Notify connection released
     void DoNotifyConnectionReleased();
+    /// Deactivate QosFlow
+    void DoDeactivateQosFlow(uint8_t qfi);
+
     /**
      * Receive data
-     * \param packet the packet
+     * @param packet the packet
+     * @param qfi the QFI of the flow the packet arrived on
      */
-    void DoRecvData(Ptr<Packet> packet);
+    void DoRecvData(Ptr<Packet> packet, uint8_t qfi);
 
     // internal methods
     /**
-     * Activate EPS Bearer
-     * \param bearer the EPS bearer
-     * \param tft the EPC TFT
+     * Activate QoS flow
+     * @param flow the QoS flow
+     * @param rule the QoS rule
      */
-    void DoActivateEpsBearer(NrEpsBearer bearer, Ptr<NrEpcTft> tft);
+    void DoActivateQosFlow(NrQosFlow flow, Ptr<NrQosRule> rule);
     /**
      * Switch the UE RRC to the given state.
-     * \param s the destination state
+     * @param s the destination state
      */
     void SwitchToState(State s);
 
@@ -201,7 +215,7 @@ class NrEpcUeNas : public Object
     /**
      * The `StateTransition` trace source. Fired upon every UE NAS state
      * transition. Exporting old state and new state.
-     * \todo This should be a TracedValue
+     * @todo This should be a TracedValue
      */
     TracedCallback<State, State> m_stateTransitionCallback;
 
@@ -219,26 +233,31 @@ class NrEpcUeNas : public Object
     /// NR SAP user
     NrAsSapUser* m_asSapUser;
 
-    uint8_t m_bidCounter;               ///< bid counter
-    NrEpcTftClassifier m_tftClassifier; ///< tft classifier
+    NrQosRuleClassifier m_qosRuleClassifier; ///< QoS rule classifier
 
-    Callback<void, Ptr<Packet>> m_forwardUpCallback; ///< upward callback
+    /// QFI of the unstructured session carrying each network layer protocol, for uplink dispatch
+    std::map<uint16_t, uint8_t> m_unstructuredQfiByProtocol;
 
-    /// BearerToBeActivated structure
-    struct BearerToBeActivated
+    /// Network layer protocol carried by each unstructured session, for downlink delivery
+    std::map<uint8_t, uint16_t> m_unstructuredProtocolByQfi;
+
+    Callback<void, Ptr<Packet>, uint16_t> m_forwardUpCallback; ///< upward callback
+
+    /// QosFlowToBeActivated structure
+    struct NR_EXPORT QosFlowToBeActivated
     {
-        NrEpsBearer bearer; ///< EPS bearer
-        Ptr<NrEpcTft> tft;  ///< TFT
+        NrQosFlow flow;      ///< QoS flow
+        Ptr<NrQosRule> rule; ///< QoS rule
     };
 
-    std::list<BearerToBeActivated> m_bearersToBeActivatedList; ///< bearers to be activated list
+    std::list<QosFlowToBeActivated> m_qosFlowsToBeActivatedList; ///< QoS flows to be activated list
 
     /**
-     * bearers to be activated list maintained and to be used for reconnecting
+     * QoS flows to be activated list maintained and to be used for reconnecting
      * an out-of-sync UE
      *
      */
-    std::list<BearerToBeActivated> m_bearersToBeActivatedListForReconnection;
+    std::list<QosFlowToBeActivated> m_qosFlowsToBeActivatedListForReconnection;
 };
 
 } // namespace ns3

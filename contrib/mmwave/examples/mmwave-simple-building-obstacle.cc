@@ -60,7 +60,7 @@ main(int argc, char* argv[])
     ueNodes.Create(1);
 
     Ptr<Building> building;
-    building = Create<Building>();
+    building = CreateObject<Building>();
     building->SetBoundaries(Box(20.0, 40.0, 0.0, 20.0, 0.0, 20.0));
     building->SetBuildingType(Building::Residential);
     building->SetExtWallsType(Building::ConcreteWithWindows);

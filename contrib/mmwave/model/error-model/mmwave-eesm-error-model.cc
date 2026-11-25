@@ -68,11 +68,6 @@ MmWaveEesmErrorModel::GetTypeId(void)
     return tid;
 }
 
-TypeId
-MmWaveEesmErrorModel::GetInstanceTypeId() const
-{
-    return MmWaveEesmErrorModel::GetTypeId();
-}
 
 double
 MmWaveEesmErrorModel::SinrEff(const SpectrumValue& sinr,

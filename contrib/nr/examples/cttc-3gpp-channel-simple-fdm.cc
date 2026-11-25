@@ -4,9 +4,9 @@
 
 /**
  *
- * \file cttc-3gpp-channel-simple-fdm.cc
- * \ingroup examples
- * \brief Simple frequency division multiplexing example.
+ * @file cttc-3gpp-channel-simple-fdm.cc
+ * @ingroup examples
+ * @brief Simple frequency division multiplexing example.
  *
  * This example describes how to setup a simple simulation with the frequency
  * division multiplexing. Simulation example allows configuration of the two
@@ -42,15 +42,13 @@
 #include "ns3/antenna-module.h"
 #include "ns3/config-store.h"
 #include "ns3/core-module.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/internet-module.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/log.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
-#include "ns3/nr-eps-bearer-tag.h"
-#include "ns3/nr-helper.h"
 #include "ns3/nr-module.h"
-#include "ns3/nr-point-to-point-epc-helper.h"
 #include "ns3/three-gpp-spectrum-propagation-loss-model.h"
 
 using namespace ns3;
@@ -82,11 +80,11 @@ SendPacket(Ptr<NetDevice> device, Address& addr, uint32_t packetSize)
     Ipv4Header ipHeader;
     pkt->AddHeader(ipHeader);
 
-    // the dedicated bearer that we activate in the simulation
-    // will have bearerId = 2
-    NrEpsBearerTag tag(1, 2);
+    // the dedicated QoS Flow ID that we activate in the simulation
+    // will have QoS Flow ID = 3;
+    NrQosFlowTag tag(1, 3);
     pkt->AddPacketTag(tag);
-    device->Send(pkt, addr, Ipv4L3Protocol::PROT_NUMBER);
+    device->Send(pkt, addr, iana::ieee802numbers::IPV4);
 }
 
 /**
@@ -168,7 +166,6 @@ main(int argc, char* argv[])
     cmd.AddValue("isUll", "Enable Uplink", isUll);
     cmd.Parse(argc, argv);
 
-    int64_t randomStream = 1;
     // Create the scenario
     GridScenarioHelper gridScenario;
     gridScenario.SetRows(1);
@@ -182,18 +179,19 @@ main(int argc, char* argv[])
     gridScenario.SetUtNumber(ueNumPergNb * gNbNum);
     gridScenario.SetScenarioHeight(3); // Create a 3x3 scenario where the UE will
     gridScenario.SetScenarioLength(3); // be distributed.
-    randomStream += gridScenario.AssignStreams(randomStream);
     gridScenario.CreateScenario();
-
-    Config::SetDefault("ns3::NrEpsBearer::Release", UintegerValue(15));
 
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
 
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
     nrHelper->SetEpcHelper(nrEpcHelper);
-
+    // Set the spectrum channel using UMi scenario, default channel condition and 3GPP channel model
+    channelHelper->ConfigureFactories("UMi", "Default", "ThreeGpp");
+    // Disable shadowing
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     // Create one operational band containing one CC with 2 bandwidth parts
     BandwidthPartInfoPtrVector allBwps;
     CcBwpCreator ccBwpCreator;
@@ -202,16 +200,13 @@ main(int argc, char* argv[])
     // Create the configuration for the CcBwpHelper
     CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequencyBand,
                                                    bandwidthBand,
-                                                   numCcPerBand,
-                                                   BandwidthPartInfo::UMi_StreetCanyon_LoS);
+                                                   numCcPerBand);
     bandConf.m_numBwp = 2; // two BWPs per CC
 
     // By using the configuration created, it is time to make the operation band
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    nrHelper->InitializeOperationBand(&band);
+    // Set and create channel for this band
+    channelHelper->AssignChannelsToBands({band});
     allBwps = CcBwpCreator::GetAllBwps({band});
 
     // Beamforming method
@@ -238,36 +233,21 @@ main(int argc, char* argv[])
                                                  UintegerValue(bwpIdForLowLat));
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForVoice));
 
-    // Ue routing between Bearer and bandwidth part
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdForLowLat));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForVoice));
-
     // Install and get the pointers to the NetDevices
     NetDeviceContainer gnbNetDev =
         nrHelper->InstallGnbDevice(gridScenario.GetBaseStations(), allBwps);
     NetDeviceContainer ueNetDev =
         nrHelper->InstallUeDevice(gridScenario.GetUserTerminals(), allBwps);
 
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+    nrHelper->AssignStreams({.scenario = &gridScenario, .gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     // Set the attribute of the netdevice (gnbNetDev.Get (0)) and bandwidth part (0)/(1)
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("Numerology", UintegerValue(numerologyBwp1));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
         ->SetAttribute("Numerology", UintegerValue(numerologyBwp2));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)->SetTxPower(txPowerPerBwp);
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)->SetTxPower(txPowerPerBwp);
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetTxPower(txPowerPerBwp);
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)->SetTxPower(txPowerPerBwp);
 
     InternetStackHelper internet;
     internet.Install(gridScenario.GetUserTerminals());
@@ -283,24 +263,24 @@ main(int argc, char* argv[])
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ueNetDev, gnbNetDev);
 
-    Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpf;
+    Ptr<NrQosRule> rule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpf;
     dlpf.localPortStart = 1234;
     dlpf.localPortEnd = 1235;
-    tft->Add(dlpf);
-    enum NrEpsBearer::Qci q;
+    rule->Add(dlpf);
+    enum NrQosFlow::FiveQi q;
 
     if (isUll)
     {
-        q = NrEpsBearer::NGBR_LOW_LAT_EMBB;
+        q = NrQosFlow::NGBR_LOW_LAT_EMBB;
     }
     else
     {
-        q = NrEpsBearer::GBR_CONV_VOICE;
+        q = NrQosFlow::GBR_CONV_VOICE;
     }
 
-    NrEpsBearer bearer(q);
-    nrHelper->ActivateDedicatedEpsBearer(ueNetDev, bearer, tft);
+    NrQosFlow flow(q);
+    nrHelper->ActivateDedicatedQosFlow(ueNetDev, flow, rule);
 
     Simulator::Schedule(Seconds(0.2), &ConnectPdcpRlcTraces);
 

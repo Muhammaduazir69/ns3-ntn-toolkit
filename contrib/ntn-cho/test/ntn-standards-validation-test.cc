@@ -52,7 +52,7 @@ class Sgp4KeplerTest : public TestCase
 {
   public:
     Sgp4KeplerTest()
-        : TestCase("SGP4 propagation matches Keplerian theory (550 km / 53 deg)")
+        : TestCase("SGP4 propagation matches Keplerian theory (550 km - 53 deg)")
     {
     }
 
@@ -220,7 +220,7 @@ class ElevationSlantRelationTest : public TestCase
 {
   public:
     ElevationSlantRelationTest()
-        : TestCase("spherical elevation/slant relation matches direct geometry")
+        : TestCase("spherical elevation-slant relation matches direct geometry")
     {
     }
 

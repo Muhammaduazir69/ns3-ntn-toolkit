@@ -38,10 +38,186 @@ If a user is not interested in Python, no action is needed; the Python bindings
 are only built on-demand by Cppyy, and only if the user enables them in the
 configuration of |ns3|.
 
-Due to an `upstream limitation with Cppyy <https://github.com/wlav/cppyy/issues/150>`_, Python bindings do not work on macOS machines with Apple silicon (M1 and M2 processors).
-
 Prior to ns-3.37, the previous Python bindings framework was based on
 `Pybindgen <https://github.com/gjcarneiro/pybindgen>`_.
+
+Python virtual environment
+**************************
+
+According to `PEP 668 <https://peps.python.org/pep-0668/>`_ it is a best practice
+to create a virtual environment for each new Python project. This isolates and
+simplifies dependency management. This is done via Python virtual environments (VENV).
+
+Trying to pip install cppyy, required for ns-3 python bindings, system-wide will
+likely result in the following error message:
+
+.. sourcecode:: console
+
+  ~$ pip install cppyy
+  error: externally-managed-environment
+
+  x This environment is externally managed
+  └─> To install Python packages system-wide, try apt install
+      python3-xyz, where xyz is the package you are trying to
+      install.
+
+      If you wish to install a non-Debian-packaged Python package,
+      create a virtual environment using python3 -m venv path/to/venv.
+      Then use path/to/venv/bin/python and path/to/venv/bin/pip. Make
+      sure you have python3-full installed.
+
+      If you wish to install a non-Debian packaged Python application,
+      it may be easiest to use pipx install xyz, which will manage a
+      virtual environment for you. Make sure you have pipx installed.
+
+      See /usr/share/doc/python3.12/README.venv for more information.
+
+  note: If you believe this is a mistake, please contact your Python
+        installation or OS distribution provider. You can override this,
+        at the risk of breaking your Python installation or OS, by
+        passing --break-system-packages.
+  hint: See PEP 668 for the detailed specification.
+
+While it is possible to ignore it via the ``--break-system-packages``
+that can cause packages required by **your operating system to fail**.
+You can check this is actually the case by running pip freeze, which
+will list multiple pip packages installed along the OS.
+
+.. sourcecode:: console
+
+   ~$ pip freeze
+   ...
+   ubuntu-pro-client==8001
+   ...
+
+Therefore, it is recommended you create a virtual environment and use it.
+This can be done with the following command:
+
+.. sourcecode:: console
+
+   ~$ python3 -m venv myEnv
+
+Note: if you don't have venv installed, you will need to install it
+either via the system package manager (e.g. ``apt install python3-venv``),
+or via pip itself (e.g. ``pip install venv``).
+
+After creating the venv, it is necessary to activate it, to properly
+set environment variables that will treat it as the active python installation.
+
+.. sourcecode:: console
+
+   ~$ source ~/myEnv/bin/activate
+   (myEnv) ~$ whereis python
+   python: ~/myEnv/bin/python
+   (myEnv) ~$ pip freeze
+   (myEnv) ~$
+
+From this point onwards, it is assumed all python commands are executed
+from within a virtual environment (venv).
+
+Note: When configuring ns-3 python bindings from source, make sure to
+activate the venv before configuring. The appropriate Python venv will be
+passed to CMake for proper configuration and used by the ns-3 script to
+execute scripts. This includes python scripts called by C++ programs.
+
+Important: Some pip packages can fail to install (for example, due to missing dependencies), as shown below.
+Their dependencies can typically be installed via the system package manager (apt, pacman, apk, etc).
+
+It is also not uncommon for frequently used pip packages, such as ``pygraphviz``, to be distributed
+along with their dependencies via the system package manager (for example, ``python3-pygraphviz``
+in Debian-based distros).
+
+However, a previously created venv will not detect pip packages installed via the package manager,
+unless it is recreated with the ``--system-site-packages flag``, as shown below. The drawback of this
+approach is that all system packages will be exposed, which may lead to version conflicts with packages
+you intend to use. If you use the ``pip freeze`` command to generate the ``requirements.txt`` list of dependencies
+for your environment, unrelated system packages will also be included.
+
+.. sourcecode:: console
+
+   (myEnv) ~$ pip install pygraphviz
+   Collecting pygraphviz
+     Using cached pygraphviz-1.14.tar.gz (106 kB)
+     Installing build dependencies ... done
+     Getting requirements to build wheel ... done
+     Preparing metadata (pyproject.toml) ... done
+   Building wheels for collected packages: pygraphviz
+     Building wheel for pygraphviz (pyproject.toml) ... error
+     error: subprocess-exited-with-error
+
+     | Building wheel for pygraphviz (pyproject.toml) did not run successfully.
+     | exit code: 1
+     --> running bdist_wheel
+         running build
+         running build_py
+         creating build/lib.linux-x86_64-cpython-313/pygraphviz
+         copying pygraphviz/testing.py -> build/lib.linux-x86_64-cpython-313/pygraphviz
+         copying pygraphviz/scraper.py -> build/lib.linux-x86_64-cpython-313/pygraphviz
+         copying pygraphviz/graphviz.py -> build/lib.linux-x86_64-cpython-313/pygraphviz
+         copying pygraphviz/agraph.py -> build/lib.linux-x86_64-cpython-313/pygraphviz
+         copying pygraphviz/__init__.py -> build/lib.linux-x86_64-cpython-313/pygraphviz
+         creating build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_unicode.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_subgraph.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_string.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_scraper.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_repr_mimebundle.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_readwrite.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_node_attributes.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_layout.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_html.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_graph.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_edge_attributes.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_drawing.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_close.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_clear.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/test_attribute_defaults.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         copying pygraphviz/tests/__init__.py -> build/lib.linux-x86_64-cpython-313/pygraphviz/tests
+         running egg_info
+         writing pygraphviz.egg-info/PKG-INFO
+         writing dependency_links to pygraphviz.egg-info/dependency_links.txt
+         writing top-level names to pygraphviz.egg-info/top_level.txt
+         reading manifest file 'pygraphviz.egg-info/SOURCES.txt'
+         reading manifest template 'MANIFEST.in'
+         warning: no files found matching '*.swg'
+         warning: no files found matching '*.png' under directory 'doc'
+         warning: no files found matching '*.html' under directory 'doc'
+         warning: no files found matching '*.txt' under directory 'doc'
+         warning: no files found matching '*.css' under directory 'doc'
+         warning: no previously-included files matching '*~' found anywhere in distribution
+         warning: no previously-included files matching '*.pyc' found anywhere in distribution
+         warning: no previously-included files matching '.svn' found anywhere in distribution
+         no previously-included directories found matching 'doc/build'
+         adding license file 'LICENSE'
+         writing manifest file 'pygraphviz.egg-info/SOURCES.txt'
+         copying pygraphviz/graphviz.i -> build/lib.linux-x86_64-cpython-313/pygraphviz
+         copying pygraphviz/graphviz_wrap.c -> build/lib.linux-x86_64-cpython-313/pygraphviz
+         running build_ext
+         building 'pygraphviz._graphviz' extension
+         creating build/temp.linux-x86_64-cpython-313/pygraphviz
+         x86_64-linux-gnu-gcc -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O2 -Wall -fPIC -DSWIG_PYTHON_STRICT_BYTE_CHAR -I/home/gabriel/ns-3-maintainer/ns3env/include -I/usr/include/python3.13 -c pygraphviz/graphviz_wrap.c -o build/temp.linux-x86_64-cpython-313/pygraphviz/graphviz_wrap.o
+         pygraphviz/graphviz_wrap.c:9:9: warning: "SWIG_PYTHON_STRICT_BYTE_CHAR" redefined
+             9 | #define SWIG_PYTHON_STRICT_BYTE_CHAR
+               |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         <command-line>: note: this is the location of the previous definition
+         pygraphviz/graphviz_wrap.c:3023:10: fatal error: graphviz/cgraph.h: No such file or directory
+          3023 | #include "graphviz/cgraph.h"
+               |          ^~~~~~~~~~~~~~~~~~~
+         compilation terminated.
+         error: command '/usr/bin/x86_64-linux-gnu-gcc' failed with exit code 1
+         [end of output]
+
+     note: This error originates from a subprocess, and is likely not a problem with pip.
+     ERROR: Failed building wheel for pygraphviz
+   Failed to build pygraphviz
+   ERROR: Failed to build installable wheels for some pyproject.toml based projects (pygraphviz)
+   (myEnv) ~$ deactivate
+   ~$ rm -R myEnv
+   ~$ apt install python3-pygraphviz
+   ~$ python3 -m venv --system-site-packages myEnv
+   ~$ source ~/myEnv/bin/activate
+   (myEnv) ~$ pip freeze | grep pygraphviz
+   pygraphviz==1.14
 
 An Example Python Script that Runs |ns3|
 ****************************************
@@ -76,18 +252,18 @@ Here is some example code that is written in Python and that runs |ns3|, which i
   echoServer = ns.UdpEchoServerHelper(9)
 
   serverApps = echoServer.Install(nodes.Get(1))
-  serverApps.Start(ns.Seconds(1.0))
-  serverApps.Stop(ns.Seconds(10.0))
+  serverApps.Start(ns.Seconds(1))
+  serverApps.Stop(ns.Seconds(10))
 
   address = interfaces.GetAddress(1).ConvertTo()
   echoClient = ns.UdpEchoClientHelper(address, 9)
   echoClient.SetAttribute("MaxPackets", ns.UintegerValue(1))
-  echoClient.SetAttribute("Interval", ns.TimeValue(ns.Seconds(1.0)))
+  echoClient.SetAttribute("Interval", ns.TimeValue(ns.Seconds(1)))
   echoClient.SetAttribute("PacketSize", ns.UintegerValue(1024))
 
   clientApps = echoClient.Install(nodes.Get(0))
-  clientApps.Start(ns.Seconds(2.0))
-  clientApps.Stop(ns.Seconds(10.0))
+  clientApps.Start(ns.Seconds(2))
+  clientApps.Stop(ns.Seconds(10))
 
   ns.Simulator.Run()
   ns.Simulator.Destroy()
@@ -97,9 +273,9 @@ Here is some example code that is written in Python and that runs |ns3|, which i
 Running Python Scripts
 **********************
 
-For users that want to change upstream modules in C++ and got a copy of
-ns-3 by Git cloning the ns-3-dev repository, or downloaded the
-ns3-allinone package, or is using bake, continue to the next section.
+For users who want to change upstream modules in C++ and who obtained a copy of
+ns-3 by Git cloning the ns-3-dev repository, or by downloading a released
+source archive, continue to the next section.
 
 `Note: models implemented in Python are not available from C++. If you want
 your model to be available for both C++ and Python users, you must implement
@@ -111,21 +287,20 @@ simple modules in python, jump to the `Using the pip wheel`_ section.
 Using the bindings from the ns-3 source
 =======================================
 
-The main prerequisite is to install `cppyy`, with version 3.1.2.
+The main prerequisite is to install `cppyy`, with version 3.5.0.
 Depending on how you may manage
 Python extensions, the installation instructions may vary, but you can first
 check if it installed by seeing if the `cppyy` module can be
-successfully imported and the version 3.1.2:
+successfully imported and the version 3.5.0:
 
 .. sourcecode:: bash
 
   $ python3
-  Python 3.8.10 (default, Jun 22 2022, 20:18:18)
-  [GCC 9.4.0] on linux
+  Python 3.12.3 (main, Jun 18 2025, 17:59:45) [GCC 13.3.0] on linux
   Type "help", "copyright", "credits" or "license" for more information.
   >>> import cppyy
-  >>> print("%s" % cppyy.__version)
-  3.1.2
+  >>> print("%s" % cppyy.__version__)
+  3.5.0
   >>>
 
 If not, you may try to install via `pip` or whatever other manager you are
@@ -133,7 +308,7 @@ using; e.g.:
 
 .. sourcecode:: bash
 
-  $ python3 -m pip install --user cppyy==3.1.2
+  $ python3 -m pip install --user cppyy==3.5.0
 
 First, we need to enable the build of Python bindings:
 
@@ -177,6 +352,26 @@ To run your own Python script that calls |ns3| and that has this path, ``/path/t
 
   $ ./ns3 shell
   $ python3 /path/to/your/example/my-script.py
+
+
+Debugging bindings build from source in IDEs
+############################################
+
+In many cases, you may want to debug your python script using an IDE.
+To properly configure ns-3 python bindings from source, you will need to do one of two:
+
+1. Setup ``PATH`` and ``PYTHONPATH`` environment variables to point to
+   ``ns-3-dev/build/lib`` and ``ns-3-dev/build/bindings/python`` respectively.
+2. Add the following Python code snipped before importing the ns-3 bindings
+
+.. sourcecode:: python
+
+  import sys
+  # paths assume the current python script (__file__)
+  # is executed from outside the ns-3-dev directory
+  sys.path.append("./ns-3-dev/build/bindings/python")
+  sys.path.append("./ns-3-dev/build/lib")
+  from ns import ns
 
 
 Using the pip wheel
@@ -266,17 +461,17 @@ After installing it, you can start using ns-3 right away. For example, using the
   echoServer = ns.UdpEchoServerHelper(9)
 
   serverApps = echoServer.Install(csmaNodes.Get(0))
-  serverApps.Start(ns.Seconds(1.0))
-  serverApps.Stop(ns.Seconds(10.0))
+  serverApps.Start(ns.Seconds(1))
+  serverApps.Stop(ns.Seconds(10))
 
   echoClient = ns.UdpEchoClientHelper(csmaInterfaces.GetAddress(0).ConvertTo(), 9)
   echoClient.SetAttribute("MaxPackets", ns.UintegerValue(10))
-  echoClient.SetAttribute("Interval", ns.TimeValue(ns.Seconds(1.0)))
+  echoClient.SetAttribute("Interval", ns.TimeValue(ns.Seconds(1)))
   echoClient.SetAttribute("PacketSize", ns.UintegerValue(1024))
 
   clientApps = echoClient.Install(csmaNodes.Get(1))
-  clientApps.Start(ns.Seconds(2.0))
-  clientApps.Stop(ns.Seconds(10.0))
+  clientApps.Start(ns.Seconds(2))
+  clientApps.Stop(ns.Seconds(10))
 
   # Populate routing tables
   ns.Ipv4GlobalRoutingHelper.PopulateRoutingTables()
@@ -388,7 +583,7 @@ no bounds checking in CommandLine::AddValue variant for ``char*``.
 
   cmd = ns.CommandLine(__file__)
   # in the real implementation, the buffer size of 21+1 bytes containing SHORT_STRING_CONTENTS\0 is passed
-  # we use the entire size of the memory contents for demonstration purposses
+  # we use the entire size of the memory contents for demonstration purposes
   cmd.AddValue("shortString", "", shortStringBuffer, 75)
 
   print("Memory contents before the memory corruption")

@@ -1,0 +1,18 @@
+diagram {
+   edge_length = 300;
+   SrcGnb; TgtGnb;
+
+   === Handover preparation ===
+   SrcGnb ->> TgtGnb [label="HANDOVER REQUEST"]
+   SrcGnb <<- TgtGnb [label="HANDOVER REQUEST ACKNOWLEDGE"]
+
+   === SN status transfer + data forwarding ===
+   SrcGnb ->> TgtGnb [label="SN STATUS TRANSFER"]
+   SrcGnb ->> TgtGnb [label="X2-U DATA FORWARDING (GTP-U)"]
+
+   === Completion ===
+   SrcGnb <<- TgtGnb [label="UE CONTEXT RELEASE"]
+
+   === SON primitives (provided, unused by current RRC) ===
+   SrcGnb ->> TgtGnb [label="LOAD INFORMATION /\nRESOURCE STATUS UPDATE"]
+}

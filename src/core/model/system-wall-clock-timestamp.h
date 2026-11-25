@@ -10,8 +10,8 @@
 #define SYSTEM_WALL_CLOCK_TIMESTAMP_H
 
 /**
- * \file
- * \ingroup system
+ * @file
+ * @ingroup system
  * ns3::SystemWallClockTimestamp declaration.
  */
 
@@ -35,19 +35,19 @@ class SystemWallClockTimestamp
 
     /**
      * Get the last time stamp as a string.
-     * \return The last time stamp.
+     * @return The last time stamp.
      */
     std::string ToString() const;
 
     /**
      * Get the last recorded raw value.
-     * \returns The last time stamp recorded.
+     * @returns The last time stamp recorded.
      */
     std::time_t GetLast() const;
 
     /**
      * Get the last recorded interval.
-     * \returns The interval between the last two time stamps.
+     * @returns The interval between the last two time stamps.
      */
     std::time_t GetInterval() const;
 
@@ -57,8 +57,7 @@ class SystemWallClockTimestamp
 
     /** Difference between the two previous time stamps. */
     std::time_t m_diff;
-
-}; // class SystemWallClockTimestamp
+};
 
 } // namespace ns3
 

@@ -5,17 +5,18 @@
 #ifndef SRC_NR_HELPER_NR_MAC_RX_TRACE_H_
 #define SRC_NR_HELPER_NR_MAC_RX_TRACE_H_
 
-#include <ns3/nr-control-messages.h>
-#include <ns3/nr-phy-mac-common.h>
-#include <ns3/object.h>
-#include <ns3/spectrum-value.h>
+#include "ns3/nr-control-messages.h"
+#include "ns3/nr-export.h"
+#include "ns3/nr-phy-mac-common.h"
+#include "ns3/object.h"
+#include "ns3/spectrum-value.h"
 
 #include <iostream>
 
 namespace ns3
 {
 
-class NrMacRxTrace : public Object
+class NR_EXPORT NrMacRxTrace : public Object
 {
   public:
     NrMacRxTrace();
@@ -25,19 +26,21 @@ class NrMacRxTrace : public Object
     /**
      *  Trace sink for Gnb Mac Received Control Messages.
      *
-     * \param [in] frame Frame number.
-     * \param [in] subframe Subframe number.
-     * \param [in] slot number.
-     * \param [in] VarTti
-     * \param [in] nodeId
-     * \param [in] rnti
-     * \param [in] bwpId
-     * \param [in] pointer to msg to get the msg type
+     * @param [in] imsi
+     * @param [in] frame Frame number.
+     * @param [in] subframe Subframe number.
+     * @param [in] slot number.
+     * @param [in] VarTti
+     * @param [in] cellId
+     * @param [in] rnti
+     * @param [in] bwpId
+     * @param [in] pointer to msg to get the msg type
      */
     static void RxedGnbMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
                                            std::string path,
+                                           uint64_t imsi,
                                            SfnSf sfn,
-                                           uint16_t nodeId,
+                                           uint16_t cellId,
                                            uint16_t rnti,
                                            uint8_t bwpId,
                                            Ptr<const NrControlMessage> msg);
@@ -45,19 +48,21 @@ class NrMacRxTrace : public Object
     /**
      *  Trace sink for Gnb Mac Transmitted Control Messages.
      *
-     * \param [in] frame Frame number.
-     * \param [in] subframe Subframe number.
-     * \param [in] slot number.
-     * \param [in] VarTti
-     * \param [in] nodeId
-     * \param [in] rnti
-     * \param [in] bwpId
-     * \param [in] pointer to msg to get the msg type
+     * @param [in] imsi
+     * @param [in] frame Frame number.
+     * @param [in] subframe Subframe number.
+     * @param [in] slot number.
+     * @param [in] VarTti
+     * @param [in] cellId
+     * @param [in] rnti
+     * @param [in] bwpId
+     * @param [in] pointer to msg to get the msg type
      */
     static void TxedGnbMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
                                            std::string path,
+                                           uint64_t imsi,
                                            SfnSf sfn,
-                                           uint16_t nodeId,
+                                           uint16_t cellId,
                                            uint16_t rnti,
                                            uint8_t bwpId,
                                            Ptr<const NrControlMessage> msg);
@@ -65,19 +70,21 @@ class NrMacRxTrace : public Object
     /**
      *  Trace sink for Ue Mac Received Control Messages.
      *
-     * \param [in] frame Frame number.
-     * \param [in] subframe Subframe number.
-     * \param [in] slot number.
-     * \param [in] VarTti
-     * \param [in] nodeId
-     * \param [in] rnti
-     * \param [in] bwpId
-     * \param [in] pointer to msg to get the msg type
+     * @param [in] imsi
+     * @param [in] frame Frame number.
+     * @param [in] subframe Subframe number.
+     * @param [in] slot number.
+     * @param [in] VarTti
+     * @param [in] cellId
+     * @param [in] rnti
+     * @param [in] bwpId
+     * @param [in] pointer to msg to get the msg type
      */
     static void RxedUeMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
                                           std::string path,
+                                          uint64_t imsi,
                                           SfnSf sfn,
-                                          uint16_t nodeId,
+                                          uint16_t cellId,
                                           uint16_t rnti,
                                           uint8_t bwpId,
                                           Ptr<const NrControlMessage> msg);
@@ -85,19 +92,21 @@ class NrMacRxTrace : public Object
     /**
      *  Trace sink for Ue Mac Transmitted Control Messages.
      *
-     * \param [in] frame Frame number.
-     * \param [in] subframe Subframe number.
-     * \param [in] slot number.
-     * \param [in] VarTti
-     * \param [in] nodeId
-     * \param [in] rnti
-     * \param [in] bwpId
-     * \param [in] pointer to msg to get the msg type
+     * @param [in] imsi
+     * @param [in] frame Frame number.
+     * @param [in] subframe Subframe number.
+     * @param [in] slot number.
+     * @param [in] VarTti
+     * @param [in] cellId
+     * @param [in] rnti
+     * @param [in] bwpId
+     * @param [in] pointer to msg to get the msg type
      */
     static void TxedUeMacCtrlMsgsCallback(Ptr<NrMacRxTrace> macStats,
                                           std::string path,
+                                          uint64_t imsi,
                                           SfnSf sfn,
-                                          uint16_t nodeId,
+                                          uint16_t cellId,
                                           uint16_t rnti,
                                           uint8_t bwpId,
                                           Ptr<const NrControlMessage> msg);

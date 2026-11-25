@@ -4,24 +4,25 @@
  * SPDX-License-Identifier: GPL-2.0-only
  */
 
-#include <ns3/abort.h>
-#include <ns3/config.h>
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/double.h>
-#include <ns3/isotropic-antenna-model.h>
-#include <ns3/log.h>
-#include <ns3/mobility-helper.h>
-#include <ns3/node-container.h>
-#include <ns3/pointer.h>
-#include <ns3/simulator.h>
-#include <ns3/string.h>
-#include <ns3/test.h>
-#include <ns3/three-gpp-antenna-model.h>
-#include <ns3/three-gpp-channel-model.h>
-#include <ns3/three-gpp-spectrum-propagation-loss-model.h>
-#include <ns3/two-ray-spectrum-propagation-loss-model.h>
-#include <ns3/uinteger.h>
-#include <ns3/uniform-planar-array.h>
+#include "ns3/abort.h"
+#include "ns3/boolean.h"
+#include "ns3/config.h"
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/double.h"
+#include "ns3/isotropic-antenna-model.h"
+#include "ns3/log.h"
+#include "ns3/mobility-helper.h"
+#include "ns3/node-container.h"
+#include "ns3/pointer.h"
+#include "ns3/simulator.h"
+#include "ns3/string.h"
+#include "ns3/test.h"
+#include "ns3/three-gpp-antenna-model.h"
+#include "ns3/three-gpp-channel-model.h"
+#include "ns3/three-gpp-spectrum-propagation-loss-model.h"
+#include "ns3/two-ray-spectrum-propagation-loss-model.h"
+#include "ns3/uinteger.h"
+#include "ns3/uniform-planar-array.h"
 
 #include <array>
 
@@ -30,7 +31,7 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("TwoRaySplmTestSuite");
 
 /**
- * \ingroup spectrum-tests
+ * @ingroup spectrum-tests
  *
  * Test case for the TwoRaySpectrumPropagationLossModel class.
  *
@@ -58,8 +59,8 @@ class FtrFadingModelAverageTest : public TestCase
 
     /**
      * Compute the average of the FTR squared norm.
-     * \param [in] ftrParams The FTR parameters.
-     * \returns The average of \c N_MEASUREMENTS FTR samples.
+     * @param [in] ftrParams The FTR parameters.
+     * @returns The average of \c N_MEASUREMENTS FTR samples.
      */
     double FtrSquaredNormAverage(
         const TwoRaySpectrumPropagationLossModel::FtrParams& ftrParams) const;
@@ -78,9 +79,9 @@ class FtrFadingModelAverageTest : public TestCase
      * Two-Ray Fading Model for mmWave Communications," 2016 IEEE Globecom Workshops (GC Wkshps) for
      * further details.
      *
-     * \param [in] sigma The sigma parameter of the FTR model.
-     * \param [in] k The k parameter of the FTR model.
-     * \returns The expected mean.
+     * @param [in] sigma The sigma parameter of the FTR model.
+     * @param [in] k The k parameter of the FTR model.
+     * @returns The expected mean.
      */
     constexpr double FtrSquaredNormExpectedMean(double sigma, double k) const;
 
@@ -177,7 +178,7 @@ FtrFadingModelAverageTest::DoRun()
 }
 
 /**
- * \ingroup spectrum-tests
+ * @ingroup spectrum-tests
  *
  * Test case for the TwoRaySpectrumPropagationLossModel class.
  *
@@ -189,15 +190,15 @@ class ArrayResponseTest : public TestCase
   public:
     /**
      * The constructor of the test case
-     * \param txAntElem the antenna element of the TX antenna panel
-     * \param rxAntElem the antenna element of the RX antenna panel
-     * \param txNumAntennas the number of antenna elements of the TX antenna panel
-     * \param rxNumAntennas the number of antenna elements of the RX antenna panel
-     * \param txPosVec the position of the TX
-     * \param rxPosVec the position of the RX
-     * \param txBearing the bearing angle of the TX antenna panel
-     * \param rxBearing the bearing angle of the RX antenna panel
-     * \param expectedGain the theoretically expected gain for the above parameters
+     * @param txAntElem the antenna element of the TX antenna panel
+     * @param rxAntElem the antenna element of the RX antenna panel
+     * @param txNumAntennas the number of antenna elements of the TX antenna panel
+     * @param rxNumAntennas the number of antenna elements of the RX antenna panel
+     * @param txPosVec the position of the TX
+     * @param rxPosVec the position of the RX
+     * @param txBearing the bearing angle of the TX antenna panel
+     * @param rxBearing the bearing angle of the RX antenna panel
+     * @param expectedGain the theoretically expected gain for the above parameters
      */
     ArrayResponseTest(Ptr<AntennaModel> txAntElem,
                       Ptr<AntennaModel> rxAntElem,
@@ -305,8 +306,10 @@ ArrayResponseTest::DoRun()
     rxArray->SetBeamformingVector(rxBfVec);
 
     // Compute the overall array response
-    double gainTxRx = twoRaySplm->CalcBeamformingGain(txPos, rxPos, txArray, rxArray);
-    double gainRxTx = twoRaySplm->CalcBeamformingGain(rxPos, txPos, rxArray, txArray);
+    double gainTxRx =
+        twoRaySplm->CalcBeamformingGain(txPos, rxPos, txArray, rxArray, txBfVec, rxBfVec);
+    double gainRxTx =
+        twoRaySplm->CalcBeamformingGain(rxPos, txPos, rxArray, txArray, rxBfVec, txBfVec);
 
     NS_TEST_EXPECT_MSG_EQ_TOL(gainTxRx, gainRxTx, gainTxRx * TOLERANCE, "gain should be symmetric");
     NS_TEST_EXPECT_MSG_EQ_TOL(10 * log10(gainTxRx),
@@ -316,7 +319,7 @@ ArrayResponseTest::DoRun()
 }
 
 /**
- * \ingroup spectrum-tests
+ * @ingroup spectrum-tests
  *
  * Test case for the TwoRaySpectrumPropagationLossModel class.
  *
@@ -330,12 +333,12 @@ class OverallGainAverageTest : public TestCase
   public:
     /**
      * The constructor of the test case
-     * \param txAntElem the antenna element of the TX antenna panel
-     * \param rxAntElem the antenna element of the RX antenna panel
-     * \param txNumAntennas the number of antenna elements of the TX antenna panel
-     * \param rxNumAntennas the number of antenna elements of the RX antenna panel
-     * \param fc the carrier frequency
-     * \param threeGppScenario the 3GPP scenario
+     * @param txAntElem the antenna element of the TX antenna panel
+     * @param rxAntElem the antenna element of the RX antenna panel
+     * @param txNumAntennas the number of antenna elements of the TX antenna panel
+     * @param rxNumAntennas the number of antenna elements of the RX antenna panel
+     * @param fc the carrier frequency
+     * @param threeGppScenario the 3GPP scenario
      */
     OverallGainAverageTest(Ptr<AntennaModel> txAntElem,
                            Ptr<AntennaModel> rxAntElem,
@@ -347,8 +350,8 @@ class OverallGainAverageTest : public TestCase
     /**
      * Computes the overall power of a PSD
      *
-     * \param psd the PSD
-     * \returns the overall power of the PSD, obtained as the integral of the
+     * @param psd the PSD
+     * @returns the overall power of the PSD, obtained as the integral of the
      *          sub-bands power over the PSD domain
      */
     double ComputePowerSpectralDensityOverallPower(Ptr<const SpectrumValue> psd);
@@ -357,8 +360,8 @@ class OverallGainAverageTest : public TestCase
      * Creates a PSD centered at fc, of bandwidth bw and sub-bands of
      * width rbWidth
      *
-     * \param fc the central frequency of the PSD
-     * \returns a PSD centered at fc, of bandwidth bw and sub-bands of
+     * @param fc the central frequency of the PSD
+     * @returns a PSD centered at fc, of bandwidth bw and sub-bands of
      *          width rbWidths
      */
     Ptr<SpectrumValue> CreateTxPowerSpectralDensity(double fc);
@@ -550,13 +553,20 @@ OverallGainAverageTest::DoRun()
         auto rxBfVec = rxArray->GetBeamformingVector(Angles(txPosVec, rxPosVec));
         rxArray->SetBeamformingVector(rxBfVec);
 
-        auto twoRayRxParams =
-            twoRaySplm->DoCalcRxPowerSpectralDensity(signalParams, txMob, rxMob, txArray, rxArray);
+        auto twoRayRxParams = twoRaySplm->DoCalcRxPowerSpectralDensity(signalParams,
+                                                                       txMob,
+                                                                       rxMob,
+                                                                       txArray,
+                                                                       rxArray,
+                                                                       txBfVec,
+                                                                       rxBfVec);
         auto threeGppRayRxParams = threeGppSplm->DoCalcRxPowerSpectralDensity(signalParams,
                                                                               txMob,
                                                                               rxMob,
                                                                               txArray,
-                                                                              rxArray);
+                                                                              rxArray,
+                                                                              txBfVec,
+                                                                              rxBfVec);
         double twoRayRxPower = ComputePowerSpectralDensityOverallPower(twoRayRxParams->psd);
         double threeGppRxPower = ComputePowerSpectralDensityOverallPower(threeGppRayRxParams->psd);
 
@@ -572,7 +582,7 @@ OverallGainAverageTest::DoRun()
 }
 
 /**
- * \ingroup spectrum-tests
+ * @ingroup spectrum-tests
  *
  * Test suite for the TwoRaySpectrumPropagationLossModel class
  */

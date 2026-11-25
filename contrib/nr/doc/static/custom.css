@@ -44,3 +44,89 @@ body > header > nav #m-navbar-collapse a
 {
   background-color: #375C93;
 }
+
+.wy-nav-content {
+  max-width: min(80%, 1000px);
+}
+
+/* ============================================================
+   5G-LENA / CTTC branding for the Read the Docs theme:
+   muted CTTC purple chrome, tasteful orange accents and links.
+   ============================================================ */
+:root {
+  --lena-purple:       #433b67;   /* muted CTTC purple (chrome) */
+  --lena-purple-deep:  #37304f;   /* active item */
+  --lena-purple-deepest: #251f3a; /* deep (l3/l4) current items */
+  --lena-purple-hover: #4e4577;   /* hover */
+  --lena-orange:       #f56600;   /* CTTC orange (links + accents) */
+  --lena-orange-soft:  #ff8534;
+}
+
+/* ---- Left column: muted purple ---- */
+.wy-nav-side,
+.wy-side-nav-search,
+.wy-menu-vertical li.current,
+.wy-menu-vertical li.current ul,
+.wy-menu-vertical li.toctree-l2.current,
+.wy-menu-vertical li.toctree-l3.current { background: var(--lena-purple); }
+.wy-side-nav-search { color: #fff; }
+.wy-side-nav-search > div.version { color: rgba(255, 255, 255, 0.8); }
+.wy-side-nav-search input[type="text"] { border-color: var(--lena-orange); background: #fff; }
+.wy-side-nav-search img.logo,
+.wy-side-nav-search > a img.logo { max-width: 86%; border-radius: 8px; background: #fff; }
+
+/* ---- Nav menu: light text, thin orange active accent ---- */
+.wy-menu-vertical a,
+.wy-menu-vertical li.current a,
+.wy-menu-vertical li.toctree-l2 a,
+.wy-menu-vertical li.toctree-l3 a,
+.wy-menu-vertical li.toctree-l4 a { color: #d8d4e6; }
+.wy-menu-vertical a:hover,
+.wy-menu-vertical li.current a:hover { background: var(--lena-purple-hover); color: #fff; }
+.wy-menu-vertical li.current > a,
+.wy-menu-vertical li.on a {
+  background: var(--lena-purple-deep); color: #fff; font-weight: 700;
+  border-right: 3px solid var(--lena-orange);
+}
+.wy-menu-vertical p.caption { color: var(--lena-orange); }
+
+/* ---- Current-section highlights: force a dark purple at every depth so the
+   light nav text stays legible. rtd otherwise paints the deeper current items
+   light grey via more-specific selectors (l2.current l3, l3.current l4), so
+   these must be matched at the same specificity. ---- */
+.wy-menu-vertical li.toctree-l2.current > a,
+.wy-menu-vertical li.toctree-l2.current li.toctree-l3 > a,
+.wy-menu-vertical li.toctree-l3.current > a,
+.wy-menu-vertical li.toctree-l3.current li.toctree-l4 > a,
+.wy-menu-vertical li.toctree-l4.current > a {
+  background: var(--lena-purple-deepest);
+  color: #ffffff;
+}
+
+/* ---- Expand/collapse crosses: white so they read against the purple
+   (rtd 3.x renders them as <button>, older versions as <span>) ---- */
+.wy-menu-vertical li button.toctree-expand,
+.wy-menu-vertical li span.toctree-expand,
+.wy-menu-vertical li.current > a button.toctree-expand,
+.wy-menu-vertical li.on a button.toctree-expand,
+.wy-menu-vertical li.current > a span.toctree-expand,
+.wy-menu-vertical li.on a span.toctree-expand { color: #f5f5f5; }
+.wy-menu-vertical li button.toctree-expand:hover,
+.wy-menu-vertical li.current > a:hover button.toctree-expand,
+.wy-menu-vertical li.on a:hover button.toctree-expand,
+.wy-menu-vertical li span.toctree-expand:hover { color: var(--lena-orange); }
+
+/* ---- Mobile top bar ---- */
+.wy-nav-top { background: var(--lena-purple); }
+.wy-nav-top a, .wy-nav-top i { color: #fff; }
+
+/* ---- Body: orange links, muted-purple headings, thin orange rule ---- */
+a, a:visited { color: var(--lena-orange); }
+a:hover { color: var(--lena-orange-soft); }
+.rst-content h1, .rst-content h2, .rst-content h3 { color: var(--lena-purple); }
+.rst-content h1 { border-bottom: 2px solid var(--lena-orange); padding-bottom: 0.15em; }
+.rst-content .note, .rst-content .seealso { border-left: 3px solid var(--lena-orange); }
+.rst-footer-buttons .btn-neutral {
+  background: var(--lena-purple) !important; color: #fff !important; border-color: var(--lena-purple-deep) !important;
+}
+.rst-footer-buttons .btn-neutral:hover { background: var(--lena-purple-hover) !important; }

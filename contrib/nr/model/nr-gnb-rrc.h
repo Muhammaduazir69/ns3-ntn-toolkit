@@ -25,12 +25,14 @@
 #include "nr-handover-management-sap.h"
 #include "nr-mac-sap.h"
 #include "nr-pdcp-sap.h"
+#include "nr-qos-flow.h"
 #include "nr-rrc-sap.h"
 
-#include <ns3/event-id.h>
-#include <ns3/nstime.h>
-#include <ns3/object.h>
-#include <ns3/traced-callback.h>
+#include "ns3/event-id.h"
+#include "ns3/nr-export.h"
+#include "ns3/nstime.h"
+#include "ns3/object.h"
+#include "ns3/traced-callback.h"
 
 #include <map>
 #include <set>
@@ -47,11 +49,11 @@ class NrGnbRrc;
 class Packet;
 
 /**
- * \ingroup nr
+ * @ingroup nr
  * Manages all the radio bearer information possessed by the gNB RRC for a
  * single UE.
  */
-class NrUeManager : public Object
+class NR_EXPORT NrUeManager : public Object
 {
     /// allow NrPdcpSpecificNrPdcpSapUser<NrUeManager> class friend access
     friend class NrPdcpSpecificNrPdcpSapUser<NrUeManager>;
@@ -82,24 +84,33 @@ class NrUeManager : public Object
     /**
      * NrUeManager constructor
      *
-     * \param rrc pointer to the NrGnbRrc holding this NrUeManager
-     * \param rnti RNTI of the UE
-     * \param s initial state of the NrUeManager
-     * \param componentCarrierId primary component carrier ID
+     * @param rrc pointer to the NrGnbRrc holding this NrUeManager
+     * @param rnti RNTI of the UE
+     * @param s initial state of the NrUeManager
+     * @param componentCarrierId primary component carrier ID
      */
     NrUeManager(Ptr<NrGnbRrc> rrc, uint16_t rnti, State s, uint8_t componentCarrierId);
 
     ~NrUeManager() override;
 
-    // inherited from Object
+    /**
+     * @brief Perform post-creation configuration steps
+     *
+     * This method is called after the NrUeManager is created and added
+     * to the NrGnbRrc's UE map.  This method configures the gNB side of
+     * the SRB0 and SRB1, the SAP objects, and propagates some information
+     * to the MAC and PHY layers.
+     */
+    void Configure();
+
   protected:
-    void DoInitialize() override;
+    // inherited from Object
     void DoDispose() override;
 
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -107,15 +118,22 @@ class NrUeManager : public Object
      * Set the identifiers of the source gNB for the case where a UE
      * joins the current gNB as part of a handover procedure
      *
-     * \param sourceCellId
-     * \param sourceX2apId
+     * @param sourceCellId
+     * @param sourceX2apId
      */
     void SetSource(uint16_t sourceCellId, uint16_t sourceX2apId);
 
     /**
+     * @return the cell ID the UE came from when it joined this cell via handover
+     *         (0 if the UE attached directly rather than via handover); used by the
+     *         reversal (ping-pong) handover guard
+     */
+    uint16_t GetSourceCellId() const;
+
+    /**
      * Set the IMSI
      *
-     * \param imsi the IMSI
+     * @param imsi the IMSI
      */
     void SetImsi(uint64_t imsi);
 
@@ -126,17 +144,43 @@ class NrUeManager : public Object
     void InitialContextSetupRequest();
 
     /**
+     * @brief Initialize the SAP objects
+     */
+    void ConfigureSap();
+
+    /**
+     * @brief Initialize the gNB side of SRB0
+     */
+    void ConfigureSrb0();
+
+    /**
+     * @brief Initialize the gNB side of SRB1
+     */
+    void ConfigureSrb1();
+
+    /**
+     * @brief Configure MAC and PHY aspects
+     *
+     * Generate UeUpdateConfigurationReq() towards the MAC, with RNTI and
+     * transmission mode. Generate SetSrsConfigurationIndex() towards
+     * the PHY.  Schedule this NrUeManager instance to be deleted if the
+     * UE does not give any sign of life by the RRC connection request
+     * timeout duration.
+     */
+    void ConfigureMacPhy();
+
+    /**
      * Setup a new data radio bearer, including both the configuration
      * within the gNB and the necessary RRC signaling with the UE
      *
-     * \param bearer the QoS characteristics of the bearer
-     * \param bearerId the EPS bearer identifier
-     * \param gtpTeid S1-bearer GTP tunnel endpoint identifier, see 36.423 9.2.1
-     * \param transportLayerAddress  IP Address of the SGW, see 36.423 9.2.1
+     * @param flow the QoS characteristics of the flow
+     * @param qfi the QoS flow identifier
+     * @param gtpTeid S1-bearer GTP tunnel endpoint identifier, see 36.423 9.2.1
+     * @param transportLayerAddress  IP Address of the SGW, see 36.423 9.2.1
      *
      */
-    void SetupDataRadioBearer(NrEpsBearer bearer,
-                              uint8_t bearerId,
+    void SetupDataRadioBearer(NrQosFlow flow,
+                              uint8_t qfi,
                               uint32_t gtpTeid,
                               Ipv4Address transportLayerAddress);
 
@@ -158,7 +202,7 @@ class NrUeManager : public Object
      *
      * Release a given radio bearer
      *
-     * \param drbid the data radio bearer id of the bearer to be released
+     * @param drbid the data radio bearer id of the bearer to be released
      */
     void ReleaseDataRadioBearer(uint8_t drbid);
 
@@ -171,32 +215,32 @@ class NrUeManager : public Object
     /**
      * Start the handover preparation and send the handover request
      *
-     * \param cellId id of the target cell
+     * @param cellId id of the target cell
      */
     void PrepareHandover(uint16_t cellId);
 
     /**
      * take the necessary actions in response to the reception of an X2 HANDOVER REQUEST ACK message
      *
-     * \param params
+     * @param params
      */
     void RecvHandoverRequestAck(NrEpcX2SapUser::HandoverRequestAckParams params);
 
     /**
      *
-     * \return the HandoverPreparationInfo sent by the source gNB to the
+     * @return the HandoverPreparationInfo sent by the source gNB to the
      * target gNB in the X2-based handover procedure
      */
     NrRrcSap::RadioResourceConfigDedicated GetRadioResourceConfigForHandoverPreparationInfo();
 
     /**
-     * \param componentCarrierId target component carrier ID
+     * @param componentCarrierId target component carrier ID
      *
-     * \return retrieve the data that the target gNB needs to send to the source
+     * @return retrieve the data that the target gNB needs to send to the source
      * gNB as the Handover Command in the X2-based handover
      * procedure.
      *
-     * \note mobility control info is not expected to be filled in
+     * @note mobility control info is not expected to be filled in
      * (shall be filled in by the caller).
      */
     NrRrcSap::RrcConnectionReconfiguration GetRrcConnectionReconfigurationForHandover(
@@ -210,14 +254,14 @@ class NrUeManager : public Object
      * RRC Connection Reconfiguration, the packet is sent through the
      * X2 interface.
      *
-     * \param bid the corresponding EPS Bearer ID
-     * \param p the packet
+     * @param qfi the corresponding QoS flow ID
+     * @param p the packet
      */
-    void SendData(uint8_t bid, Ptr<Packet> p);
+    void SendData(uint8_t qfi, Ptr<Packet> p);
 
     /**
      *
-     * \return a list of ERAB-to-be-setup items to be put in a X2 HO REQ message
+     * @return a list of ERAB-to-be-setup items to be put in a X2 HO REQ message
      */
     std::vector<NrEpcX2Sap::ErabToBeSetupItem> GetErabList();
 
@@ -232,28 +276,28 @@ class NrUeManager : public Object
      * Take the necessary actions in response to the reception of an X2 HO preparation failure
      * message
      *
-     * \param cellId id of the target cell
+     * @param cellId id of the target cell
      */
     void RecvHandoverPreparationFailure(uint16_t cellId);
 
     /**
      * Take the necessary actions in response to the reception of an X2 SN STATUS TRANSFER message
      *
-     * \param params the SN STATUS
+     * @param params the SN STATUS
      */
     void RecvSnStatusTransfer(NrEpcX2SapUser::SnStatusTransferParams params);
 
     /**
      * Take the necessary actions in response to the reception of an X2 UE CONTEXT RELEASE message
      *
-     * \param params the SN STATUS
+     * @param params the SN STATUS
      */
     void RecvUeContextRelease(NrEpcX2SapUser::UeContextReleaseParams params);
 
     /**
      * Take the necessary actions in response to the reception of an X2 UE CONTEXT RELEASE message
      *
-     * \param params the SN STATUS
+     * @param params the SN STATUS
      */
     void RecvHandoverCancel(NrEpcX2SapUser::HandoverCancelParams params);
 
@@ -261,45 +305,45 @@ class NrUeManager : public Object
 
     /**
      * Implement the NrGnbRrcSapProvider::CompleteSetupUe interface.
-     * \param params CompleteSetupUeParameters
+     * @param params CompleteSetupUeParameters
      */
     void CompleteSetupUe(NrGnbRrcSapProvider::CompleteSetupUeParameters params);
     /**
      * Implement the NrGnbRrcSapProvider::RecvRrcConnectionRequest interface.
-     * \param msg the RRC connection request message
+     * @param msg the RRC connection request message
      */
     void RecvRrcConnectionRequest(NrRrcSap::RrcConnectionRequest msg);
     /**
      * Implement the NrGnbRrcSapProvider::RecvRrcConnectionSetupCompleted interface.
-     * \param msg RRC connection setup completed message
+     * @param msg RRC connection setup completed message
      */
     void RecvRrcConnectionSetupCompleted(NrRrcSap::RrcConnectionSetupCompleted msg);
     /**
      * Implement the NrGnbRrcSapProvider::RecvRrcConnectionReconfigurationCompleted interface.
-     * \param msg RRC connection reconfiguration completed message
+     * @param msg RRC connection reconfiguration completed message
      */
     void RecvRrcConnectionReconfigurationCompleted(
         NrRrcSap::RrcConnectionReconfigurationCompleted msg);
     /**
      * Implement the NrGnbRrcSapProvider::RecvRrcConnectionReestablishmentRequest interface.
-     * \param msg the RRC connection reestablishment request message
+     * @param msg the RRC connection reestablishment request message
      */
     void RecvRrcConnectionReestablishmentRequest(NrRrcSap::RrcConnectionReestablishmentRequest msg);
     /**
      * Implement the NrGnbRrcSapProvider::RecvRrcConnectionReestablishmentComplete interface.
-     * \param msg the RRC connection reestablsihment complete message
+     * @param msg the RRC connection reestablsihment complete message
      */
     void RecvRrcConnectionReestablishmentComplete(
         NrRrcSap::RrcConnectionReestablishmentComplete msg);
     /**
      * Implement the NrGnbRrcSapProvider::RecvMeasurementReport interface.
-     * \param msg the measrurement report
+     * @param msg the measrurement report
      */
     void RecvMeasurementReport(NrRrcSap::MeasurementReport msg);
     /**
      * Implement the NrGnbRrcSapProvider::RecvIdealUeContextRemoveRequest interface.
      *
-     * \param rnti the C-RNTI identifying the user
+     * @param rnti the C-RNTI identifying the user
      */
     void RecvIdealUeContextRemoveRequest(uint16_t rnti);
 
@@ -307,7 +351,7 @@ class NrUeManager : public Object
 
     /**
      * CMAC UE config update indication function
-     * \param cmacParams the UE config parameters
+     * @param cmacParams the UE config parameters
      */
     void CmacUeConfigUpdateInd(NrGnbCmacSapUser::UeConfig cmacParams);
 
@@ -315,53 +359,90 @@ class NrUeManager : public Object
 
     /**
      * Receive PDCP SDU function
-     * \param params the receive PDCP SDU parameters
+     * @param params the receive PDCP SDU parameters
      */
     void DoReceivePdcpSdu(NrPdcpSapUser::ReceivePdcpSduParameters params);
 
     /**
      *
-     * \return the RNTI, i.e., an UE identifier that is unique within
+     * @return the RNTI, i.e., an UE identifier that is unique within
      * the cell
      */
     uint16_t GetRnti() const;
 
     /**
      *
-     * \return the IMSI, i.e., a globally unique UE identifier
+     * @return the IMSI, i.e., a globally unique UE identifier
      */
     uint64_t GetImsi() const;
 
     /**
      *
-     * \return the primary component carrier ID
+     * @return the primary component carrier ID
      */
     uint8_t GetComponentCarrierId() const;
 
     /**
+     * @brief Set the UE's current primary (serving) BWP/CC index.
      *
-     * \return the SRS Configuration Index
+     * Called when the UE reports a same-cell primary-BWP switch. It records the
+     * new primary BWP and re-points the UE's DL scheduling to it (via the
+     * component-carrier manager), so downlink data follows the UE to the new
+     * BWP. Same-cell only: the cellId is unchanged.
+     *
+     * @param bwpId the new primary BWP/CC index.
+     */
+    void SetPrimaryBwp(uint8_t bwpId);
+
+    /**
+     * @return the UE's current primary (serving) BWP/CC index.
+     */
+    uint8_t GetPrimaryBwp() const;
+
+    /**
+     *
+     * @return the SRS Configuration Index
      */
     uint16_t GetSrsConfigurationIndex() const;
 
     /**
+     *
+     * @return the SRB0 signaling radio bearer info
+     */
+    Ptr<NrSignalingRadioBearerInfo> GetSrb0() const;
+
+    /**
      * Set the SRS configuration index and do the necessary reconfiguration
      *
-     * \param srsConfIndex
+     * @param srsConfIndex
      */
     void SetSrsConfigurationIndex(uint16_t srsConfIndex);
 
     /**
      *
-     * \return the current state
+     * @return the current state
      */
     State GetState() const;
+
+    /**
+     * @return the simulation time at which the UE last entered CONNECTED_NORMALLY
+     *         (initial connection or handover completion) on this cell; used by the
+     *         minimum-time-of-stay handover guard
+     */
+    Time GetConnectedNormallyAt() const;
+
+    /**
+     * Get the state transition trace source.
+     *
+     * @return the trace source
+     */
+    ns3::TracedCallback<uint64_t, uint16_t, uint16_t, State, State> GetStateTransitionTrace() const;
 
     /**
      * Configure PdschConfigDedicated (i.e. P_A value) for UE and start RrcConnectionReconfiguration
      * to inform UE about new PdschConfigDedicated
      *
-     * \param pdschConfigDedicated new pdschConfigDedicated (i.e. P_A value) to be set
+     * @param pdschConfigDedicated new pdschConfigDedicated (i.e. P_A value) to be set
      */
     void SetPdschConfigDedicated(NrRrcSap::PdschConfigDedicated pdschConfigDedicated);
 
@@ -372,32 +453,41 @@ class NrUeManager : public Object
     void CancelPendingEvents();
 
     /**
-     *  \brief This function acts as an interface to trigger the connection
+     *  @brief This function acts as an interface to trigger the connection
      *  release towards gNB, EPC and UE.
      *
      */
     void SendRrcConnectionRelease();
 
     /**
-     * \brief build handover preparation failure message
-     * \return the handover preparation failure message.
+     * @brief build handover preparation failure message
+     * @return the handover preparation failure message.
      */
     NrEpcX2Sap::HandoverPreparationFailureParams BuildHoPrepFailMsg();
 
     /**
-     * \brief build handover cancel message
-     * \return the handover cancel message.
+     * @brief build handover cancel message
+     * @return the handover cancel message.
      */
     NrEpcX2Sap::HandoverCancelParams BuildHoCancelMsg();
 
     /**
+     * @brief Starts the handover joining timer for the UE.
+     * This method schedules the handover joining timeout event if the UE is in the HANDOVER_JOINING
+     * state. The timer is set to expire after the duration specified by
+     * m_handoverJoiningTimeoutDuration. Upon expiration, the HandoverJoiningTimeout callback
+     * is invoked on the gNB RRC with the UE's RNTI.
+     */
+    void StartHandoverJoiningTimer();
+
+    /**
      * TracedCallback signature for state transition events.
      *
-     * \param [in] imsi
-     * \param [in] cellId
-     * \param [in] rnti
-     * \param [in] oldState
-     * \param [in] newState
+     * @param [in] imsi
+     * @param [in] cellId
+     * @param [in] rnti
+     * @param [in] oldState
+     * @param [in] newState
      */
     typedef void (*StateTracedCallback)(const uint64_t imsi,
                                         const uint16_t cellId,
@@ -409,94 +499,52 @@ class NrUeManager : public Object
     /**
      * Add a new NrDataRadioBearerInfo structure to the NrUeManager
      *
-     * \param radioBearerInfo
+     * @param radioBearerInfo
      *
-     * \return the id of the newly added data radio bearer structure
+     * @return the id of the newly added data radio bearer structure
      */
     uint8_t AddDataRadioBearerInfo(Ptr<NrDataRadioBearerInfo> radioBearerInfo);
 
     /**
-     * \param drbid the Data Radio Bearer id
+     * @param drbid the Data Radio Bearer id
      *
-     * \return the corresponding NrDataRadioBearerInfo
+     * @return the corresponding NrDataRadioBearerInfo
      */
     Ptr<NrDataRadioBearerInfo> GetDataRadioBearerInfo(uint8_t drbid);
 
     /**
      * remove the NrDataRadioBearerInfo corresponding to a bearer being released
      *
-     * \param drbid the Data Radio Bearer id
+     * @param drbid the Data Radio Bearer id
      */
     void RemoveDataRadioBearerInfo(uint8_t drbid);
 
     /**
      *
-     * \return an RrcConnectionReconfiguration struct built based on the
+     * @return an RrcConnectionReconfiguration struct built based on the
      * current configuration
      */
     NrRrcSap::RrcConnectionReconfiguration BuildRrcConnectionReconfiguration();
 
     /**
      *
-     * \return an NonCriticalExtensionConfiguration struct built based on the
+     * @return an NonCriticalExtensionConfiguration struct built based on the
      * current configuration
      */
     NrRrcSap::NonCriticalExtensionConfiguration BuildNonCriticalExtensionConfigurationCa();
 
     /**
      *
-     * \return a RadioResourceConfigDedicated struct built based on the
+     * @return a RadioResourceConfigDedicated struct built based on the
      * current configuration
      */
     NrRrcSap::RadioResourceConfigDedicated BuildRadioResourceConfigDedicated();
 
     /**
      *
-     * \return a newly allocated identifier for a new RRC transaction
+     * @return a newly allocated identifier for a new RRC transaction
      */
     uint8_t GetNewRrcTransactionIdentifier();
-
-    /**
-     * \param lcid a Logical Channel Identifier
-     *
-     * \return the corresponding Data Radio Bearer Id
-     */
-    uint8_t Lcid2Drbid(uint8_t lcid);
-
-    /**
-     * \param drbid a Data Radio Bearer Id
-     *
-     * \return the corresponding  Logical Channel Identifier
-     */
-    uint8_t Drbid2Lcid(uint8_t drbid);
-
-    /**
-     * \param lcid a  Logical Channel Identifier
-     *
-     * \return the corresponding EPS Bearer Identifier
-     */
-    uint8_t Lcid2Bid(uint8_t lcid);
-
-    /**
-     * \param bid  an EPS Bearer Identifier
-     *
-     * \return the corresponding Logical Channel Identifier
-     */
-    uint8_t Bid2Lcid(uint8_t bid);
-
-    /**
-     * \param drbid Data Radio Bearer Id
-     *
-     * \return the corresponding EPS Bearer Identifier
-     */
-    uint8_t Drbid2Bid(uint8_t drbid);
-
-    /**
-     * \param bid an EPS Bearer Identifier
-     *
-     * \return the corresponding Data Radio Bearer Id
-     */
-    uint8_t Bid2Drbid(uint8_t bid);
 
     /**
      * Send a data packet over the appropriate Data Radio Bearer.
@@ -504,15 +552,15 @@ class NrUeManager : public Object
      * or when the RRC Connection Reconfiguration Complete message
      * is received and the packets are debuffered.
      *
-     * \param bid the corresponding EPS Bearer ID
-     * \param p the packet
+     * @param qfi the corresponding QoS flow ID
+     * @param p the packet
      */
-    void SendPacket(uint8_t bid, Ptr<Packet> p);
+    void SendPacket(uint8_t qfi, Ptr<Packet> p);
 
     /**
      * Switch the NrUeManager to the given state
      *
-     * \param s the given state
+     * @param s the given state
      */
     void SwitchToState(State s);
 
@@ -547,13 +595,24 @@ class NrUeManager : public Object
      */
     uint8_t m_componentCarrierId;
 
+    /**
+     * UE's current primary (serving) BWP/CC index for downlink. Initialized to
+     * #m_componentCarrierId and updated by SetPrimaryBwp when the UE reports a
+     * same-cell primary-BWP switch. Used to route the UE's DL scheduling to the
+     * BWP it is actually listening on.
+     */
+    uint8_t m_primaryBwpId;
+
     uint8_t m_lastRrcTransactionIdentifier; ///< last RRC transaction identifier
 
     NrRrcSap::PhysicalConfigDedicated m_physicalConfigDedicated; ///< physical config dedicated
-    /// Pointer to the parent eNodeB RRC.
+    /// Pointer to the parent gNB RRC.
     Ptr<NrGnbRrc> m_rrc;
     /// The current NrUeManager state.
     State m_state;
+    /// Time the UE last entered CONNECTED_NORMALLY on this cell (initial connection or
+    /// handover completion); used by the minimum-time-of-stay handover guard.
+    Time m_connectedNormallyAt{Seconds(0)};
 
     NrPdcpSapUser* m_drbPdcpSapUser; ///< DRB PDCP SAP user
 
@@ -622,7 +681,7 @@ class NrUeManager : public Object
 
     /**
      * Packet buffer for when UE is doing the handover.
-     * The packets are stored with the bid (bearer ID).
+     * The packets are stored with the QFI (QoS Flow ID).
      *
      * Source gNB starts forwarding data to target gNB through the X2 interface
      * when it sends RRC Connection Reconfiguration to the UE.
@@ -631,14 +690,37 @@ class NrUeManager : public Object
      */
     std::list<std::pair<uint8_t, Ptr<Packet>>> m_packetBuffer;
 
+    // Deferred handover support
+    // A handover request may arrive while the UE is still in
+    // CONNECTION_SETUP (e.g. when the test schedules it at a fixed time).
+    // We store the target cell here and trigger PrepareHandover() as soon
+    // as RecvRrcConnectionSetupCompleted() moves us to CONNECTED_NORMALLY.
+    // 0 means no pending handover.
+    uint16_t m_pendingHandoverTargetCellId{0};
+
 }; // end of `class NrUeManager`
 
 /**
- * \ingroup nr
+ * Converts NrUeManager::State to a string
+ * @param state enum value of the state
+ * @return string value of the state
+ */
+NR_EXPORT const std::string ToString(NrUeManager::State state);
+
+/**
+ * Prints to the output stream the NrUeManager::State
+ * @param os output stream
+ * @param state the enum value of the state
+ * @return the output stream
+ */
+NR_EXPORT std::ostream& operator<<(std::ostream& os, NrUeManager::State state);
+
+/**
+ * @ingroup nr
  *
  * The NR Radio Resource Control entity at the gNB
  */
-class NrGnbRrc : public Object
+class NR_EXPORT NrGnbRrc : public Object
 {
     /// allow GnbRrcMemberNrGnbCmacSapUser class friend access
     friend class GnbRrcMemberNrGnbCmacSapUser;
@@ -675,61 +757,61 @@ class NrGnbRrc : public Object
 
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     /**
      * Set the X2 SAP this RRC should interact with
-     * \param s the X2 SAP Provider to be used by this RRC entity
+     * @param s the X2 SAP Provider to be used by this RRC entity
      */
     void SetEpcX2SapProvider(NrEpcX2SapProvider* s);
 
     /**
      * Get the X2 SAP offered by this RRC
-     * \return s the X2 SAP User interface offered to the X2 entity by this RRC entity
+     * @return s the X2 SAP User interface offered to the X2 entity by this RRC entity
      */
     NrEpcX2SapUser* GetEpcX2SapUser();
 
     /**
      * set the CMAC SAP this RRC should interact with
      *
-     * \param s the CMAC SAP Provider to be used by this RRC
+     * @param s the CMAC SAP Provider to be used by this RRC
      */
     void SetNrGnbCmacSapProvider(NrGnbCmacSapProvider* s);
 
     /**
      * set the CMAC SAP this RRC should interact with
      *
-     * \param s the CMAC SAP Provider to be used by this RRC
-     * \param pos the position
+     * @param s the CMAC SAP Provider to be used by this RRC
+     * @param pos the position
      */
     void SetNrGnbCmacSapProvider(NrGnbCmacSapProvider* s, uint8_t pos);
 
     /**
      * Get the CMAC SAP offered by this RRC
-     * \returns the CMAC SAP User interface offered to the MAC by this RRC
+     * @returns the CMAC SAP User interface offered to the MAC by this RRC
      */
     NrGnbCmacSapUser* GetNrGnbCmacSapUser();
 
     /**
      * Get the CMAC SAP offered by this RRC
-     * \param pos the position
-     * \returns the CMAC SAP User interface offered to the MAC by this RRC
+     * @param pos the position
+     * @returns the CMAC SAP User interface offered to the MAC by this RRC
      */
     NrGnbCmacSapUser* GetNrGnbCmacSapUser(uint8_t pos);
 
     /**
      * set the Handover Management SAP this RRC should interact with
      *
-     * \param s the Handover Management SAP Provider to be used by this RRC
+     * @param s the Handover Management SAP Provider to be used by this RRC
      */
     void SetNrHandoverManagementSapProvider(NrHandoverManagementSapProvider* s);
 
     /**
      * Get the Handover Management SAP offered by this RRC
-     * \returns the Handover Management SAP User interface offered to the
+     * @returns the Handover Management SAP User interface offered to the
      *           handover algorithm by this RRC
      */
     NrHandoverManagementSapUser* GetNrHandoverManagementSapUser();
@@ -737,13 +819,13 @@ class NrGnbRrc : public Object
     /**
      * set the Component Carrier Management SAP this RRC should interact with
      *
-     * \param s the Component Carrier Management SAP Provider to be used by this RRC
+     * @param s the Component Carrier Management SAP Provider to be used by this RRC
      */
     void SetNrCcmRrcSapProvider(NrCcmRrcSapProvider* s);
 
     /**
      * Get the Component Carrier Management SAP offered by this RRC
-     * \return s the Component Carrier Management SAP User interface offered to the
+     * @return s the Component Carrier Management SAP User interface offered to the
      *           carrier component selection algorithm by this RRC
      */
     NrCcmRrcSapUser* GetNrCcmRrcSapUser();
@@ -751,13 +833,13 @@ class NrGnbRrc : public Object
     /**
      * set the ANR SAP this RRC should interact with
      *
-     * \param s the ANR SAP Provider to be used by this RRC
+     * @param s the ANR SAP Provider to be used by this RRC
      */
     void SetNrAnrSapProvider(NrAnrSapProvider* s);
 
     /**
      * Get the ANR SAP offered by this RRC
-     * \return s the ANR SAP User interface offered to the ANR instance by this
+     * @return s the ANR SAP User interface offered to the ANR instance by this
      *           RRC
      */
     NrAnrSapUser* GetNrAnrSapUser();
@@ -765,14 +847,28 @@ class NrGnbRrc : public Object
     /**
      * set the RRC SAP this RRC should interact with
      *
-     * \param s the RRC SAP User to be used by this RRC
+     * @param s the RRC SAP User to be used by this RRC
      */
     void SetNrGnbRrcSapUser(NrGnbRrcSapUser* s);
 
     /**
+     * Get the RRC SAP user interface offered by this RRC.
+     *
+     * @return s the RRC SAP User interface offered by this RRC
+     */
+    NrGnbRrcSapUser* GetNrGnbRrcSapUser();
+
+    /**
+     * @brief Get the RxRrcConnectionReconfigurationCompleted trace source.
+     *
+     * @return the trace source
+     */
+    ns3::TracedCallback<uint16_t> GetRxRrcConnectionReconfigurationCompletedTrace() const;
+
+    /**
      *
      *
-     * \return s the RRC SAP Provider interface offered to the MAC by this RRC
+     * @return s the RRC SAP Provider interface offered to the MAC by this RRC
      */
     NrGnbRrcSapProvider* GetNrGnbRrcSapProvider();
 
@@ -780,7 +876,7 @@ class NrGnbRrc : public Object
      * set the MAC SAP provider. The gNB RRC does not use this
      * directly, but it needs to provide it to newly created RLC instances.
      *
-     * \param s the MAC SAP provider that will be used by all
+     * @param s the MAC SAP provider that will be used by all
      * newly created RLC instances
      */
     void SetNrMacSapProvider(NrMacSapProvider* s);
@@ -788,83 +884,112 @@ class NrGnbRrc : public Object
     /**
      * Set the S1 SAP Provider
      *
-     * \param s the S1 SAP Provider
+     * @param s the S1 SAP Provider
      */
     void SetS1SapProvider(NrEpcGnbS1SapProvider* s);
 
     /**
      *
-     * \return the S1 SAP user
+     * @return the S1 SAP user
      */
     NrEpcGnbS1SapUser* GetS1SapUser();
 
     /**
      * set the CPHY SAP this RRC should use to interact with the PHY
      *
-     * \param s the CPHY SAP Provider
+     * @param s the CPHY SAP Provider
      */
     void SetNrGnbCphySapProvider(NrGnbCphySapProvider* s);
 
     /**
      * set the CPHY SAP this RRC should use to interact with the PHY
      *
-     * \param s the CPHY SAP Provider
-     * \param pos the position
+     * @param s the CPHY SAP Provider
+     * @param pos the position
      */
     void SetNrGnbCphySapProvider(NrGnbCphySapProvider* s, uint8_t pos);
 
     /**
      *
      *
-     * \return s the CPHY SAP User interface offered to the PHY by this RRC
+     * @return s the CPHY SAP User interface offered to the PHY by this RRC
      */
     NrGnbCphySapUser* GetNrGnbCphySapUser();
 
     /**
      * Get the gNB CPhy SAP user
      *
-     * \param pos the position
-     * \return s the CPHY SAP User interface offered to the PHY by this RRC
+     * @param pos the position
+     * @return s the CPHY SAP User interface offered to the PHY by this RRC
      */
     NrGnbCphySapUser* GetNrGnbCphySapUser(uint8_t pos);
 
     /**
      *
      *
-     * \param rnti the identifier of an UE
+     * @param rnti the identifier of an UE
      *
-     * \return true if the corresponding NrUeManager instance exists
+     * @return true if the corresponding NrUeManager instance exists
      */
     bool HasUeManager(uint16_t rnti) const;
 
     /**
      *
      *
-     * \param rnti the identifier of an UE
+     * @param rnti the identifier of an UE
      *
-     * \return the corresponding NrUeManager instance
+     * @return the corresponding NrUeManager instance
      */
     Ptr<NrUeManager> GetUeManager(uint16_t rnti);
 
     /**
-     * \brief Add a new UE measurement reporting configuration
-     * \param config the new reporting configuration
-     * \return the measurement IDs (measId) referring to the newly added
+     * Get all UE managers managed by this RRC.
+     *
+     * @return map of RNTI to NrUeManager instances
+     */
+    std::map<uint16_t, Ptr<NrUeManager>> GetUeMap() const;
+
+    /**
+     * @brief Add a new UE measurement reporting configuration
+     * @param config the new reporting configuration
+     * @return the measurement IDs (measId) referring to the newly added
      *         reporting configuration
      *
-     * Assuming intra-frequency environment, the new measurement reporting
-     * configuration will be automatically associated to measurement
-     * objects corresponding to serving cell frequencies.
+     * The new measurement reporting configuration is automatically associated
+     * to all configured measurement objects, i.e. both the serving cell
+     * frequencies and any neighbour frequencies previously registered through
+     * `NrGnbRrc::AddNeighbourMeasFrequency`. This enables both intra-frequency
+     * and inter-frequency measurement reporting (and thus handover).
      *
      * Can only be called before the start of simulation.
      */
     std::vector<uint8_t> AddUeMeasReportConfig(NrRrcSap::ReportConfigEutra config);
 
     /**
-     * \brief Configure cell-specific parameters.
+     * @brief Register a neighbour frequency for inter-frequency measurements.
+     *
+     * Registers an additional carrier frequency (ARFCN) belonging to a
+     * neighbour cell that does not match any of this gNB's own component
+     * carriers. A dedicated measurement object is created for it in
+     * `NrGnbRrc::ConfigureCell`, so that a connected UE can measure and be
+     * handed over to cells operating on that frequency (inter-frequency and,
+     * by extension, inter-numerology handover).
+     *
+     * Must be called before `NrGnbRrc::ConfigureCell` (i.e. before the gNB
+     * NetDevice is installed) and before the simulation starts. Frequencies
+     * already covered by this gNB's own carriers are silently ignored.
+     *
+     * @param arfcn the neighbour carrier frequency (ARFCN)
+     * @param dlBandwidth the downlink bandwidth (in RBs) advertised for the
+     *        neighbour measurement object
+     */
+    void AddNeighbourMeasFrequency(uint32_t arfcn, uint8_t dlBandwidth);
+
+    /**
+     * @brief Configure cell-specific parameters.
      *
      * Configure cell-specific parameters and propagate them to lower layers.
-     * The parameters include bandwidth, EARFCN (E-UTRA Absolute Radio Frequency
+     * The parameters include bandwidth, ARFCN (E-UTRA Absolute Radio Frequency
      * Channel Number), and cell ID.
      *
      * In addition to parameter configuration, this function also performs several
@@ -875,75 +1000,100 @@ class NrGnbRrc : public Object
      *  - Enabling MIB (Master Information Block) broadcast transmission
      *  - Enabling SIB (System Information Block) broadcast transmission
      *
-     * Typically runs when the eNodeB NetDevice is installed, for instance by
+     * Typically runs when the gNB NetDevice is installed, for instance by
      * `NrHelper::InstallGnbDevice` (i.e. before the simulation starts).
      *
-     * \warning Raises an error when executed more than once.
+     * @warning Raises an error when executed more than once.
      *
-     * \param ccPhyConf the component carrier configuration
+     * @param ccPhyConf the component carrier configuration
      */
-    void ConfigureCell(std::map<uint8_t, Ptr<BandwidthPartGnb>> ccPhyConf);
+    void ConfigureCell(const std::map<uint8_t, Ptr<BandwidthPartGnb>>& ccPhyConf);
 
     /**
-     * \brief Configure carriers.
-     * \param ccPhyConf the component carrier configuration
+     * @brief Set the 5QI to serving-BWP map advertised in dedicated RRC config
+     * @param qosFlowToBwpArfcn map between 5QI and the ARFCN of the BWP serving it
+     */
+    void SetQosFlowToBwpArfcn(const std::map<uint8_t, uint32_t>& qosFlowToBwpArfcn)
+    {
+        m_qosFlowToBwpArfcn = qosFlowToBwpArfcn;
+    }
+
+    /**
+     * @brief Set the UL carrier pairing advertised in dedicated RRC config
+     * @param ulCarrierPairing map between a DL carrier ARFCN and the ARFCN of
+     *        the UL carrier receiving for it
+     */
+    void SetUlCarrierPairing(const std::map<uint32_t, uint32_t>& ulCarrierPairing)
+    {
+        m_ulCarrierPairing = ulCarrierPairing;
+    }
+
+    /**
+     * @brief Configure carriers.
+     * @param ccPhyConf the component carrier configuration
      */
     void ConfigureCarriers(std::map<uint8_t, Ptr<BandwidthPartGnb>> ccPhyConf);
 
     /**
      * set the cell id of this gNB
      *
-     * \param m_cellId
+     * @param m_cellId
      */
     void SetCellId(uint16_t m_cellId);
 
     /**
      * set the cell id of this gNB
      *
-     * \param m_cellId
-     * \param ccIndex
+     * @param m_cellId
+     * @param ccIndex
      */
     void SetCellId(uint16_t m_cellId, uint8_t ccIndex);
 
     /**
      * convert the cell id to component carrier id
      *
-     * \param cellId Cell ID
+     * @param cellId Cell ID
      *
-     * \return corresponding component carrier id
+     * @return corresponding component carrier id
      */
     uint8_t CellToComponentCarrierId(uint16_t cellId);
 
     /**
      * convert the component carrier id to cell id
      *
-     * \param componentCarrierId component carrier ID
+     * @param componentCarrierId component carrier ID
      *
-     * \return corresponding cell ID
+     * @return corresponding cell ID
      */
     uint16_t ComponentCarrierToCellId(uint8_t componentCarrierId);
 
     /**
-     * \param cellId cell ID
-     * \return true if cellId is served by this gNB
+     * @param cellId cell ID
+     * @return true if cellId is served by this gNB
      */
     bool HasCellId(uint16_t cellId) const;
+
+    /**
+     * @param bwpId Bandwidth-part ID
+     * @return true if bwpId is served by this gNB
+     */
+    bool HasBwpId(uint16_t bwpId) const;
 
     /**
      * Enqueue an IP data packet on the proper bearer for downlink
      * transmission. Normally expected to be called by the NetDevice
      * forwarding a packet coming from the NrEpcGnbApplication
      *
-     * \param p the packet
+     * @param p the packet
      *
-     * \return true if successful, false if an error occurred
+     * @return true if successful, false if an error occurred
      */
     bool SendData(Ptr<Packet> p);
 
     /**
      * set the callback used to forward data packets up the stack
      *
-     * \param cb
+     * @param cb
      */
     void SetForwardUpCallback(Callback<void, Ptr<Packet>> cb);
 
@@ -951,7 +1101,7 @@ class NrGnbRrc : public Object
      * Method triggered when a UE is expected to request for connection but does
      * not do so in a reasonable time. The method will remove the UE context.
      *
-     * \param rnti the T-C-RNTI whose timeout expired
+     * @param rnti the T-C-RNTI whose timeout expired
      */
     void ConnectionRequestTimeout(uint16_t rnti);
 
@@ -960,7 +1110,7 @@ class NrGnbRrc : public Object
      * procedure but does not do so in a reasonable time. The method will remove
      * the UE context.
      *
-     * \param rnti the T-C-RNTI whose timeout expired
+     * @param rnti the T-C-RNTI whose timeout expired
      */
     void ConnectionSetupTimeout(uint16_t rnti);
 
@@ -968,7 +1118,7 @@ class NrGnbRrc : public Object
      * Method triggered a while after sending RRC Connection Rejected. The method
      * will remove the UE context.
      *
-     * \param rnti the T-C-RNTI whose timeout expired
+     * @param rnti the T-C-RNTI whose timeout expired
      */
     void ConnectionRejectedTimeout(uint16_t rnti);
 
@@ -977,7 +1127,7 @@ class NrGnbRrc : public Object
      * but does not do so in a reasonable time. The method will remove the UE
      * context.
      *
-     * \param rnti the C-RNTI whose timeout expired
+     * @param rnti the C-RNTI whose timeout expired
      */
     void HandoverJoiningTimeout(uint16_t rnti);
 
@@ -986,7 +1136,7 @@ class NrGnbRrc : public Object
      * but no feedback is received in a reasonable time. The method will remove
      * the UE context.
      *
-     * \param rnti the C-RNTI whose timeout expired
+     * @param rnti the C-RNTI whose timeout expired
      */
     void HandoverLeavingTimeout(uint16_t rnti);
 
@@ -995,22 +1145,22 @@ class NrGnbRrc : public Object
      * trigger a handover which is started by the RRC by sending a handover
      * request to the target gNB over the X2 interface
      *
-     * \param rnti the ID of the UE to be handed over
-     * \param cellId the ID of the target gNB
+     * @param rnti the ID of the UE to be handed over
+     * @param cellId the ID of the target gNB
      */
     void SendHandoverRequest(uint16_t rnti, uint16_t cellId);
 
     /**
-     *  \brief This function acts as an interface to trigger Release indication messages towards gNB
+     *  @brief This function acts as an interface to trigger Release indication messages towards gNB
      * and EPC
-     * \param imsi the IMSI
-     * \param rnti the RNTI
-     * \param bearerId Bearer Identity which is to be de-activated
+     * @param imsi the IMSI
+     * @param rnti the RNTI
+     * @param qfi QoS flow ID
      */
-    void DoSendReleaseDataRadioBearer(uint64_t imsi, uint16_t rnti, uint8_t bearerId);
+    void DoSendReleaseQosFlow(uint64_t imsi, uint16_t rnti, uint8_t qfi);
 
     /**
-     *  \brief Send RRC connection release function
+     *  @brief Send RRC connection release function
      *
      *  This function acts as an interface to trigger the connection
      *  release towards gNB, EPC and UE.
@@ -1018,10 +1168,10 @@ class NrGnbRrc : public Object
     void SendRrcConnectionRelease();
 
     /**
-     * Identifies how EPS Bearer parameters are mapped to different RLC types
+     * Identifies how QoS Flow parameters are mapped to different RLC types
      *
      */
-    enum NrEpsBearerToRlcMapping_t
+    enum NrQosFlowToRlcMapping_t
     {
         RLC_SM_ALWAYS = 1,
         RLC_UM_ALWAYS = 2,
@@ -1032,17 +1182,17 @@ class NrGnbRrc : public Object
     /**
      * TracedCallback signature for new Ue Context events.
      *
-     * \param [in] cellId
-     * \param [in] rnti
+     * @param [in] cellId
+     * @param [in] rnti
      */
     typedef void (*NewUeContextTracedCallback)(const uint16_t cellId, const uint16_t rnti);
 
     /**
      * TracedCallback signature for connection and handover end events.
      *
-     * \param [in] imsi
-     * \param [in] cellId
-     * \param [in] rnti
+     * @param [in] imsi
+     * @param [in] cellId
+     * @param [in] rnti
      */
     typedef void (*ConnectionHandoverTracedCallback)(const uint64_t imsi,
                                                      const uint16_t cellId,
@@ -1051,10 +1201,10 @@ class NrGnbRrc : public Object
     /**
      * TracedCallback signature for handover start events.
      *
-     * \param [in] imsi
-     * \param [in] cellId
-     * \param [in] rnti
-     * \param [in] targetCid
+     * @param [in] imsi
+     * @param [in] cellId
+     * @param [in] rnti
+     * @param [in] targetCid
      */
     typedef void (*HandoverStartTracedCallback)(const uint64_t imsi,
                                                 const uint16_t cellId,
@@ -1064,11 +1214,11 @@ class NrGnbRrc : public Object
     /**
      * TracedCallback signature for receive measurement report events.
      *
-     * \param [in] imsi
-     * \param [in] cellId
-     * \param [in] rnti
-     * \param [in] report
-     * \todo The \c NrRrcSap::MeasurementReport argument should be
+     * @param [in] imsi
+     * @param [in] cellId
+     * @param [in] rnti
+     * @param [in] report
+     * @todo The \c NrRrcSap::MeasurementReport argument should be
      * changed to a const reference since the argument is large.
      */
     typedef void (*ReceiveReportTracedCallback)(const uint64_t imsi,
@@ -1079,10 +1229,10 @@ class NrGnbRrc : public Object
     /**
      * TracedCallback signature for timer expiry events
      *
-     * \param [in] imsi
-     * \param [in] rnti
-     * \param [in] cellId
-     * \param [in] cause
+     * @param [in] imsi
+     * @param [in] rnti
+     * @param [in] cellId
+     * @param [in] cause
      */
     typedef void (*TimerExpiryTracedCallback)(const uint64_t imsi,
                                               const uint16_t rnti,
@@ -1092,13 +1242,39 @@ class NrGnbRrc : public Object
     /**
      * TracedCallback signature for handover failure events.
      *
-     * \param [in] imsi
-     * \param [in] rnti
-     * \param [in] cellId
+     * @param [in] imsi
+     * @param [in] rnti
+     * @param [in] cellId
      */
     typedef void (*HandoverFailureTracedCallback)(const uint64_t imsi,
                                                   const uint16_t rnti,
                                                   const uint16_t cellId);
+
+    /**
+     * TracedCallback signature for total handover time events.
+     *
+     * @param [in] imsi
+     * @param [in] sourceCellId
+     * @param [in] targetCellId
+     * @param [in] totalTime time from the A3 trigger to handover completion
+     */
+    typedef void (*HandoverTotalTimeTracedCallback)(uint64_t imsi,
+                                                    uint16_t sourceCellId,
+                                                    uint16_t targetCellId,
+                                                    Time totalTime);
+
+    /**
+     * TracedCallback signature for X2-U forwarded data drop events.
+     *
+     * @param [in] sourceCellId the cell that forwarded the packet over X2-U
+     * @param [in] targetCellId the cell that received and dropped the packet
+     * @param [in] gtpTeid the GTP TEID of the forwarded packet with no local mapping
+     * @param [in] packet the dropped forwarded packet
+     */
+    typedef void (*X2DataForwardingDropTracedCallback)(uint16_t sourceCellId,
+                                                       uint16_t targetCellId,
+                                                       uint32_t gtpTeid,
+                                                       Ptr<const Packet> packet);
 
   private:
     // RRC SAP methods
@@ -1106,24 +1282,24 @@ class NrGnbRrc : public Object
     /**
      * Part of the RRC protocol. Forwarding NrGnbRrcSapProvider::CompleteSetupUe interface to
      * NrUeManager::CompleteSetupUe
-     * \param rnti the RNTI
-     * \param params the NrGnbRrcSapProvider::CompleteSetupUeParameters
+     * @param rnti the RNTI
+     * @param params the NrGnbRrcSapProvider::CompleteSetupUeParameters
      */
     void DoCompleteSetupUe(uint16_t rnti, NrGnbRrcSapProvider::CompleteSetupUeParameters params);
     /**
      * Part of the RRC protocol. Forwarding NrGnbRrcSapProvider::RecvRrcConnectionRequest interface
      * to NrUeManager::RecvRrcConnectionRequest
      *
-     * \param rnti the RNTI
-     * \param msg the NrRrcSap::RrcConnectionRequest
+     * @param rnti the RNTI
+     * @param msg the NrRrcSap::RrcConnectionRequest
      */
     void DoRecvRrcConnectionRequest(uint16_t rnti, NrRrcSap::RrcConnectionRequest msg);
     /**
      * Part of the RRC protocol. Forwarding NrGnbRrcSapProvider::RecvRrcConnectionSetupCompleted
      * interface to NrUeManager::RecvRrcConnectionSetupCompleted
      *
-     * \param rnti the RNTI
-     * \param msg the NrRrcSap::RrcConnectionSetupCompleted
+     * @param rnti the RNTI
+     * @param msg the NrRrcSap::RrcConnectionSetupCompleted
      */
     void DoRecvRrcConnectionSetupCompleted(uint16_t rnti,
                                            NrRrcSap::RrcConnectionSetupCompleted msg);
@@ -1132,8 +1308,8 @@ class NrGnbRrc : public Object
      * NrGnbRrcSapProvider::RecvRrcConnectionReconfigurationCompleted interface to
      * NrUeManager::RecvRrcConnectionReconfigurationCompleted
      *
-     * \param rnti the RNTI
-     * \param msg the NrRrcSap::RrcConnectionReconfigurationCompleted
+     * @param rnti the RNTI
+     * @param msg the NrRrcSap::RrcConnectionReconfigurationCompleted
      */
     void DoRecvRrcConnectionReconfigurationCompleted(
         uint16_t rnti,
@@ -1143,8 +1319,8 @@ class NrGnbRrc : public Object
      * NrGnbRrcSapProvider::RecvRrcConnectionReestablishmentRequest interface to
      * NrUeManager::RecvRrcConnectionReestablishmentRequest
      *
-     * \param rnti the RNTI
-     * \param msg the NrRrcSap::RrcConnectionReestablishmentRequest
+     * @param rnti the RNTI
+     * @param msg the NrRrcSap::RrcConnectionReestablishmentRequest
      */
     void DoRecvRrcConnectionReestablishmentRequest(
         uint16_t rnti,
@@ -1154,8 +1330,8 @@ class NrGnbRrc : public Object
      * NrGnbRrcSapProvider::RecvRrcConnectionReestablishmentComplete interface to
      * NrUeManager::RecvRrcConnectionReestablishmentComplete
      *
-     * \param rnti the RNTI
-     * \param msg the NrRrcSap::RrcConnectionReestablishmentComplete
+     * @param rnti the RNTI
+     * @param msg the NrRrcSap::RrcConnectionReestablishmentComplete
      */
     void DoRecvRrcConnectionReestablishmentComplete(
         uint16_t rnti,
@@ -1164,102 +1340,132 @@ class NrGnbRrc : public Object
      * Part of the RRC protocol. Forwarding NrGnbRrcSapProvider::RecvMeasurementReport interface to
      * NrUeManager::RecvMeasurementReport
      *
-     * \param rnti the RNTI
-     * \param msg the NrRrcSap::MeasurementReport
+     * @param rnti the RNTI
+     * @param msg the NrRrcSap::MeasurementReport
      */
     void DoRecvMeasurementReport(uint16_t rnti, NrRrcSap::MeasurementReport msg);
     /**
-     * \brief Part of the RRC protocol. Forwarding
+     * Deliver a measurement report to the UE manager, after the
+     * HandoverDecisionDelay (if any) has elapsed. The report is dropped if the
+     * UE was removed while the report was being delayed.
+     *
+     * @param rnti the RNTI
+     * @param msg the NrRrcSap::MeasurementReport
+     */
+    void DeliverMeasurementReport(uint16_t rnti, NrRrcSap::MeasurementReport msg);
+    /**
+     * @brief Part of the RRC protocol. Forwarding
      * NrGnbRrcSapProvider::RecvIdealUeContextRemoveRequest interface to
      * NrUeManager::RecvIdealUeContextRemoveRequest.
      *
-     * Remove the UE context at eNodeB and also remove the bearers established
+     * Remove the UE context at gNB and also remove the bearers established
      * at SGW/PGW node. Bearer info at MME is not deleted since they are added at
      * MME only at the beginning of simulation and if they are removed,
      * the bearers cannot be activated again.
      *
-     * \param rnti the C-RNTI identifying the user
+     * @param rnti the C-RNTI identifying the user
      */
     void DoRecvIdealUeContextRemoveRequest(uint16_t rnti);
+
+    /**
+     * @brief Part of the RRC protocol. Forwarding
+     * NrGnbRrcSapProvider::RecvIdealBwpSwitchIndication to the UE's manager.
+     *
+     * Handles the UE's notification that it switched its primary serving BWP to
+     * another BWP of the SAME cell. Updates the gNB's per-UE primary-BWP
+     * bookkeeping and re-points the UE's DL scheduling to the new BWP.
+     *
+     * @param rnti  the C-RNTI identifying the user
+     * @param bwpId the new primary BWP/CC index the UE switched to
+     */
+    void DoRecvIdealBwpSwitchIndication(uint16_t rnti, uint8_t bwpId);
 
     // S1 SAP methods
 
     /**
      * Initial context setup request function
      *
-     * \param params NrEpcGnbS1SapUser::InitialContextSetupRequestParameters
+     * @param params NrEpcGnbS1SapUser::InitialContextSetupRequestParameters
      */
     void DoInitialContextSetupRequest(
         NrEpcGnbS1SapUser::InitialContextSetupRequestParameters params);
     /**
      * Data radio beaerer setup request function
      *
-     * \param params NrEpcGnbS1SapUser::DataRadioBearerSetupRequestParameters
+     * @param params NrEpcGnbS1SapUser::DataRadioBearerSetupRequestParameters
      */
     void DoDataRadioBearerSetupRequest(
         NrEpcGnbS1SapUser::DataRadioBearerSetupRequestParameters params);
     /**
      * Path switch request acknowledge function
      *
-     * \param params NrEpcGnbS1SapUser::PathSwitchRequestAcknowledgeParameters
+     * @param params NrEpcGnbS1SapUser::PathSwitchRequestAcknowledgeParameters
      */
     void DoPathSwitchRequestAcknowledge(
         NrEpcGnbS1SapUser::PathSwitchRequestAcknowledgeParameters params);
+    /**
+     * Release the context of a UE, as requested by the core network, if the RNTI still
+     * identifies that UE: the RRC connection of the UE is released.
+     *
+     * @param imsi the IMSI of the UE
+     * @param rnti the RNTI of the UE
+     */
+    void DoUeContextReleaseCommand(uint64_t imsi, uint16_t rnti);
 
     // X2 SAP methods
 
     /**
      * Receive handover request function
      *
-     * \param params NrEpcX2SapUser::HandoverRequestParams
+     * @param params NrEpcX2SapUser::HandoverRequestParams
      */
     void DoRecvHandoverRequest(NrEpcX2SapUser::HandoverRequestParams params);
     /**
      * Receive handover request acknowledge function
      *
-     * \param params NrEpcX2SapUser::HandoverRequestAckParams
+     * @param params NrEpcX2SapUser::HandoverRequestAckParams
      */
     void DoRecvHandoverRequestAck(NrEpcX2SapUser::HandoverRequestAckParams params);
     /**
      * Receive handover preparation failure function
      *
-     * \param params NrEpcX2SapUser::HandoverPreparationFailureParams
+     * @param params NrEpcX2SapUser::HandoverPreparationFailureParams
      */
     void DoRecvHandoverPreparationFailure(NrEpcX2SapUser::HandoverPreparationFailureParams params);
     /**
      * Receive SN status transfer function
      *
-     * \param params NrEpcX2SapUser::SnStatusTransferParams
+     * @param params NrEpcX2SapUser::SnStatusTransferParams
      */
     void DoRecvSnStatusTransfer(NrEpcX2SapUser::SnStatusTransferParams params);
     /**
      * Receive UE context release function
      *
-     * \param params NrEpcX2SapUser::UeContextReleaseParams
+     * @param params NrEpcX2SapUser::UeContextReleaseParams
      */
     void DoRecvUeContextRelease(NrEpcX2SapUser::UeContextReleaseParams params);
     /**
      * Receive load information function
      *
-     * \param params NrEpcX2SapUser::LoadInformationParams
+     * @param params NrEpcX2SapUser::LoadInformationParams
      */
     void DoRecvLoadInformation(NrEpcX2SapUser::LoadInformationParams params);
     /**
      * Receive resource status update function
      *
-     * \param params NrEpcX2SapUser::ResourceStatusUpdateParams
+     * @param params NrEpcX2SapUser::ResourceStatusUpdateParams
      */
     void DoRecvResourceStatusUpdate(NrEpcX2SapUser::ResourceStatusUpdateParams params);
     /**
      * Receive UE data function
      *
-     * \param params NrEpcX2SapUser::UeDataParams
+     * @param params NrEpcX2SapUser::UeDataParams
      */
     void DoRecvUeData(NrEpcX2SapUser::UeDataParams params);
     /**
      * Receive Handover Cancel function.
      *
-     * \param params NrEpcX2SapUser::HandoverCancelParams
+     * @param params NrEpcX2SapUser::HandoverCancelParams
      */
     void DoRecvHandoverCancel(NrEpcX2SapUser::HandoverCancelParams params);
 
@@ -1268,22 +1474,22 @@ class NrGnbRrc : public Object
     /**
      * Allocate temporary cell RNTI function
      *
-     * \param componentCarrierId ID of the primary component carrier
-     * \return temporary RNTI
+     * @param componentCarrierId ID of the primary component carrier
+     * @return temporary RNTI
      */
     uint16_t DoAllocateTemporaryCellRnti(uint8_t componentCarrierId);
     /**
      * Notify LC config result function
      *
-     * \param rnti RNTI
-     * \param lcid LCID
-     * \param success the success indicator
+     * @param rnti RNTI
+     * @param lcid LCID
+     * @param success the success indicator
      */
     void DoNotifyLcConfigResult(uint16_t rnti, uint8_t lcid, bool success);
     /**
      * RRC configuration update indication function
      *
-     * \param params NrGnbCmacSapUser::UeConfig
+     * @param params NrGnbCmacSapUser::UeConfig
      */
     void DoRrcConfigurationUpdateInd(NrGnbCmacSapUser::UeConfig params);
 
@@ -1292,53 +1498,63 @@ class NrGnbRrc : public Object
     /**
      * Add UE measure report config for handover function
      *
-     * \param reportConfig NrRrcSap::ReportConfigEutra
-     * \returns measure ID
+     * @param reportConfig NrRrcSap::ReportConfigEutra
+     * @returns measure ID
      */
     std::vector<uint8_t> DoAddUeMeasReportConfigForHandover(
         NrRrcSap::ReportConfigEutra reportConfig);
     /**
      * Add UE measure report config for component carrier function
      *
-     * \param reportConfig NrRrcSap::ReportConfigEutra
-     * \returns measure ID
+     * @param reportConfig NrRrcSap::ReportConfigEutra
+     * @returns measure ID
      */
     uint8_t DoAddUeMeasReportConfigForComponentCarrier(NrRrcSap::ReportConfigEutra reportConfig);
     /**
-     * \brief Set number of component carriers
-     * \param numberOfComponentCarriers the number of component carriers
+     * @brief Set number of component carriers
+     * @param numberOfComponentCarriers the number of component carriers
      */
     void DoSetNumberOfComponentCarriers(uint16_t numberOfComponentCarriers);
 
     /**
      * Trigger handover function
      *
-     * \param rnti RNTI
-     * \param targetCellId target cell ID
+     * @param rnti RNTI
+     * @param targetCellId target cell ID
      */
     void DoTriggerHandover(uint16_t rnti, uint16_t targetCellId);
+
+    /**
+     * Execute a handover towards the target cell, after the
+     * HandoverTriggeringDelay (if any) has elapsed. The handover is canceled if
+     * the UE was removed while the trigger was being delayed.
+     *
+     * @param rnti RNTI
+     * @param targetCellId target cell ID
+     */
+    void ExecuteHandover(uint16_t rnti, uint16_t targetCellId);
 
     // ANR SAP methods
 
     /**
      * Add UE measure report config for ANR function
      *
-     * \param reportConfig NrRrcSap::ReportConfigEutra
-     * \returns measure ID
+     * @param reportConfig NrRrcSap::ReportConfigEutra
+     * @returns measure ID
      */
     uint8_t DoAddUeMeasReportConfigForAnr(NrRrcSap::ReportConfigEutra reportConfig);
 
     /**
      * Set PDSCH config dedicated function
      *
-     * \param rnti the RNTI
-     * \param pa NrRrcSap::PdschConfigDedicated
+     * @param rnti the RNTI
+     * @param pa NrRrcSap::PdschConfigDedicated
      */
     void DoSetPdschConfigDedicated(uint16_t rnti, NrRrcSap::PdschConfigDedicated pa);
     /**
      * Send load information function
      *
-     * \param params NrEpcX2Sap::LoadInformationParams
+     * @param params NrEpcX2Sap::LoadInformationParams
      */
     void DoSendLoadInformation(NrEpcX2Sap::LoadInformationParams params);
 
@@ -1349,30 +1565,37 @@ class NrGnbRrc : public Object
      *   * T-C-RNTI allocation upon contention-based MAC Random Access procedure
      *   * target cell RNTI allocation upon handover
      *
-     * \param state the initial state of the NrUeManager
-     * \param componentCarrierId primary component carrier ID of the NrUeManager
+     * @param state the initial state of the NrUeManager
+     * @param componentCarrierId primary component carrier ID of the NrUeManager
      *
-     * \return the newly allocated RNTI
+     * @return the newly allocated RNTI
      */
     uint16_t AddUe(NrUeManager::State state, uint8_t componentCarrierId);
 
     /**
      * remove a UE from the cell
      *
-     * \param rnti the C-RNTI identiftying the user
+     * @param rnti the C-RNTI identiftying the user
      */
     void RemoveUe(uint16_t rnti);
 
     /**
+     * Return an RNTI reserved by RemoveUe() to the allocation pool.
      *
-     * \param bearer the specification of an EPS bearer
-     *
-     * \return the type of RLC that is to be created for the given EPS bearer
+     * @param rnti the C-RNTI to release
      */
-    TypeId GetRlcType(NrEpsBearer bearer);
+    void ReleaseRntiReservation(uint16_t rnti);
 
     /**
-     * \brief Is random access completed function
+     *
+     * @param flow the specification of a QoS flow
+     *
+     * @return the type of RLC that is to be created for the given QoS flow
+     */
+    TypeId GetRlcType(NrQosFlow flow);
+
+    /**
+     * @brief Is random access completed function
      *
      * This method is executed to decide if the non contention based
      * preamble has to reused or not upon preamble expiry. If the random access
@@ -1380,8 +1603,8 @@ class NrGnbRrc : public Object
      * If not, the same UE retains the preamble and other available preambles is
      * assigned to the required UEs.
      *
-     * \param rnti the C-RNTI identifying the user
-     * \return true if the random access in connected mode is completed
+     * @param rnti the C-RNTI identifying the user
+     * @return true if the random access in connected mode is completed
      */
     bool IsRandomAccessCompleted(uint16_t rnti);
 
@@ -1389,35 +1612,23 @@ class NrGnbRrc : public Object
     /**
      * Add a neighbour with an X2 interface
      *
-     * \param cellId neighbouring cell id
+     * @param cellId neighbouring cell id
      */
     void AddX2Neighbour(uint16_t cellId);
 
     /**
-     *
-     * \param p the SRS periodicity in num TTIs
-     */
-    void SetSrsPeriodicity(uint32_t p);
-
-    /**
-     *
-     * \return the current SRS periodicity
-     */
-    uint32_t GetSrsPeriodicity() const;
-
-    /**
-     * \brief Associate this RRC entity with a particular CSG information.
-     * \param csgId the intended Closed Subscriber Group identity
-     * \param csgIndication if TRUE, only CSG members are allowed to access the
+     * @brief Associate this RRC entity with a particular CSG information.
+     * @param csgId the intended Closed Subscriber Group identity
+     * @param csgIndication if TRUE, only CSG members are allowed to access the
      *                      cell
      *
      * CSG identity is a number identifying a Closed Subscriber Group which the
-     * cell belongs to. eNodeB is associated with a single CSG identity.
+     * cell belongs to. gNB is associated with a single CSG identity.
      *
      * The same CSG identity can also be associated to several UEs, which is
      * equivalent as enlisting these UEs as the members of this particular CSG.
      * When the CSG indication field is set to TRUE, only UEs which are members of
-     * the CSG (i.e. same CSG ID) can gain access to the eNodeB, therefore
+     * the CSG (i.e. same CSG ID) can gain access to the gNB, therefore
      * enforcing closed access mode. Otherwise, the eNodeB operates as a non-CSG
      * cell and implements open access mode.
      *
@@ -1430,46 +1641,54 @@ class NrGnbRrc : public Object
     /**
      * Allocate a new SRS configuration index for a new UE.
      *
-     * \note this method can have the side effect of updating the SRS
+     * @note this method can have the side effect of updating the SRS
      * configuration index of all UEs
      *
-     * \return the newly allocated SRS configuration index
+     * @return the newly allocated SRS configuration index
      */
     uint16_t GetNewSrsConfigurationIndex();
 
     /**
      * remove a previously allocated SRS configuration index
      *
-     * \note this method can have the side effect of updating the SRS
+     * @note this method can have the side effect of updating the SRS
      * configuration index of all UEs
      *
-     * \param srcCi the index to be removed
+     * @param srcCi the index to be removed
      */
     void RemoveSrsConfigurationIndex(uint16_t srcCi);
 
     /**
-     * \return true if all the SRS indices are assigned to UEs
+     * @return true if all the SRS indices are assigned to UEs
      */
-    bool IsMaxSrsReached();
+    bool IsMaxSrsReached() const;
 
     /**
      *
-     * \param bearer the characteristics of the bearer
+     * @param flow the QoS characteristics of the flow
      *
-     * \return the Logical Channel Group in a bearer with these
+     * @return the Logical Channel Group in a flow with these
      * characteristics is put. Used for MAC Buffer Status Reporting purposes.
      */
-    uint8_t GetLogicalChannelGroup(NrEpsBearer bearer);
+    uint8_t GetLogicalChannelGroup(NrQosFlow flow);
 
     /**
      *
-     * \param bearer the characteristics of the bearer
+     * @param flow the QoS characteristics of the flow
      *
-     * \return the priority level of a bearer with these
+     * @return the priority level of a flow with these
      * characteristics is put. Used for the part of UL MAC Scheduling
      * carried out by the UE
      */
-    uint8_t GetLogicalChannelPriority(NrEpsBearer bearer);
+    uint8_t GetLogicalChannelPriority(NrQosFlow flow);
+
+    /**
+     * Get the 5G QoS Identifier (5QI) for a QoS flow
+     *
+     * @param flow the QoS flow
+     * @return the 5QI value
+     */
+    NrQosFlow::FiveQi GetLogicalChannelFiveQi(NrQosFlow flow);
 
     /**
      * method used to periodically send System Information
@@ -1509,6 +1728,9 @@ class NrGnbRrc : public Object
     /// Interface to receive messages from UE over the RRC protocol.
     NrGnbRrcSapProvider* m_rrcSapProvider;
 
+    /// Trace fired when the gNB RRC receives an RRC Connection Reconfiguration Complete.
+    ns3::TracedCallback<uint16_t> m_rxRrcConnectionReconfigurationCompletedTrace;
+
     /// Interface to the eNodeB MAC instance, to be used by RLC instances.
     NrMacSapProvider* m_macSapProvider;
 
@@ -1524,16 +1746,20 @@ class NrGnbRrc : public Object
 
     /// True if ConfigureCell() has been completed.
     bool m_configured;
-    /// Downlink E-UTRA Absolute Radio Frequency Channel Number.
-    uint32_t m_dlEarfcn;
-    /// Uplink E-UTRA Absolute Radio Frequency Channel Number.
-    uint32_t m_ulEarfcn;
     /// Downlink transmission bandwidth configuration in number of Resource Blocks.
     uint16_t m_dlBandwidth;
     /// Uplink transmission bandwidth configuration in number of Resource Blocks.
     uint16_t m_ulBandwidth;
     /// Last allocated RNTI
     uint16_t m_lastAllocatedRnti;
+    /**
+     * RNTIs of UE contexts destroyed while a handover was still in progress, kept out of the
+     * allocation pool until the X2 exchange that names them concludes. Reusing one straight
+     * away would make a late UE CONTEXT RELEASE address whichever UE inherited it.
+     */
+    std::map<uint16_t, EventId> m_reservedRntis;
+    /// How long an RNTI stays reserved after a handover was interrupted
+    Time m_rntiReservationDuration;
 
     /// The System Information Block Type 1 that is currently broadcasted over BCH.
     std::vector<NrRrcSap::SystemInformationBlockType1> m_sib1;
@@ -1549,6 +1775,13 @@ class NrGnbRrc : public Object
      */
     NrRrcSap::MeasConfig m_ueMeasConfig;
 
+    /**
+     * Neighbour carrier frequencies (ARFCNs) registered for inter-frequency
+     * measurements via `NrGnbRrc::AddNeighbourMeasFrequency`. Each entry maps an
+     * ARFCN to the downlink bandwidth advertised for its measurement object.
+     */
+    std::map<uint32_t, uint8_t> m_neighbourMeasFreqs;
+
     /// List of measurement identities which are intended for handover purpose.
     std::set<uint8_t> m_handoverMeasIds;
     /// List of measurement identities which are intended for ANR purpose.
@@ -1557,7 +1790,7 @@ class NrGnbRrc : public Object
     std::set<uint8_t> m_componentCarrierMeasIds;
 
     /// X2uTeidInfo structure
-    struct X2uTeidInfo
+    struct NR_EXPORT X2uTeidInfo
     {
         uint16_t rnti; ///< RNTI
         uint8_t drbid; ///< DRBID
@@ -1572,22 +1805,20 @@ class NrGnbRrc : public Object
      */
     uint8_t m_defaultTransmissionMode;
     /**
-     * The `EpsBearerToRlcMapping` attribute. Specify which type of RLC will be
-     * used for each type of EPS bearer.
+     * The `QosFlowToRlcMapping` attribute. Specify which type of RLC will be
+     * used for each type of QoS flow.
      */
-    NrEpsBearerToRlcMapping_t m_epsBearerToRlcMapping;
+    NrQosFlowToRlcMapping_t m_qosFlowToRlcMapping;
     /**
      * The `SystemInformationPeriodicity` attribute. The interval for sending
      * system information.
      */
     Time m_systemInformationPeriodicity;
-    /**
-     * The `SrsPeriodicity` attribute. The SRS periodicity in milliseconds.
-     */
-    uint16_t m_srsCurrentPeriodicityId;              ///< SRS current periodicity ID
     std::set<uint16_t> m_ueSrsConfigurationIndexSet; ///< UE SRS configuration index set
-    uint16_t m_lastAllocatedConfigurationIndex;      ///< last allocated configuration index
-    bool m_reconfigureUes;                           ///< reconfigure UEs?
+    std::set<uint16_t>
+        m_unusedUeSrsConfigurationIndexSet;     ///< UE SRS unused configuration index set
+    uint16_t m_lastAllocatedConfigurationIndex; ///< last allocated configuration index
+    bool m_reconfigureUes;                      ///< reconfigure UEs?
 
     /**
      * The `QRxLevMin` attribute. One of information transmitted within the SIB1
@@ -1605,6 +1836,11 @@ class NrGnbRrc : public Object
      * request from a UE.
      */
     bool m_admitRrcConnectionRequest;
+    /**
+     * The `UseRrcReestablishment` attribute. Whether to accept RRC connection
+     * reestablishment requests from UEs.
+     */
+    bool m_useRrcReestablishment;
     /**
      * The `RsrpFilterCoefficient` attribute. Determines the strength of
      * smoothing effect induced by layer 3 filtering of RSRP in all attached UE.
@@ -1646,6 +1882,19 @@ class NrGnbRrc : public Object
      */
     Time m_handoverJoiningTimeoutDuration;
     /**
+     * The `HandoverMinTimeOfStay` attribute. Reversal-only ping-pong guard window: a
+     * handover back to the cell the UE just came from is suppressed if it occurs less
+     * than this long after the UE arrived. 0 disables the guard.
+     */
+    Time m_handoverMinTimeOfStay{MilliSeconds(0)};
+    /**
+     * A3 handover-trigger instant per IMSI, stamped when the source gNB's handover
+     * algorithm requests a handover and cleared on completion, suppression, or UE
+     * removal. Used to compute the total handover time reported by the
+     * `HandoverTotalTime` trace source.
+     */
+    std::map<uint64_t, Time> m_handoverTriggerTime;
+    /**
      * The `HandoverLeavingTimeoutDuration` attribute. After issuing a Handover
      * Command, if neither RRC CONNECTION RE-ESTABLISHMENT nor X2 UE Context
      * Release has been previously received, the UE context is destroyed.
@@ -1677,6 +1926,14 @@ class NrGnbRrc : public Object
      * handover procedure. Exporting IMSI, cell ID, and RNTI.
      */
     TracedCallback<uint64_t, uint16_t, uint16_t> m_handoverEndOkTrace;
+    /**
+     * The `HandoverTotalTime` trace source. Fired at the source gNB upon successful
+     * handover completion, reporting the total time from the A3 trigger (the instant
+     * the source gNB's handover algorithm requested the handover) to completion (the
+     * source releasing the UE context). Exporting IMSI, source cell ID, target cell
+     * ID, and the total handover time.
+     */
+    TracedCallback<uint64_t, uint16_t, uint16_t, Time> m_handoverTotalTimeTrace;
     /**
      * The `RecvMeasurementReport` trace source. Fired when measurement report is
      * received. Exporting IMSI, cell ID, and RNTI.
@@ -1720,13 +1977,38 @@ class NrGnbRrc : public Object
      *
      */
     TracedCallback<uint64_t, uint16_t, uint16_t> m_handoverFailureJoiningTrace;
+    /**
+     * The 'X2DataForwardingDrop' Trace source. Fired when a UE-data packet forwarded over X2-U is
+     * dropped because there is no matching X2-U TEID mapping (the packet arrived outside the
+     * handover data-forwarding window, i.e. before the target bearer is set up or after it is
+     * torn down at handover completion).
+     */
+    TracedCallback<uint16_t, uint16_t, uint32_t, Ptr<const Packet>> m_x2DataForwardingDropTrace;
 
     uint16_t m_numberOfComponentCarriers; ///< number of component carriers
 
     bool m_carriersConfigured; ///< are carriers configured
 
+    /**
+     * The `HandoverDecisionDelay` attribute. Time delay between receiving a measurement
+     * report and forwarding it to the handover algorithm for decision making.
+     */
+    Time m_handoverDecisionDelay;
+    /**
+     * The `HandoverTriggeringDelay` attribute. Time delay between the handover
+     * algorithm deciding to handover and the gNB RRC actually triggering the
+     * handover procedure.
+     */
+    Time m_handoverTriggeringDelay;
+
     std::map<uint8_t, Ptr<BandwidthPartGnb>>
         m_componentCarrierPhyConf; ///< component carrier phy configuration
+
+    std::map<uint8_t, uint32_t>
+        m_qosFlowToBwpArfcn; ///< 5QI -> ARFCN of the BWP serving it, advertised to UEs
+
+    std::map<uint32_t, uint32_t>
+        m_ulCarrierPairing; ///< DL carrier ARFCN -> paired UL carrier ARFCN, advertised to UEs
 
 }; // end of `class NrGnbRrc`
 

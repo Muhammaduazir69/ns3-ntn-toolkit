@@ -5,12 +5,14 @@
 #include "ns3/antenna-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
-#include "ns3/nr-eps-bearer-tag.h"
 #include "ns3/nr-module.h"
+#include "ns3/nr-qos-flow-tag.h"
 #include "ns3/point-to-point-helper.h"
+#include "ns3/rng-seed-manager.h"
 
 #include <unordered_map>
 
@@ -19,10 +21,10 @@
 using namespace ns3;
 
 /**
- * \file test-timings.cc
- * \ingroup test
+ * @file nr-test-timings.cc
+ * @ingroup test
  *
- * \brief Check numerology timings. The test, that is run for every numerology,
+ * @brief Check numerology timings. The test, that is run for every numerology,
  * checks that the slot number of certain events is the same as the one
  * pre-recorded by an expert, that spent time in checking that such timing is
  * correct. We currently check only RAR and DL_DCI messages, improvements are
@@ -66,13 +68,15 @@ class NrTimingsTest : public TestCase
                   uint8_t ccId,
                   Ptr<const NrControlMessage> msg);
 
-    void GnbMacTx(SfnSf sfn,
-                  uint16_t nodeId,
+    void GnbMacTx(uint64_t imsi,
+                  SfnSf sfn,
+                  uint16_t cellId,
                   uint16_t rnti,
                   uint8_t ccId,
                   Ptr<const NrControlMessage> msg);
-    void GnbMacRx(SfnSf sfn,
-                  uint16_t nodeId,
+    void GnbMacRx(uint64_t imsi,
+                  SfnSf sfn,
+                  uint16_t cellId,
                   uint16_t rnti,
                   uint8_t ccId,
                   Ptr<const NrControlMessage> msg);
@@ -88,13 +92,15 @@ class NrTimingsTest : public TestCase
                  uint8_t ccId,
                  Ptr<const NrControlMessage> msg);
 
-    void UeMacTx(SfnSf sfn,
-                 uint16_t nodeId,
+    void UeMacTx(uint64_t imsi,
+                 SfnSf sfn,
+                 uint16_t cellId,
                  uint16_t rnti,
                  uint8_t ccId,
                  Ptr<const NrControlMessage> msg);
-    void UeMacRx(SfnSf sfn,
-                 uint16_t nodeId,
+    void UeMacRx(uint64_t imsi,
+                 SfnSf sfn,
+                 uint16_t cellId,
                  uint16_t rnti,
                  uint8_t ccId,
                  Ptr<const NrControlMessage> msg);
@@ -121,10 +127,10 @@ SendPacket(const Ptr<NetDevice>& device, const Address& addr)
     NS_ASSERT(packetSize > header.GetSerializedSize());
     Ptr<Packet> pkt = Create<Packet>(packetSize - header.GetSerializedSize());
     header.SetProtocol(0x06);
-    NrEpsBearerTag tag(1, 1);
+    NrQosFlowTag tag(1, 1);
     pkt->AddPacketTag(tag);
     pkt->AddHeader(header);
-    device->Send(pkt, addr, Ipv4L3Protocol::PROT_NUMBER);
+    device->Send(pkt, addr, iana::ieee802numbers::IPV4);
 }
 
 static const std::unordered_map<NrControlMessage::messageType, std::string, std::hash<int>>
@@ -317,8 +323,9 @@ NrTimingsTest::GnbPhyRx(SfnSf sfn,
 }
 
 void
-NrTimingsTest::GnbMacTx(SfnSf sfn,
-                        [[maybe_unused]] uint16_t nodeId,
+NrTimingsTest::GnbMacTx(uint64_t imsi,
+                        SfnSf sfn,
+                        [[maybe_unused]] uint16_t cellId,
                         [[maybe_unused]] uint16_t rnti,
                         [[maybe_unused]] uint8_t ccId,
                         Ptr<const NrControlMessage> msg)
@@ -379,8 +386,9 @@ NrTimingsTest::GnbMacTx(SfnSf sfn,
 }
 
 void
-NrTimingsTest::GnbMacRx(SfnSf sfn,
-                        [[maybe_unused]] uint16_t nodeId,
+NrTimingsTest::GnbMacRx(uint64_t imsi,
+                        SfnSf sfn,
+                        [[maybe_unused]] uint16_t cellId,
                         [[maybe_unused]] uint16_t rnti,
                         [[maybe_unused]] uint8_t ccId,
                         Ptr<const NrControlMessage> msg)
@@ -642,8 +650,9 @@ NrTimingsTest::UePhyRx(SfnSf sfn,
 }
 
 void
-NrTimingsTest::UeMacTx(SfnSf sfn,
-                       [[maybe_unused]] uint16_t nodeId,
+NrTimingsTest::UeMacTx(uint64_t imsi,
+                       SfnSf sfn,
+                       [[maybe_unused]] uint16_t cellId,
                        [[maybe_unused]] uint16_t rnti,
                        [[maybe_unused]] uint8_t ccId,
                        Ptr<const NrControlMessage> msg)
@@ -724,8 +733,9 @@ NrTimingsTest::UeMacTx(SfnSf sfn,
 }
 
 void
-NrTimingsTest::UeMacRx(SfnSf sfn,
-                       [[maybe_unused]] uint16_t nodeId,
+NrTimingsTest::UeMacRx(uint64_t imsi,
+                       SfnSf sfn,
+                       [[maybe_unused]] uint16_t cellId,
                        [[maybe_unused]] uint16_t rnti,
                        [[maybe_unused]] uint8_t ccId,
                        Ptr<const NrControlMessage> msg)
@@ -806,11 +816,11 @@ NrTimingsTest::UeMacRx(SfnSf sfn,
 // Ugly pre-processor macro, to speed up writing. The best way would be to use
 // static functions... so please forget them, and remember that they work
 // only here in the DoRun function, as it is all hard-coded
-#define GET_GNB_PHY(X, Y) nrHelper->GetGnbPhy(gnbNetDev.Get(X), Y)
-#define GET_GNB_MAC(X, Y) nrHelper->GetGnbMac(gnbNetDev.Get(X), Y)
+#define GET_GNB_PHY(X, Y) NrHelper::GetGnbPhy(gnbNetDev.Get(X), Y)
+#define GET_GNB_MAC(X, Y) NrHelper::GetGnbMac(gnbNetDev.Get(X), Y)
 
-#define GET_UE_PHY(X, Y) nrHelper->GetUePhy(ueNetDev.Get(X), Y)
-#define GET_UE_MAC(X, Y) nrHelper->GetUeMac(ueNetDev.Get(X), Y)
+#define GET_UE_PHY(X, Y) NrHelper::GetUePhy(ueNetDev.Get(X), Y)
+#define GET_UE_MAC(X, Y) NrHelper::GetUeMac(ueNetDev.Get(X), Y)
 
 void
 NrTimingsTest::DoRun()
@@ -831,6 +841,13 @@ NrTimingsTest::DoRun()
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Set the spectrum channel using the UMi scenario and some attributes
+    channelHelper->ConfigureFactories("UMi");
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
     // Put the pointers inside nrHelper
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
@@ -840,19 +857,9 @@ NrTimingsTest::DoRun()
     CcBwpCreator ccBwpCreator;
     const uint8_t numCcPerBand = 1; // in this example, both bands have a single CC
 
-    CcBwpCreator::SimpleOperationBandConf bandConf1(28e9,
-                                                    100e6,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon);
-
+    CcBwpCreator::SimpleOperationBandConf bandConf1(28e9, 100e6, numCcPerBand);
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
-
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    nrHelper->InitializeOperationBand(&band1);
-
+    channelHelper->AssignChannelsToBands({band1});
     allBwps = CcBwpCreator::GetAllBwps({band1});
     // Beamforming method
     idealBeamformingHelper->SetAttribute("BeamformingMethod",
@@ -884,9 +891,7 @@ NrTimingsTest::DoRun()
     NetDeviceContainer gnbNetDev = nrHelper->InstallGnbDevice(gNbNode, allBwps);
     NetDeviceContainer ueNetDev = nrHelper->InstallUeDevice(ueNode, allBwps);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+    nrHelper->AssignStreams({.assignEpc = true, .gnbDevs = gnbNetDev, .ueDevs = ueNetDev});
 
     GET_GNB_PHY(0, 0)->TraceConnectWithoutContext("GnbPhyTxedCtrlMsgsTrace",
                                                   MakeCallback(&NrTimingsTest::GnbPhyTx, this));
@@ -908,20 +913,15 @@ NrTimingsTest::DoRun()
     GET_UE_MAC(0, 0)->TraceConnectWithoutContext("UeMacRxedCtrlMsgsTrace",
                                                  MakeCallback(&NrTimingsTest::UeMacRx, this));
 
-    // When all the configuration is done, explicitly call UpdateConfig ()
-
-    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
-
     InternetStackHelper internet;
     internet.Install(ueNode);
+    // The UE is a host, not a router: without this, the synthetic test packet (whose
+    // default IPv4 header addresses are not local to the UE) enters the forwarding path
+    // and, since ns-3.49, a no-route forwarding failure answers with an ICMP net
+    // unreachable that echoes through the EPC and back over the air, perturbing the
+    // exact message timings this test checks.
+    ueNode->GetObject<Ipv4>()->SetAttribute("IpForward", BooleanValue(false));
+    nrHelper->AssignStreams({.ueNodes = ueNode, .ueNodeStream = 1000});
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
 

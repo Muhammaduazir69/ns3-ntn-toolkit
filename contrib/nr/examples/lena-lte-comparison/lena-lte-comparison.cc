@@ -2,6 +2,21 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup examples
+ * @file lena-lte-comparison.cc
+ *
+ * @brief Core implementation of the LENA (LTE) vs 5G-LENA (NR) comparison scenario. It builds a
+ * multi-cell 3GPP deployment (UMa, UMi or RMa) of tri-sector sites, laid out either on a
+ * hexagonal grid with a configurable number of rings or from a CSV file of tower coordinates, and
+ * runs it with the LTE module (LENA v1) or the NR module (5G-LENA) so that both simulators can be
+ * compared under identical conditions. Each UE exchanges CBR UDP traffic with a remote host, from
+ * full-buffer saturation down to a single-packet latency probe, in DL or UL. Results are written
+ * to a SQLite database (<outputDir>/<simTag>.db) with SINR, UE TX power, gNB RX power, slot and
+ * RB occupancy tables, plus a FlowMonitor end-to-end table ("e2e") with per-flow throughput,
+ * delay and jitter; a DL or UL radio environment map can also be generated in the 5G-LENA case.
+ */
+
 #include "lena-lte-comparison.h"
 
 #include "flow-monitor-output-stats.h"
@@ -24,8 +39,8 @@
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/point-to-point-module.h"
-#include <ns3/radio-environment-map-helper.h>
-#include <ns3/sqlite-output.h>
+#include "ns3/radio-environment-map-helper.h"
+#include "ns3/sqlite-output.h"
 
 #include <iomanip>
 
@@ -71,7 +86,7 @@ CreateLowLatTft(uint16_t start, uint16_t end, std::string dir)
 }
 
 template Ptr<ns3::EpcTft> CreateLowLatTft<ns3::EpcTft>(uint16_t, uint16_t, std::string);
-template Ptr<ns3::NrEpcTft> CreateLowLatTft<ns3::NrEpcTft>(uint16_t, uint16_t, std::string);
+template Ptr<ns3::NrQosRule> CreateLowLatTft<ns3::NrQosRule>(uint16_t, uint16_t, std::string);
 
 static std::pair<ApplicationContainer, Time>
 InstallApps(const Ptr<Node>& ue,
@@ -92,22 +107,26 @@ InstallApps(const Ptr<Node>& ue,
 
     // The bearer that will carry low latency traffic
     EpsBearer lowLatBearer(EpsBearer::NGBR_VIDEO_TCP_DEFAULT);
-    NrEpsBearer nrLowLatBearer(NrEpsBearer::NGBR_VIDEO_TCP_DEFAULT);
+    NrQosFlow nrLowLatFlow(NrQosFlow::NGBR_VIDEO_TCP_DEFAULT);
 
     // The filter for the low-latency traffic
     Ptr<EpcTft> lowLatTft = CreateLowLatTft<EpcTft>(dlPortLowLat, dlPortLowLat, direction);
-    Ptr<NrEpcTft> nrLowLatTft = CreateLowLatTft<NrEpcTft>(dlPortLowLat, dlPortLowLat, direction);
+    Ptr<NrQosRule> nrLowLatTft = CreateLowLatTft<NrQosRule>(dlPortLowLat, dlPortLowLat, direction);
 
     // The client, who is transmitting, is installed in the remote host,
     // with destination address set to the address of the UE
     if (direction == "DL")
     {
-        dlClientLowLat->SetAttribute("RemoteAddress", AddressValue(ueAddress));
+        dlClientLowLat->SetAttribute(
+            "Remote",
+            AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
         app = dlClientLowLat->Install(remoteHost);
     }
     else
     {
-        dlClientLowLat->SetAttribute("RemoteAddress", AddressValue(remoteHostAddr));
+        dlClientLowLat->SetAttribute(
+            "Remote",
+            AddressValue(addressUtils::ConvertToSocketAddress(remoteHostAddr, dlPortLowLat)));
         app = dlClientLowLat->Install(ue);
     }
 
@@ -127,7 +146,7 @@ InstallApps(const Ptr<Node>& ue,
     }
     else if (nrHelper != nullptr)
     {
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, nrLowLatBearer, nrLowLatTft);
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, nrLowLatFlow, nrLowLatTft);
     }
 
     return std::make_pair(app, startTime);
@@ -297,6 +316,7 @@ LenaLteComparison(const Parameters& params)
      */
     std::cout << "  max tx buffer size\n";
     Config::SetDefault("ns3::LteRlcUm::MaxTxBufferSize", UintegerValue(999999999));
+    Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
 
     /*
      * Create the scenario. In our examples, we heavily use helpers that setup
@@ -607,8 +627,8 @@ LenaLteComparison(const Parameters& params)
         else if (nrHelper != nullptr)
         {
             nrHelper->AttachToGnb(ueNetDev, gnbNetDev);
-            auto uePhyBwp0{nrHelper->GetUePhy(ueNetDev, 0)};
-            auto gnbPhyBwp0{nrHelper->GetGnbPhy(gnbNetDev, 0)};
+            auto uePhyBwp0{NrHelper::GetUePhy(ueNetDev, 0)};
+            auto gnbPhyBwp0{NrHelper::GetGnbPhy(gnbNetDev, 0)};
             Vector gnbpos = gnbNetDev->GetNode()->GetObject<MobilityModel>()->GetPosition();
             Vector uepos = ueNetDev->GetNode()->GetObject<MobilityModel>()->GetPosition();
             double distance = CalculateDistance(gnbpos, uepos);
@@ -658,7 +678,6 @@ LenaLteComparison(const Parameters& params)
               << "\n    max packets: " << packetCount << std::endl;
 
     UdpClientHelper dlClientLowLat;
-    dlClientLowLat.SetAttribute("RemotePort", UintegerValue(dlPortLowLat));
     dlClientLowLat.SetAttribute("MaxPackets", UintegerValue(packetCount));
     dlClientLowLat.SetAttribute("PacketSize", UintegerValue(udpPacketSize));
     dlClientLowLat.SetAttribute("Interval", TimeValue(interval));
@@ -926,7 +945,7 @@ operator<<(std::ostream& os, const Parameters& parameters)
         MSG("Number of outer rings") << p.numOuterRings;
     }
     MSG("Number of UEs per sector") << p.ueNumPergNb;
-    MSG("Antenna down tilt angle (deg)") << p.downtiltAngle;
+    MSG("Antenna downtilt angle (deg)") << p.downtiltAngle;
 
     MSG("");
     MSG("Network loading") << p.trafficScenario;

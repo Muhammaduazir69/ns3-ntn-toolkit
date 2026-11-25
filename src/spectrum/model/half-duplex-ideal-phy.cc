@@ -11,13 +11,13 @@
 #include "half-duplex-ideal-phy-signal-parameters.h"
 #include "spectrum-error-model.h"
 
-#include <ns3/antenna-model.h>
-#include <ns3/callback.h>
-#include <ns3/log.h>
-#include <ns3/object-factory.h>
-#include <ns3/packet-burst.h>
-#include <ns3/simulator.h>
-#include <ns3/trace-source-accessor.h>
+#include "ns3/antenna-model.h"
+#include "ns3/callback.h"
+#include "ns3/log.h"
+#include "ns3/object-factory.h"
+#include "ns3/packet-burst.h"
+#include "ns3/simulator.h"
+#include "ns3/trace-source-accessor.h"
 
 #include <cmath>
 
@@ -61,10 +61,10 @@ HalfDuplexIdealPhy::DoDispose()
 }
 
 /**
- * \brief Output stream operator
- * \param os output stream
- * \param s the state to print
- * \return an output stream
+ * @brief Output stream operator
+ * @param os output stream
+ * @param s the state to print
+ * @return an output stream
  */
 std::ostream&
 operator<<(std::ostream& os, HalfDuplexIdealPhy::State s)

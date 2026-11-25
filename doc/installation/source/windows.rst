@@ -18,6 +18,7 @@ via the Msys2/MinGW64 toolchain.  Both options are listed below; users may choos
 either WSL or the Msys2/MinGW64 toolchain (installing both is not required).
 
 .. note::
+
   |ns3| is not fully compatible with Visual Studio IDE / MSVC compiler; only Visual Studio Code
   editor, the Msys2/MinGW64 toolchain, and WSL, as explained below.
 
@@ -56,9 +57,13 @@ Installation of the Msys2 environment
 The `Msys2`_ includes ports of Unix tools for Windows built with multiple toolchains,
 including: MinGW32, MinGW64, Clang64, UCRT.
 
-|ns3| has been tested with the  MinGW64 (GCC) toolchain.  MinGW32 is 32-bit, which |ns3| does
-not support.  The project's Windows maintainer has tested Clang64 unsuccessfully, and has
-not tested the UCRT toolchain (which may work).
+|ns3| is tested with the UCRT64 (GCC) toolchain.  The MinGW64 (GCC) toolchain should also
+work, but is no longer tested.  MinGW32 is 32-bit, which |ns3| does not support.  The project's
+Windows maintainer has tested Clang64 unsuccessfully.
+
+The instructions below use the MinGW64 toolchain.  To use UCRT64 instead, replace
+``msys64\mingw64\bin`` with ``msys64\ucrt64\bin``, ``MSYSTEM MINGW64`` with ``MSYSTEM UCRT64``,
+and the ``mingw-w64-x86_64-*`` packages with ``mingw-w64-ucrt-x86_64-*``.
 
 The `Msys2`_ installer can be found on their site.
 Msys2 will be installed by default in the ``C:\msys64`` directory.
@@ -113,7 +118,7 @@ This is the minimal set of packages needed to run ns-3 C++ programs from a relea
 Netanim animator
 ++++++++++++++++
 
-Qt5 development tools are needed for Netanim animator. Qt4 will also work but we have migrated to qt5.
+Qt5 or Qt6 development tools are needed for Netanim animator.
 
 .. sourcecode:: console
 
@@ -267,7 +272,6 @@ Save the following Dockerfile to the base directory.
                        mingw-w64-x86_64-qt5 \
                        git \
                        mingw-w64-x86_64-msmpi \
-                       mingw-w64-x86_64-uncrustify \
                        mingw-w64-x86_64-imagemagick \
                        mingw-w64-x86_64-doxygen \
                        mingw-w64-x86_64-graphviz \
@@ -717,7 +721,7 @@ Calculate the MD5 hash of your BOX_FILE.box and fill the field then click to pro
 
 Upload the box.
 
-Now you should be able to download your box from the Vagrant servers via the the following command.
+Now you should be able to download your box from the Vagrant servers via the following command.
 
 .. sourcecode:: console
 

@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /**
- * \ingroup examples
- * \file cttc-nr-demo.cc
- * \brief A cozy, simple, NR demo (in a tutorial style)
+ * @ingroup examples
+ * @file cttc-nr-demo.cc
+ * @brief A cozy, simple, NR demo (in a tutorial style)
  *
  * Notice: this entire program uses technical terms defined by the 3GPP TS 38.300 [1].
  *
@@ -198,7 +198,6 @@ main(int argc, char* argv[])
      * the gnbs and ue following a pre-defined pattern. Please have a look at the
      * GridScenarioHelper documentation to see how the nodes will be distributed.
      */
-    int64_t randomStream = 1;
     GridScenarioHelper gridScenario;
     gridScenario.SetRows(1);
     gridScenario.SetColumns(gNbNum);
@@ -213,7 +212,6 @@ main(int argc, char* argv[])
     gridScenario.SetUtNumber(ueNumPergNb * gNbNum);
     gridScenario.SetScenarioHeight(3); // Create a 3x3 scenario where the UE will
     gridScenario.SetScenarioLength(3); // be distributed.
-    randomStream += gridScenario.AssignStreams(randomStream);
     gridScenario.CreateScenario();
 
     /*
@@ -250,6 +248,7 @@ main(int argc, char* argv[])
      * - IdealBeamformingHelper, which takes care of the beamforming part
      * - NrHelper, which takes care of creating and connecting the various
      * part of the NR stack
+     * - NrChannelHelper, which takes care of the spectrum channel
      */
     Ptr<NrPointToPointEpcHelper> nrEpcHelper = CreateObject<NrPointToPointEpcHelper>();
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
@@ -274,15 +273,14 @@ main(int argc, char* argv[])
     // a single BWP per CC
     CcBwpCreator::SimpleOperationBandConf bandConf1(centralFrequencyBand1,
                                                     bandwidthBand1,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon);
+                                                    numCcPerBand);
+
+    // Create the band and install the channel into it
+    OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
+    // Set the channel for the band
     CcBwpCreator::SimpleOperationBandConf bandConf2(centralFrequencyBand2,
                                                     bandwidthBand2,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon);
-
-    // By using the configuration created, it is time to make the operation bands
-    OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
+                                                    numCcPerBand);
     OperationBandInfo band2 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf2);
 
     /*
@@ -293,40 +291,37 @@ main(int argc, char* argv[])
      */
 
     /*
-     * Attributes of ThreeGppChannelModel still cannot be set in our way.
-     * TODO: Coordinate with Tommaso
-     */
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    /*
-     * Initialize channel and pathloss, plus other things inside band1. If needed,
-     * the band configuration can be done manually, but we leave it for more
-     * sophisticated examples. For the moment, this method will take care
-     * of all the spectrum initialization needs.
-     */
-    nrHelper->InitializeOperationBand(&band1);
-
-    /*
      * Start to account for the bandwidth used by the example, as well as
      * the total power that has to be divided among the BWPs.
      */
     double x = pow(10, totalTxPower / 10);
     double totalBandwidth = bandwidthBand1;
+    /**
+     * The channel is configured by this helper using a combination of the scenario, the channel
+     * condition model, and the fading model.
+     */
 
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigureFactories("UMi", "Default", "ThreeGpp");
+    /**
+     * Use channelHelper API to define the attributes for the channel model (condition, pathloss and
+     * spectrum)
+     */
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     /*
-     * if not single band simulation, initialize and setup power in the second band
+     * if not single band simulation, initialize and setup power in the second band.
+     * Install channel and pathloss, plus other things inside single or both bands.
      */
     if (doubleOperationalBand)
     {
-        // Initialize channel and pathloss, plus other things inside band2
-        nrHelper->InitializeOperationBand(&band2);
+        channelHelper->AssignChannelsToBands({band1, band2});
         totalBandwidth += bandwidthBand2;
         allBwps = CcBwpCreator::GetAllBwps({band1, band2});
     }
     else
     {
+        channelHelper->AssignChannelsToBands({band1});
         allBwps = CcBwpCreator::GetAllBwps({band1});
     }
 
@@ -386,10 +381,6 @@ main(int argc, char* argv[])
                                                  UintegerValue(bwpIdForLowLat));
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForVoice));
 
-    // Ue routing between Bearer and bandwidth part
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdForLowLat));
-    nrHelper->SetUeBwpManagerAlgorithmAttribute("GBR_CONV_VOICE", UintegerValue(bwpIdForVoice));
-
     /*
      * We miss many other parameters. By default, not configuring them is equivalent
      * to use the default values. Please, have a look at the documentation to see
@@ -412,9 +403,10 @@ main(int argc, char* argv[])
     NetDeviceContainer ueLowLatNetDev = nrHelper->InstallUeDevice(ueLowLatContainer, allBwps);
     NetDeviceContainer ueVoiceNetDev = nrHelper->InstallUeDevice(ueVoiceContainer, allBwps);
 
-    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueLowLatNetDev, randomStream);
-    randomStream += nrHelper->AssignStreams(ueVoiceNetDev, randomStream);
+    NetDeviceContainer ueNetDevs;
+    ueNetDevs.Add(ueLowLatNetDev);
+    ueNetDevs.Add(ueVoiceNetDev);
+    nrHelper->AssignStreams({.scenario = &gridScenario, .gnbDevs = gnbNetDev, .ueDevs = ueNetDevs});
     /*
      * Case (iii): Go node for node and change the attributes we have to setup
      * per-node.
@@ -422,68 +414,35 @@ main(int argc, char* argv[])
 
     // Get the first netdevice (gnbNetDev.Get (0)) and the first bandwidth part (0)
     // and set the attribute.
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("Numerology", UintegerValue(numerologyBwp1));
-    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+    NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)
         ->SetAttribute("TxPower", DoubleValue(10 * log10((bandwidthBand1 / totalBandwidth) * x)));
 
     if (doubleOperationalBand)
     {
         // Get the first netdevice (gnbNetDev.Get (0)) and the second bandwidth part (1)
         // and set the attribute.
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
             ->SetAttribute("Numerology", UintegerValue(numerologyBwp2));
-        nrHelper->GetGnbPhy(gnbNetDev.Get(0), 1)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)
             ->SetTxPower(10 * log10((bandwidthBand2 / totalBandwidth) * x));
     }
-
-    // When all the configuration is done, explicitly call UpdateConfig ()
-    // Instead of calling individually for each netDevice, we can call
-    // NrHelper::UpdateDeviceConfigs() to update a NetDeviceContainer with a single call. This was
-    // introduced with the v.3.2 Release.
-    nrHelper->UpdateDeviceConfigs(gnbNetDev);
-    nrHelper->UpdateDeviceConfigs(ueLowLatNetDev);
-    nrHelper->UpdateDeviceConfigs(ueVoiceNetDev);
 
     // From here, it is standard NS3. In the future, we will create helpers
     // for this part as well.
 
-    // create the internet and install the IP stack on the UEs
-    // get SGW/PGW and create a single RemoteHost
-    Ptr<Node> pgw = nrEpcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    auto [remoteHost, remoteHostIpv4Address] =
+        nrEpcHelper->SetupRemoteHost("100Gb/s", 2500, Seconds(0.000));
 
-    // connect a remoteHost to pgw. Setup routing too
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    InternetStackHelper internet;
+
     internet.Install(gridScenario.GetUserTerminals());
 
     Ipv4InterfaceContainer ueLowLatIpIface =
         nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueLowLatNetDev));
     Ipv4InterfaceContainer ueVoiceIpIface =
         nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueVoiceNetDev));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < gridScenario.GetUserTerminals().GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(
-            gridScenario.GetUserTerminals().Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ueLowLatNetDev, gnbNetDev);
@@ -513,37 +472,35 @@ main(int argc, char* argv[])
      * Low-Latency configuration and object creation:
      */
     UdpClientHelper dlClientLowLat;
-    dlClientLowLat.SetAttribute("RemotePort", UintegerValue(dlPortLowLat));
     dlClientLowLat.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientLowLat.SetAttribute("PacketSize", UintegerValue(udpPacketSizeULL));
     dlClientLowLat.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaULL)));
 
     // The bearer that will carry low latency traffic
-    NrEpsBearer lowLatBearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
+    NrQosFlow lowLatFlow(NrQosFlow::NGBR_LOW_LAT_EMBB);
 
     // The filter for the low-latency traffic
-    Ptr<NrEpcTft> lowLatTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfLowLat;
+    Ptr<NrQosRule> lowLatRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfLowLat;
     dlpfLowLat.localPortStart = dlPortLowLat;
     dlpfLowLat.localPortEnd = dlPortLowLat;
-    lowLatTft->Add(dlpfLowLat);
+    lowLatRule->Add(dlpfLowLat);
 
     // Voice configuration and object creation:
     UdpClientHelper dlClientVoice;
-    dlClientVoice.SetAttribute("RemotePort", UintegerValue(dlPortVoice));
     dlClientVoice.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
     dlClientVoice.SetAttribute("PacketSize", UintegerValue(udpPacketSizeBe));
     dlClientVoice.SetAttribute("Interval", TimeValue(Seconds(1.0 / lambdaBe)));
 
     // The bearer that will carry voice traffic
-    NrEpsBearer voiceBearer(NrEpsBearer::GBR_CONV_VOICE);
+    NrQosFlow voiceFlow(NrQosFlow::GBR_CONV_VOICE);
 
     // The filter for the voice traffic
-    Ptr<NrEpcTft> voiceTft = Create<NrEpcTft>();
-    NrEpcTft::PacketFilter dlpfVoice;
+    Ptr<NrQosRule> voiceRule = Create<NrQosRule>();
+    NrQosRule::PacketFilter dlpfVoice;
     dlpfVoice.localPortStart = dlPortVoice;
     dlpfVoice.localPortEnd = dlPortVoice;
-    voiceTft->Add(dlpfVoice);
+    voiceRule->Add(dlpfVoice);
 
     /*
      * Let's install the applications!
@@ -558,11 +515,13 @@ main(int argc, char* argv[])
 
         // The client, who is transmitting, is installed in the remote host,
         // with destination address set to the address of the UE
-        dlClientLowLat.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+        dlClientLowLat.SetAttribute(
+            "Remote",
+            AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortLowLat)));
         clientApps.Add(dlClientLowLat.Install(remoteHost));
 
         // Activate a dedicated bearer for the traffic type
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, lowLatBearer, lowLatTft);
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, lowLatFlow, lowLatRule);
     }
 
     for (uint32_t i = 0; i < ueVoiceContainer.GetN(); ++i)
@@ -573,11 +532,13 @@ main(int argc, char* argv[])
 
         // The client, who is transmitting, is installed in the remote host,
         // with destination address set to the address of the UE
-        dlClientVoice.SetAttribute("RemoteAddress", AddressValue(ueAddress));
+        dlClientVoice.SetAttribute(
+            "Remote",
+            AddressValue(addressUtils::ConvertToSocketAddress(ueAddress, dlPortVoice)));
         clientApps.Add(dlClientVoice.Install(remoteHost));
 
         // Activate a dedicated bearer for the traffic type
-        nrHelper->ActivateDedicatedEpsBearer(ueDevice, voiceBearer, voiceTft);
+        nrHelper->ActivateDedicatedQosFlow(ueDevice, voiceFlow, voiceRule);
     }
 
     // start UDP server and client apps
@@ -630,9 +591,7 @@ main(int argc, char* argv[])
     outFile.setf(std::ios_base::fixed);
 
     double flowDuration = (simTime - udpAppStartTime).GetSeconds();
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
+    for (auto i = stats.begin(); i != stats.end(); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         std::stringstream protoStream;

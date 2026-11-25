@@ -7,15 +7,17 @@
  *  Alberto Gallegos Ramonet <ramonet@fc.ritsumei.ac.jp>
  */
 
-#include <ns3/constant-position-mobility-model.h>
-#include <ns3/core-module.h>
-#include <ns3/log.h>
-#include <ns3/lr-wpan-module.h>
-#include <ns3/packet.h>
-#include <ns3/propagation-delay-model.h>
-#include <ns3/propagation-loss-model.h>
-#include <ns3/simulator.h>
-#include <ns3/single-model-spectrum-channel.h>
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/log.h"
+#include "ns3/lr-wpan-csmaca.h"
+#include "ns3/lr-wpan-net-device.h"
+#include "ns3/node.h"
+#include "ns3/packet.h"
+#include "ns3/propagation-delay-model.h"
+#include "ns3/propagation-loss-model.h"
+#include "ns3/simulator.h"
+#include "ns3/single-model-spectrum-channel.h"
+#include "ns3/test.h"
 
 using namespace ns3;
 using namespace ns3::lrwpan;
@@ -23,10 +25,10 @@ using namespace ns3::lrwpan;
 NS_LOG_COMPONENT_DEFINE("lr-wpan-slotted-csma-test");
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief Test the correct allocation of DIRECT transmissions in the
+ * @brief Test the correct allocation of DIRECT transmissions in the
  *        contention access period (CAP) of the superframe
  *        (Slotted CSMA-CA algorithm).
  */
@@ -38,41 +40,41 @@ class LrWpanSlottedCsmacaTestCase : public TestCase
 
   private:
     /**
-     * \brief Function called when McpsDataConfirm is hit.
-     * \param testcase The TestCase.
-     * \param dev The LrWpanNetDevice.
-     * \param params The McpsDataConfirm parameters.
+     * @brief Function called when McpsDataConfirm is hit.
+     * @param testcase The TestCase.
+     * @param dev The LrWpanNetDevice.
+     * @param params The McpsDataConfirm parameters.
      */
     static void TransEndIndication(LrWpanSlottedCsmacaTestCase* testcase,
                                    Ptr<LrWpanNetDevice> dev,
                                    McpsDataConfirmParams params);
     /**
-     * \brief Function called when McpsDataIndication is hit.
-     * \param testcase The TestCase.
-     * \param dev The LrWpanNetDevice.
-     * \param params The McpsDataIndication parameters.
-     * \param p The received packet.
+     * @brief Function called when McpsDataIndication is hit.
+     * @param testcase The TestCase.
+     * @param dev The LrWpanNetDevice.
+     * @param params The McpsDataIndication parameters.
+     * @param p The received packet.
      */
     static void DataIndicationCoordinator(LrWpanSlottedCsmacaTestCase* testcase,
                                           Ptr<LrWpanNetDevice> dev,
                                           McpsDataIndicationParams params,
                                           Ptr<Packet> p);
     /**
-     * \brief Function called when MlmeStartConfirm is hit.
-     * \param testcase The TestCase.
-     * \param dev The LrWpanNetDevice.
-     * \param params The MlmeStartConfirm parameters.
+     * @brief Function called when MlmeStartConfirm is hit.
+     * @param testcase The TestCase.
+     * @param dev The LrWpanNetDevice.
+     * @param params The MlmeStartConfirm parameters.
      */
     static void StartConfirm(LrWpanSlottedCsmacaTestCase* testcase,
                              Ptr<LrWpanNetDevice> dev,
                              MlmeStartConfirmParams params);
 
     /**
-     * \brief Function called on each Superframe status change (CAP|CFP|INACTIVE).
-     * \param testcase The TestCase.
-     * \param dev The LrWpanNetDevice.
-     * \param oldValue The previous superframe status.
-     * \param newValue THe new superframe status.
+     * @brief Function called on each Superframe status change (CAP|CFP|INACTIVE).
+     * @param testcase The TestCase.
+     * @param dev The LrWpanNetDevice.
+     * @param oldValue The previous superframe status.
+     * @param newValue THe new superframe status.
      */
     static void IncomingSuperframeStatus(LrWpanSlottedCsmacaTestCase* testcase,
                                          Ptr<LrWpanNetDevice> dev,
@@ -80,10 +82,10 @@ class LrWpanSlottedCsmacaTestCase : public TestCase
                                          SuperframeStatus newValue);
 
     /**
-     * \brief Function called to indicated the calculated transaction cost in slotted CSMA-CA
-     * \param testcase The TestCase.
-     * \param dev The LrWpanNetDevice.
-     * \param trans The transaction cost in symbols.
+     * @brief Function called to indicated the calculated transaction cost in slotted CSMA-CA
+     * @param testcase The TestCase.
+     * @param dev The LrWpanNetDevice.
+     * @param trans The transaction cost in symbols.
      */
     static void TransactionCost(LrWpanSlottedCsmacaTestCase* testcase,
                                 Ptr<LrWpanNetDevice> dev,
@@ -243,7 +245,7 @@ LrWpanSlottedCsmacaTestCase::DoRun()
     params.m_bcnOrd = 14;
     params.m_sfrmOrd = 6;
     Simulator::ScheduleWithContext(1,
-                                   Seconds(2.0),
+                                   Seconds(2),
                                    &LrWpanMac::MlmeStartRequest,
                                    dev0->GetMac(),
                                    params);
@@ -324,14 +326,19 @@ LrWpanSlottedCsmacaTestCase::DoRun()
                           (m_apBoundary + transactionTime),
                           "Error, the transaction time is not the expected value");
 
+    // Disconnect traces to eliminate valgrid errors
+    dev1->GetMac()->TraceDisconnectWithoutContext(
+        "MacIncSuperframeStatus",
+        MakeBoundCallback(&LrWpanSlottedCsmacaTestCase::IncomingSuperframeStatus, this, dev1));
+
     Simulator::Destroy();
 }
 
 /**
- * \ingroup lr-wpan-test
- * \ingroup tests
+ * @ingroup lr-wpan-test
+ * @ingroup tests
  *
- * \brief LrWpan Slotted CSMA-CA TestSuite
+ * @brief LrWpan Slotted CSMA-CA TestSuite
  */
 
 class LrWpanSlottedCsmacaTestSuite : public TestSuite

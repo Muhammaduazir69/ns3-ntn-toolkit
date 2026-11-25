@@ -14,9 +14,9 @@ namespace ns3
 {
 
 /**
- * \ingroup mobility
+ * @ingroup mobility
  *
- * \brief Mobility model for which the current position does not change once it has been set and
+ * @brief Mobility model for which the current position does not change once it has been set and
  * until it is set again explicitly to a new value.
  */
 class ConstantPositionMobilityModel : public MobilityModel
@@ -24,7 +24,7 @@ class ConstantPositionMobilityModel : public MobilityModel
   public:
     /**
      * Register this type with the TypeId system.
-     * \return the object TypeId
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     /**
@@ -32,6 +32,12 @@ class ConstantPositionMobilityModel : public MobilityModel
      */
     ConstantPositionMobilityModel();
     ~ConstantPositionMobilityModel() override;
+
+    // Inherited from MobilityModel
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<ConstantPositionMobilityModel>(*this);
+    }
 
   private:
     Vector DoGetPosition() const override;

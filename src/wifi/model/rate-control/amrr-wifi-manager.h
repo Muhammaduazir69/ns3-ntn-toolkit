@@ -10,6 +10,7 @@
 #define AMRR_WIFI_MANAGER_H
 
 #include "ns3/traced-value.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-remote-station-manager.h"
 
 namespace ns3
@@ -18,8 +19,8 @@ namespace ns3
 struct AmrrWifiRemoteStation;
 
 /**
- * \brief AMRR Rate control algorithm
- * \ingroup wifi
+ * @brief AMRR Rate control algorithm
+ * @ingroup wifi
  *
  * This class implements the AMRR rate control algorithm which
  * was initially described in <i>IEEE 802.11 Rate Adaptation:
@@ -30,12 +31,12 @@ struct AmrrWifiRemoteStation;
  * exit if the user tries to configure this RAA with a Wi-Fi MAC
  * that supports 802.11n or higher.
  */
-class AmrrWifiManager : public WifiRemoteStationManager
+class WIFI_EXPORT AmrrWifiManager : public WifiRemoteStationManager
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -66,34 +67,34 @@ class AmrrWifiManager : public WifiRemoteStationManager
     /**
      * Update the mode used to send to the given station.
      *
-     * \param station the remote station state
+     * @param station the remote station state
      */
     void UpdateMode(AmrrWifiRemoteStation* station);
     /**
      * Reset transmission statistics of the given station.
      *
-     * \param station the remote station state
+     * @param station the remote station state
      */
     void ResetCnt(AmrrWifiRemoteStation* station);
     /**
      * Increase the transmission rate to the given station.
      *
-     * \param station the remote station state
+     * @param station the remote station state
      */
     void IncreaseRate(AmrrWifiRemoteStation* station);
     /**
      * Decrease the transmission rate to the given station.
      *
-     * \param station the remote station state
+     * @param station the remote station state
      */
     void DecreaseRate(AmrrWifiRemoteStation* station);
     /**
      * Check if the current rate for the given station is the
      * minimum rate.
      *
-     * \param station the remote station state
+     * @param station the remote station state
      *
-     * \return true if the current rate is the minimum rate,
+     * @return true if the current rate is the minimum rate,
      *         false otherwise
      */
     bool IsMinRate(AmrrWifiRemoteStation* station) const;
@@ -101,9 +102,9 @@ class AmrrWifiManager : public WifiRemoteStationManager
      * Check if the current rate for the given station is the
      * maximum rate.
      *
-     * \param station the remote station state
+     * @param station the remote station state
      *
-     * \return true if the current rate is the maximum rate,
+     * @return true if the current rate is the maximum rate,
      *         false otherwise
      */
     bool IsMaxRate(AmrrWifiRemoteStation* station) const;
@@ -111,9 +112,9 @@ class AmrrWifiManager : public WifiRemoteStationManager
      * Check if the number of retransmission and transmission error
      * is less than the number of successful transmission (times ratio).
      *
-     * \param station the remote station state
+     * @param station the remote station state
      *
-     * \return true if the number of retransmission and transmission error
+     * @return true if the number of retransmission and transmission error
      *              is less than the number of successful transmission
      *              (times ratio), false otherwise
      */
@@ -122,9 +123,9 @@ class AmrrWifiManager : public WifiRemoteStationManager
      * Check if the number of retransmission and transmission error
      * is greater than the number of successful transmission (times ratio).
      *
-     * \param station the remote station state
+     * @param station the remote station state
      *
-     * \return true if the number of retransmission and transmission error
+     * @return true if the number of retransmission and transmission error
      *              is less than the number of successful transmission
      *              (times ratio), false otherwise
      */
@@ -133,8 +134,8 @@ class AmrrWifiManager : public WifiRemoteStationManager
      * Check if the number of retransmission, transmission error,
      * and successful transmission are greater than 10.
      *
-     * \param station the remote station state
-     * \return true if the number of retransmission, transmission error,
+     * @param station the remote station state
+     * @return true if the number of retransmission, transmission error,
      *         and successful transmission are greater than 10,
      *         false otherwise
      */

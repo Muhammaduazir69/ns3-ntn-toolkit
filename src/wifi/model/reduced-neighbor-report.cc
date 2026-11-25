@@ -9,6 +9,7 @@
 #include "reduced-neighbor-report.h"
 
 #include "wifi-phy-operating-channel.h"
+#include "wifi-utils.h"
 
 #include "ns3/abort.h"
 #include "ns3/address-utils.h"
@@ -53,17 +54,17 @@ ReducedNeighborReport::SetOperatingChannel(std::size_t nbrApInfoId,
     switch (channel.GetPhyBand())
     {
     case WIFI_PHY_BAND_2_4GHZ:
-        if (channel.GetWidth() == 20)
+        if (channel.GetWidth() == MHz_u{20})
         {
             operatingClass = 81;
         }
-        else if (channel.GetWidth() == 40)
+        else if (channel.GetWidth() == MHz_u{40})
         {
             operatingClass = 83;
         }
         break;
     case WIFI_PHY_BAND_5GHZ:
-        if (channel.GetWidth() == 20)
+        if (channel.GetWidth() == MHz_u{20})
         {
             if (channelNumber == 36 || channelNumber == 40 || channelNumber == 44 ||
                 channelNumber == 48)
@@ -89,7 +90,7 @@ ReducedNeighborReport::SetOperatingChannel(std::size_t nbrApInfoId,
                 operatingClass = 125;
             }
         }
-        else if (channel.GetWidth() == 40)
+        else if (channel.GetWidth() == MHz_u{40})
         {
             if (channelNumber == 38 || channelNumber == 46)
             {
@@ -110,7 +111,7 @@ ReducedNeighborReport::SetOperatingChannel(std::size_t nbrApInfoId,
                 operatingClass = 126;
             }
         }
-        else if (channel.GetWidth() == 80)
+        else if (channel.GetWidth() == MHz_u{80})
         {
             if (channelNumber == 42 || channelNumber == 58 || channelNumber == 106 ||
                 channelNumber == 122 || channelNumber == 138 || channelNumber == 155 ||
@@ -119,7 +120,7 @@ ReducedNeighborReport::SetOperatingChannel(std::size_t nbrApInfoId,
                 operatingClass = 128;
             }
         }
-        else if (channel.GetWidth() == 160)
+        else if (channel.GetWidth() == MHz_u{160})
         {
             if (channelNumber == 50 || channelNumber == 114 || channelNumber == 163)
             {
@@ -128,21 +129,25 @@ ReducedNeighborReport::SetOperatingChannel(std::size_t nbrApInfoId,
         }
         break;
     case WIFI_PHY_BAND_6GHZ:
-        if (channel.GetWidth() == 20)
+        if (channel.GetWidth() == MHz_u{20})
         {
             operatingClass = 131;
         }
-        else if (channel.GetWidth() == 40)
+        else if (channel.GetWidth() == MHz_u{40})
         {
             operatingClass = 132;
         }
-        else if (channel.GetWidth() == 80)
+        else if (channel.GetWidth() == MHz_u{80})
         {
             operatingClass = 133;
         }
-        else if (channel.GetWidth() == 160)
+        else if (channel.GetWidth() == MHz_u{160})
         {
             operatingClass = 134;
+        }
+        else if (channel.GetWidth() == MHz_u{320})
+        {
+            operatingClass = 137;
         }
         break;
     case WIFI_PHY_BAND_UNSPECIFIED:
@@ -153,22 +158,22 @@ ReducedNeighborReport::SetOperatingChannel(std::size_t nbrApInfoId,
 
     NS_ABORT_MSG_IF(operatingClass == 0,
                     "Operating class not found for channel number "
-                        << channelNumber << " width " << channel.GetWidth() << " MHz "
+                        << +channelNumber << " width " << channel.GetWidth() << " MHz "
                         << "band " << channel.GetPhyBand());
 
     // find the primary channel number
-    MHz_u startingFreq = 0;
+    MHz_u startingFreq{0};
 
     switch (channel.GetPhyBand())
     {
     case WIFI_PHY_BAND_2_4GHZ:
-        startingFreq = 2407;
+        startingFreq = MHz_u{2407};
         break;
     case WIFI_PHY_BAND_5GHZ:
-        startingFreq = 5000;
+        startingFreq = MHz_u{5000};
         break;
     case WIFI_PHY_BAND_6GHZ:
-        startingFreq = 5950;
+        startingFreq = MHz_u{5950};
         break;
     case WIFI_PHY_BAND_UNSPECIFIED:
     default:
@@ -177,7 +182,7 @@ ReducedNeighborReport::SetOperatingChannel(std::size_t nbrApInfoId,
     }
 
     uint8_t primaryChannelNumber =
-        (channel.GetPrimaryChannelCenterFrequency(20) - startingFreq) / 5;
+        (channel.GetPrimaryChannelCenterFrequency(MHz_u{20}) - startingFreq) / MHz_u{5};
 
     m_nbrApInfoFields.at(nbrApInfoId).operatingClass = operatingClass;
     m_nbrApInfoFields.at(nbrApInfoId).channelNumber = primaryChannelNumber;
@@ -189,74 +194,78 @@ ReducedNeighborReport::GetOperatingChannel(std::size_t nbrApInfoId) const
     NS_ASSERT(nbrApInfoId < m_nbrApInfoFields.size());
 
     WifiPhyBand band = WIFI_PHY_BAND_UNSPECIFIED;
-    MHz_u width = 0;
+    MHz_u width{0};
 
     switch (m_nbrApInfoFields.at(nbrApInfoId).operatingClass)
     {
     case 81:
         band = WIFI_PHY_BAND_2_4GHZ;
-        width = 20;
+        width = MHz_u{20};
         break;
     case 83:
         band = WIFI_PHY_BAND_2_4GHZ;
-        width = 40;
+        width = MHz_u{40};
         break;
     case 115:
     case 118:
     case 121:
     case 125:
         band = WIFI_PHY_BAND_5GHZ;
-        width = 20;
+        width = MHz_u{20};
         break;
     case 116:
     case 119:
     case 122:
     case 126:
         band = WIFI_PHY_BAND_5GHZ;
-        width = 40;
+        width = MHz_u{40};
         break;
     case 128:
         band = WIFI_PHY_BAND_5GHZ;
-        width = 80;
+        width = MHz_u{80};
         break;
     case 129:
         band = WIFI_PHY_BAND_5GHZ;
-        width = 160;
+        width = MHz_u{160};
         break;
     case 131:
         band = WIFI_PHY_BAND_6GHZ;
-        width = 20;
+        width = MHz_u{20};
         break;
     case 132:
         band = WIFI_PHY_BAND_6GHZ;
-        width = 40;
+        width = MHz_u{40};
         break;
     case 133:
         band = WIFI_PHY_BAND_6GHZ;
-        width = 80;
+        width = MHz_u{80};
         break;
     case 134:
         band = WIFI_PHY_BAND_6GHZ;
-        width = 160;
+        width = MHz_u{160};
+        break;
+    case 137:
+        band = WIFI_PHY_BAND_6GHZ;
+        width = MHz_u{320};
         break;
     default:
         break;
     }
 
-    NS_ABORT_IF(band == WIFI_PHY_BAND_UNSPECIFIED || width == 0);
+    NS_ABORT_IF(band == WIFI_PHY_BAND_UNSPECIFIED || width == MHz_u{0});
 
-    MHz_u startingFreq = 0;
+    MHz_u startingFreq{0};
 
     switch (band)
     {
     case WIFI_PHY_BAND_2_4GHZ:
-        startingFreq = 2407;
+        startingFreq = MHz_u{2407};
         break;
     case WIFI_PHY_BAND_5GHZ:
-        startingFreq = 5000;
+        startingFreq = MHz_u{5000};
         break;
     case WIFI_PHY_BAND_6GHZ:
-        startingFreq = 5950;
+        startingFreq = MHz_u{5950};
         break;
     case WIFI_PHY_BAND_UNSPECIFIED:
     default:
@@ -265,10 +274,10 @@ ReducedNeighborReport::GetOperatingChannel(std::size_t nbrApInfoId) const
     }
 
     uint8_t primaryChannelNumber = m_nbrApInfoFields.at(nbrApInfoId).channelNumber;
-    MHz_u primaryChannelCenterFrequency = startingFreq + primaryChannelNumber * 5;
+    auto primaryChannelCenterFrequency = startingFreq + primaryChannelNumber * MHz_u{5};
 
     uint8_t channelNumber = 0;
-    MHz_u frequency = 0;
+    MHz_u frequency{0};
 
     for (const auto& channel : WifiPhyOperatingChannel::m_frequencyChannels)
     {
@@ -299,8 +308,8 @@ ReducedNeighborReport::GetOperatingChannel(std::size_t nbrApInfoId) const
                     }
                     break;
                 case 40:
-                    if ((channel.frequency == primaryChannelCenterFrequency + 10) ||
-                        (channel.frequency == primaryChannelCenterFrequency - 10))
+                    if ((channel.frequency == primaryChannelCenterFrequency + MHz_u{10}) ||
+                        (channel.frequency == primaryChannelCenterFrequency - MHz_u{10}))
                     {
                         found = true;
                     }
@@ -319,14 +328,14 @@ ReducedNeighborReport::GetOperatingChannel(std::size_t nbrApInfoId) const
         }
     }
 
-    NS_ABORT_IF(channelNumber == 0 || frequency == 0);
+    NS_ABORT_IF(channelNumber == 0 || frequency == MHz_u{0});
 
     WifiPhyOperatingChannel channel;
     channel.Set({{channelNumber, frequency, width, band}}, WIFI_STANDARD_UNSPECIFIED);
 
-    MHz_u channelLowestFreq = frequency - width / 2;
-    MHz_u primaryChannelLowestFreq = primaryChannelCenterFrequency - 10;
-    channel.SetPrimary20Index((primaryChannelLowestFreq - channelLowestFreq) / 20);
+    const auto channelLowestFreq = frequency - width / 2;
+    const auto primaryChannelLowestFreq = primaryChannelCenterFrequency - MHz_u{10};
+    channel.SetPrimary20Index(Count20MHzSubchannels(channelLowestFreq, primaryChannelLowestFreq));
 
     return channel;
 }
@@ -519,17 +528,13 @@ ReducedNeighborReport::GetPsd20MHz(std::size_t nbrApInfoId, std::size_t index) c
 void
 ReducedNeighborReport::SetMldParameters(std::size_t nbrApInfoId,
                                         std::size_t index,
-                                        uint8_t mldId,
-                                        uint8_t linkId,
-                                        uint8_t changeCount)
+                                        const MldParameters& mldParams)
 {
     NS_ASSERT(nbrApInfoId < m_nbrApInfoFields.size());
     NS_ASSERT(index < m_nbrApInfoFields.at(nbrApInfoId).tbttInformationSet.size());
 
     auto it = std::next(m_nbrApInfoFields.at(nbrApInfoId).tbttInformationSet.begin(), index);
-    it->mldParameters.mldId = mldId;
-    it->mldParameters.linkId = (linkId & 0x0f);
-    it->mldParameters.bssParamsChangeCount = changeCount;
+    it->mldParameters = mldParams;
 
     m_nbrApInfoFields.at(nbrApInfoId).hasMldParams = true;
 }
@@ -542,23 +547,13 @@ ReducedNeighborReport::HasMldParameters(std::size_t nbrApInfoId) const
     return m_nbrApInfoFields.at(nbrApInfoId).hasMldParams;
 }
 
-uint8_t
-ReducedNeighborReport::GetMldId(std::size_t nbrApInfoId, std::size_t index) const
+const ReducedNeighborReport::MldParameters&
+ReducedNeighborReport::GetMldParameters(std::size_t nbrApInfoId, std::size_t index) const
 {
     NS_ASSERT(HasMldParameters(nbrApInfoId));
     NS_ASSERT(index < m_nbrApInfoFields.at(nbrApInfoId).tbttInformationSet.size());
 
-    return m_nbrApInfoFields.at(nbrApInfoId).tbttInformationSet.at(index).mldParameters.mldId;
-}
-
-uint8_t
-ReducedNeighborReport::GetLinkId(std::size_t nbrApInfoId, std::size_t index) const
-{
-    NS_ASSERT(HasMldParameters(nbrApInfoId));
-    NS_ASSERT(index < m_nbrApInfoFields.at(nbrApInfoId).tbttInformationSet.size());
-
-    return m_nbrApInfoFields.at(nbrApInfoId).tbttInformationSet.at(index).mldParameters.linkId &
-           0x0f;
+    return m_nbrApInfoFields.at(nbrApInfoId).tbttInformationSet.at(index).mldParameters;
 }
 
 void
@@ -633,7 +628,7 @@ ReducedNeighborReport::SerializeInformationField(Buffer::Iterator start) const
         tbttInfoHdr |= (neighborApInfo.tbttInfoHdr.filtered << 2);
         tbttInfoHdr |= (neighborApInfo.tbttInfoHdr.tbttInfoCount << 4);
         tbttInfoHdr |= (neighborApInfo.tbttInfoHdr.tbttInfoLength << 8);
-        start.WriteHtolsbU16(tbttInfoHdr);
+        start.WriteU16(tbttInfoHdr);
 
         start.WriteU8(neighborApInfo.operatingClass);
         start.WriteU8(neighborApInfo.channelNumber);
@@ -648,7 +643,7 @@ ReducedNeighborReport::SerializeInformationField(Buffer::Iterator start) const
             }
             if (neighborApInfo.hasShortSsid)
             {
-                start.WriteHtolsbU32(tbttInformation.shortSsid);
+                start.WriteU32(tbttInformation.shortSsid);
             }
             if (neighborApInfo.hasBssParams)
             {
@@ -660,11 +655,13 @@ ReducedNeighborReport::SerializeInformationField(Buffer::Iterator start) const
             }
             if (neighborApInfo.hasMldParams)
             {
-                start.WriteU8(tbttInformation.mldParameters.mldId);
+                start.WriteU8(tbttInformation.mldParameters.apMldId);
                 uint16_t other = 0;
                 other |= (tbttInformation.mldParameters.linkId & 0x0f);
                 other |= (tbttInformation.mldParameters.bssParamsChangeCount << 4);
-                start.WriteHtolsbU16(other);
+                other |= (tbttInformation.mldParameters.allUpdates << 12);
+                other |= (tbttInformation.mldParameters.disabledLink << 13);
+                start.WriteU16(other);
             }
         }
     }
@@ -680,7 +677,7 @@ ReducedNeighborReport::DeserializeInformationField(Buffer::Iterator start, uint1
     {
         AddNbrApInfoField();
 
-        auto tbttInfoHdr = i.ReadLsbtohU16();
+        auto tbttInfoHdr = i.ReadU16();
         m_nbrApInfoFields.back().tbttInfoHdr.type = tbttInfoHdr & 0x0003;
         m_nbrApInfoFields.back().tbttInfoHdr.filtered = (tbttInfoHdr >> 2) & 0x0001;
         m_nbrApInfoFields.back().tbttInfoHdr.tbttInfoCount = (tbttInfoHdr >> 4) & 0x000f;
@@ -707,7 +704,7 @@ ReducedNeighborReport::DeserializeInformationField(Buffer::Iterator start, uint1
             }
             if (m_nbrApInfoFields.back().hasShortSsid)
             {
-                m_nbrApInfoFields.back().tbttInformationSet.back().shortSsid = i.ReadLsbtohU32();
+                m_nbrApInfoFields.back().tbttInformationSet.back().shortSsid = i.ReadU32();
                 count += 4;
             }
             if (m_nbrApInfoFields.back().hasBssParams)
@@ -722,19 +719,33 @@ ReducedNeighborReport::DeserializeInformationField(Buffer::Iterator start, uint1
             }
             if (m_nbrApInfoFields.back().hasMldParams)
             {
-                m_nbrApInfoFields.back().tbttInformationSet.back().mldParameters.mldId = i.ReadU8();
-                uint16_t other = i.ReadLsbtohU16();
+                auto& mldParams = m_nbrApInfoFields.back().tbttInformationSet.back().mldParameters;
+                mldParams.apMldId = i.ReadU8();
+                uint16_t other = i.ReadU16();
                 count += 3;
-                m_nbrApInfoFields.back().tbttInformationSet.back().mldParameters.linkId =
-                    other & 0x000f;
-                m_nbrApInfoFields.back()
-                    .tbttInformationSet.back()
-                    .mldParameters.bssParamsChangeCount = (other >> 4) & 0x00ff;
+                mldParams.linkId = other & 0x000f;
+                mldParams.bssParamsChangeCount = (other >> 4) & 0x00ff;
+                mldParams.allUpdates = (other >> 12) & 0x01;
+                mldParams.disabledLink = (other >> 13) & 0x01;
             }
         }
     }
 
     return count;
+}
+
+void
+ReducedNeighborReport::Print(std::ostream& os) const
+{
+    os << "Reduced Neighbor Report=[";
+    for (const auto& neighborApInfo : m_nbrApInfoFields)
+    {
+        os << "{Operating Class: " << +neighborApInfo.operatingClass
+           << ", Channel Number: " << +neighborApInfo.channelNumber
+           << ", TBTT Information Count: " << +neighborApInfo.tbttInfoHdr.tbttInfoCount
+           << ", TBTT Information Length: " << +neighborApInfo.tbttInfoHdr.tbttInfoLength << "}, ";
+    }
+    os << "]";
 }
 
 } // namespace ns3

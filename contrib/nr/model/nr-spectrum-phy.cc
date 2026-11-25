@@ -13,11 +13,13 @@
 #include "nr-ue-net-device.h"
 #include "nr-ue-phy.h"
 
+#include "ns3/boolean.h"
+#include "ns3/double.h"
+#include "ns3/matrix-based-channel-model.h"
 #include "ns3/node.h"
-#include "ns3/uniform-planar-array.h"
-#include <ns3/boolean.h>
-#include <ns3/double.h>
-#include <ns3/trace-source-accessor.h>
+#include "ns3/trace-source-accessor.h"
+
+#include <numeric>
 
 namespace ns3
 {
@@ -60,6 +62,7 @@ operator<<(std::ostream& os, const enum NrSpectrumPhy::State state)
 NrSpectrumPhy::NrSpectrumPhy()
     : SpectrumPhy()
 {
+    NS_LOG_FUNCTION(this);
     m_interferenceData = CreateObject<NrInterference>();
     m_interferenceCtrl = CreateObject<NrInterference>();
     m_random = CreateObject<UniformRandomVariable>();
@@ -98,6 +101,18 @@ NrSpectrumPhy::DoDispose()
         m_interferenceSrs = nullptr;
     }
 
+    if (m_interferenceCsiRs)
+    {
+        m_interferenceCsiRs->Dispose();
+        m_interferenceCsiRs = nullptr;
+    }
+
+    if (m_interferenceCsiIm)
+    {
+        m_interferenceCsiIm->Dispose();
+        m_interferenceCsiIm = nullptr;
+    }
+
     m_interferenceData = nullptr;
     m_interferenceCtrl = nullptr;
     m_mobility = nullptr;
@@ -109,6 +124,10 @@ NrSpectrumPhy::DoDispose()
     m_phyDlHarqFeedbackCallback = MakeNullCallback<void, const DlHarqInfo&>();
     m_phyUlHarqFeedbackCallback = MakeNullCallback<void, const UlHarqInfo&>();
     m_phyRxPssCallback = MakeNullCallback<void, uint16_t, const Ptr<SpectrumValue>&>();
+    // The device and this callback both refer back to the NetDevice owning this spectrum PHY.
+    // Release them to break the reference cycle.
+    m_phyRxCtrlEndOkCallback = nullptr;
+    m_device = nullptr;
 
     SpectrumPhy::DoDispose();
 }
@@ -125,14 +144,6 @@ NrSpectrumPhy::GetTypeId()
                           "[by default is active].",
                           BooleanValue(true),
                           MakeBooleanAccessor(&NrSpectrumPhy::SetDataErrorModelEnabled),
-                          MakeBooleanChecker())
-            .AddAttribute("FlushDlSoftBufferOnNewData",
-                          "TS 38.321 5.3.2.2: a DL transport block with rv 0 (a new "
-                          "transmission) flushes the soft buffer of its HARQ process before "
-                          "decoding instead of being combined with a TB the gNB never "
-                          "retransmitted. false reproduces the pre-patch-15 combining.",
-                          BooleanValue(true),
-                          MakeBooleanAccessor(&NrSpectrumPhy::m_flushDlSoftBufferOnNewData),
                           MakeBooleanChecker())
             .AddAttribute("ErrorModelType",
                           "Default type of the Error Model to apply to TBs of PDSCH and PUSCH",
@@ -153,6 +164,12 @@ NrSpectrumPhy::GetTypeId()
                           MakeDoubleAccessor(&NrSpectrumPhy::SetCcaMode1Threshold,
                                              &NrSpectrumPhy::GetCcaMode1Threshold),
                           MakeDoubleChecker<double>())
+            .AddAttribute(
+                "NumAntennaPanel",
+                "number of panels to install on UE/ gNB device",
+                UintegerValue(1),
+                MakeUintegerAccessor(&NrSpectrumPhy::SetNumPanels, &NrSpectrumPhy::GetNumPanels),
+                MakeUintegerChecker<uint8_t>())
             .AddTraceSource("RxPacketTraceGnb",
                             "The no. of packets received and transmitted by the Base Station",
                             MakeTraceSourceAccessor(&NrSpectrumPhy::m_rxPacketTraceGnb),
@@ -195,8 +212,77 @@ NrSpectrumPhy::GetTypeId()
                             "Pathloss calculated for CTRL",
                             MakeTraceSourceAccessor(&NrSpectrumPhy::m_dlDataPathlossTrace),
                             "ns3::NrSpectrumPhy::DlPathlossTrace");
-
     return tid;
+}
+
+NrSpectrumPhy::State
+NrSpectrumPhy::GetState() const
+{
+    return m_state;
+}
+
+Ptr<UniformRandomVariable>
+NrSpectrumPhy::GetErrorModelRv() const
+{
+    return m_random;
+}
+
+Ptr<NrPhy>
+NrSpectrumPhy::GetNrPhy() const
+{
+    return m_phy;
+}
+
+Time
+NrSpectrumPhy::GetFirstRxStart() const
+{
+    return m_firstRxStart;
+}
+
+void
+NrSpectrumPhy::SetFirstRxStart(Time startTime)
+{
+    m_firstRxStart = startTime;
+}
+
+Time
+NrSpectrumPhy::GetFirstRxDuration() const
+{
+    return m_firstRxDuration;
+}
+
+void
+NrSpectrumPhy::SetFirstRxDuration(Time duration)
+{
+    m_firstRxDuration = duration;
+}
+
+void
+NrSpectrumPhy::IncrementActiveTransmissions()
+{
+    m_activeTransmissions++;
+}
+
+void
+NrSpectrumPhy::NotifyRxDataTrace(const SfnSf& sfn,
+                                 Ptr<const SpectrumValue> spectrumValue,
+                                 const Time& duration,
+                                 uint16_t bwpId,
+                                 uint16_t cellId) const
+{
+    m_rxDataTrace(sfn, spectrumValue, duration, bwpId, cellId);
+}
+
+void
+NrSpectrumPhy::NotifyTxCtrlTrace(Time duration) const
+{
+    m_txCtrlTrace(duration);
+}
+
+void
+NrSpectrumPhy::NotifyTxDataTrace(Time duration) const
+{
+    m_txDataTrace(duration);
 }
 
 // set callbacks
@@ -240,6 +326,7 @@ NrSpectrumPhy::SetPhyUlHarqFeedbackCallback(const NrPhyUlHarqFeedbackCallback& c
 void
 NrSpectrumPhy::SetDevice(Ptr<NetDevice> d)
 {
+    NS_LOG_FUNCTION(this << d);
     m_device = d;
     // It would be appropriate that the creation of interference for SRS is in the constructor.
     // But, in the constructor since the device is yet not configured we don't know if we
@@ -259,6 +346,8 @@ NrSpectrumPhy::SetDevice(Ptr<NetDevice> d)
     }
     else
     {
+        m_interferenceCsiRs = CreateObject<NrInterference>();
+        m_interferenceCsiIm = CreateObject<NrInterference>();
         m_interferenceData->TraceConnectWithoutContext(
             "SnrPerProcessedChunk",
             MakeCallback(&NrSpectrumPhy::ReportWbDlDataSnrPerceived, this));
@@ -274,6 +363,7 @@ NrSpectrumPhy::GetDevice() const
 void
 NrSpectrumPhy::SetMobility(Ptr<MobilityModel> m)
 {
+    NS_LOG_FUNCTION(this << m);
     m_mobility = m;
 }
 
@@ -286,7 +376,14 @@ NrSpectrumPhy::GetMobility() const
 void
 NrSpectrumPhy::SetChannel(Ptr<SpectrumChannel> c)
 {
+    NS_LOG_FUNCTION(this << c);
     m_channel = c;
+}
+
+Ptr<SpectrumChannel>
+NrSpectrumPhy::GetChannel() const
+{
+    return m_channel;
 }
 
 Ptr<const SpectrumModel>
@@ -299,7 +396,29 @@ Ptr<Object>
 NrSpectrumPhy::GetAntenna() const
 {
     NS_LOG_FUNCTION(this);
-    return m_antenna;
+    NS_ASSERT_MSG(m_numPanels == m_antennaPanels.size(), "mismatch of number of Panels");
+
+    return m_antennaPanels.at(m_activePanelIndex);
+}
+
+Ptr<Object>
+NrSpectrumPhy::GetPanelByIndex(const uint8_t index) const
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT_MSG(m_numPanels == m_antennaPanels.size(), "mismatch of number of Panels");
+    return m_antennaPanels.at(index);
+}
+
+void
+NrSpectrumPhy::SetNumPanels(const uint8_t numPanel)
+{
+    m_numPanels = numPanel;
+}
+
+uint8_t
+NrSpectrumPhy::GetNumPanels() const
+{
+    return m_numPanels;
 }
 
 // set/get attributes
@@ -307,13 +426,65 @@ NrSpectrumPhy::GetAntenna() const
 void
 NrSpectrumPhy::SetBeamManager(Ptr<BeamManager> b)
 {
-    m_beamManager = b;
+    NS_LOG_FUNCTION(this << b);
+    m_beamManagers.resize(1);
+    m_beamManagers[0] = b;
+}
+
+void
+NrSpectrumPhy::AddBeamManager(Ptr<BeamManager> b)
+{
+    NS_LOG_FUNCTION(this << b);
+    m_beamManagers.emplace_back(b);
 }
 
 Ptr<BeamManager>
 NrSpectrumPhy::GetBeamManager()
 {
-    return m_beamManager;
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT_MSG(m_numPanels == m_antennaPanels.size(), "mismatch of number of Panels");
+    if (!m_beamManagers.empty())
+    {
+        return m_beamManagers.at(m_activePanelIndex);
+    }
+    return nullptr;
+}
+
+void
+NrSpectrumPhy::ConfigPanelsBearingAngles()
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT_MSG(m_numPanels == m_antennaPanels.size(), "mismatch of number of Panels");
+
+    auto firstPanelBearingAngleRad =
+        (DynamicCast<UniformPlanarArray>(m_antennaPanels[0]))->GetAlpha();
+
+    for (auto i = 0; i < m_numPanels; i++)
+    {
+        m_antennaPanels[i]->GetObject<UniformPlanarArray>()->SetAlpha(
+            CircularBearingAnglesForPanels(firstPanelBearingAngleRad, i));
+    }
+}
+
+void
+NrSpectrumPhy::ConfigPanelsBearingAngles(double firstPanelBearingAngleRad)
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT_MSG(m_numPanels == m_antennaPanels.size(), "mismatch of number of Panels");
+
+    for (auto i = 0; i < m_numPanels; i++)
+    {
+        m_antennaPanels[i]->GetObject<UniformPlanarArray>()->SetAlpha(
+            CircularBearingAnglesForPanels(firstPanelBearingAngleRad, i));
+    }
+}
+
+double
+NrSpectrumPhy::CircularBearingAnglesForPanels(double firstPanelBearingAngleRad,
+                                              uint8_t panelIndex) const
+{
+    // to cover 360 based on number of ue antenna panels
+    return firstPanelBearingAngleRad + 2 * M_PI * (panelIndex) / m_numPanels;
 }
 
 void
@@ -332,20 +503,29 @@ NrSpectrumPhy::GetErrorModel() const
 void
 NrSpectrumPhy::EnableDlDataPathlossTrace()
 {
+    NS_LOG_FUNCTION(this);
     m_enableDlDataPathlossTrace = true;
 }
 
 void
 NrSpectrumPhy::EnableDlCtrlPathlossTrace()
 {
+    NS_LOG_FUNCTION(this);
     m_enableDlCtrlPathlossTrace = true;
 }
 
 void
 NrSpectrumPhy::SetRnti(uint16_t rnti)
 {
+    NS_LOG_FUNCTION(this << rnti);
     m_rnti = rnti;
     m_hasRnti = true;
+}
+
+uint16_t
+NrSpectrumPhy::GetRnti() const
+{
+    return m_rnti;
 }
 
 void
@@ -373,6 +553,7 @@ NrSpectrumPhy::SetUnlicensedMode(bool unlicensedMode)
 void
 NrSpectrumPhy::SetDataErrorModelEnabled(bool dataErrorModelEnabled)
 {
+    NS_LOG_FUNCTION(this << dataErrorModelEnabled);
     m_dataErrorModelEnabled = dataErrorModelEnabled;
 }
 
@@ -387,6 +568,7 @@ NrSpectrumPhy::IsDataErrorModelEnabled() const
 void
 NrSpectrumPhy::SetErrorModelType(TypeId errorModelType)
 {
+    NS_LOG_FUNCTION(this << errorModelType.GetName());
     m_errorModelType = errorModelType;
 }
 
@@ -404,11 +586,17 @@ NrSpectrumPhy::SetNoisePowerSpectralDensity(const Ptr<const SpectrumValue>& nois
     {
         m_interferenceSrs->SetNoisePowerSpectralDensity(noisePsd);
     }
+    if (m_interferenceCsiRs)
+    {
+        m_interferenceCsiRs->SetNoisePowerSpectralDensity(noisePsd);
+        m_interferenceCsiIm->SetNoisePowerSpectralDensity(noisePsd);
+    }
 }
 
 void
 NrSpectrumPhy::SetTxPowerSpectralDensity(const Ptr<SpectrumValue>& TxPsd)
 {
+    NS_LOG_FUNCTION(this << TxPsd);
     m_txPsd = TxPsd;
 }
 
@@ -418,13 +606,64 @@ NrSpectrumPhy::GetTxPowerSpectralDensity()
     return m_txPsd;
 }
 
+Ptr<MatrixBasedChannelModel::Complex3DVector>
+NrSpectrumPhy::CreateSpectrumChannelMatrix(const Ptr<SpectrumSignalParameters> params) const
+{
+    auto txAntenna = DynamicCast<PhasedArrayModel>(params->txPhy->GetAntenna());
+    auto rxAntenna = DynamicCast<PhasedArrayModel>(GetAntenna());
+    NS_ABORT_MSG_UNLESS(txAntenna && rxAntenna, "Only phased antenna array models are supported.");
+
+    auto txAntennaPorts = txAntenna->GetNumPorts();
+    auto rxAntennaPorts = rxAntenna->GetNumPorts();
+    NS_ASSERT_MSG(txAntennaPorts == 1 && rxAntennaPorts == 1,
+                  "The conversion only fits to a single antenna port in Tx and Rx");
+
+    Ptr<const SpectrumValue> rxPsd = params->psd;
+    uint32_t nRb = rxPsd->GetValuesN();
+    Ptr<MatrixBasedChannelModel::Complex3DVector> channelSpct =
+        Create<MatrixBasedChannelModel::Complex3DVector>(rxAntennaPorts, txAntennaPorts, nRb);
+    auto rxRb = rxPsd->ConstValuesBegin();
+    size_t iRb = 0;
+    while (rxRb != rxPsd->ConstValuesEnd())
+    {
+        if (*rxRb != 0.0)
+        {
+            auto sqrtvit = sqrt(*rxRb);
+            for (size_t u = 0; u < rxAntennaPorts; u++)
+            {
+                for (size_t s = 0; s < txAntennaPorts; s++)
+                {
+                    channelSpct->Elem(u, s, iRb) = sqrtvit;
+                }
+            }
+        }
+        rxRb++;
+        iRb++;
+    }
+    return channelSpct;
+}
+
 void
 NrSpectrumPhy::StartRx(Ptr<SpectrumSignalParameters> params)
 {
     NS_LOG_FUNCTION(this);
     Ptr<const SpectrumValue> rxPsd = params->psd;
     Time duration = params->duration;
-    NS_LOG_INFO("Start receiving signal: " << rxPsd << " duration= " << duration);
+    NS_LOG_INFO("Start receiving signal: " << params->psd << " duration= " << duration);
+
+    // all-zero psd is out-of-range
+    if (std::count(rxPsd->ConstValuesBegin(), rxPsd->ConstValuesEnd(), 0.0) == rxPsd->GetValuesN())
+    {
+        NS_LOG_INFO("Received all-zero psd, ignoring signal.");
+        return;
+    }
+
+    // phased-array mimo expects a channel
+    if (!params->spectrumChannelMatrix &&
+        GetSpectrumChannel()->GetPhasedArraySpectrumPropagationLossModel())
+    {
+        params->spectrumChannelMatrix = CreateSpectrumChannelMatrix(params);
+    }
 
     // pass it to interference calculations regardless of the type (nr or non-nr)
     m_interferenceData->AddSignalMimo(params, duration);
@@ -444,20 +683,23 @@ NrSpectrumPhy::StartRx(Ptr<SpectrumSignalParameters> params)
     Ptr<NrSpectrumSignalParametersUlCtrlFrame> ulCtrlRxParams =
         DynamicCast<NrSpectrumSignalParametersUlCtrlFrame>(params);
 
+    Ptr<NrSpectrumSignalParametersCsiRs> csiRsRxParams =
+        DynamicCast<NrSpectrumSignalParametersCsiRs>(params);
+
     if (nrDataRxParams)
     {
+        if (m_interferenceCsiIm && m_interferenceCsiIm->IsChunkProcessorSet() &&
+            nrDataRxParams->cellId != m_phy->GetCellId())
+        {
+            m_interferenceCsiIm->AddSignalMimo(params, duration);
+        }
+
         if (nrDataRxParams->cellId == GetCellId())
         {
             // Receive only signals intended for this receiver. Receive only
             //  - if the receiver is a UE and the signal's RNTI matches the UE's RNTI,
             //  - or if the receiver device is either a gNB or not configured (has no RNTI)
             auto isIntendedRx = (nrDataRxParams->rnti == m_rnti) || !m_hasRnti;
-
-            // Workaround: always receive the signal, to keep performance equal to OSS code.
-            // This ensures all UEs can generate CQI feedback from data signals, even from those
-            // signals that are intended for other UEs in the same cell.
-            // TODO: implement proper CSI-RS signalling for CQI and disable this workaround
-            isIntendedRx = true;
 
             if (isIntendedRx)
             {
@@ -468,13 +710,8 @@ NrSpectrumPhy::StartRx(Ptr<SpectrumSignalParameters> params)
                 Ptr<const SpectrumValue> txPsd =
                     DynamicCast<NrSpectrumPhy>(nrDataRxParams->txPhy)->GetTxPowerSpectralDensity();
                 Ptr<const SpectrumValue> rxPsd = nrDataRxParams->psd;
-                double pathloss = 10 * log10(Integral(*txPsd)) - 10 * log10(Integral(*rxPsd));
-                Ptr<NrUePhy> phy = (DynamicCast<NrUePhy>(m_phy));
-                m_dlDataPathlossTrace(GetCellId(),
-                                      GetBwpId(),
-                                      GetMobility()->GetObject<Node>()->GetId(),
-                                      pathloss,
-                                      phy->ComputeCqi(m_sinrPerceived));
+                // this value will be used in EndRxData when ProcessReceivedPacketBurst is called
+                m_dlDataPathloss = 10 * log10(Integral(*txPsd)) - 10 * log10(Integral(*rxPsd));
             }
         }
         else
@@ -562,6 +799,13 @@ NrSpectrumPhy::StartRx(Ptr<SpectrumSignalParameters> params)
         else
         {
             NS_LOG_DEBUG("UL CTRL ignored at UE device");
+        }
+    }
+    else if (csiRsRxParams != nullptr)
+    {
+        if (m_hasRnti && csiRsRxParams->cellId == GetCellId())
+        {
+            StartRxCsiRs(csiRsRxParams);
         }
     }
     else
@@ -677,6 +921,7 @@ void
 NrSpectrumPhy::StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ctrlMsgList,
                                       const Time& duration)
 {
+    NS_LOG_FUNCTION(this << duration.As(Time::S));
     NS_LOG_LOGIC(this << " state: " << m_state);
 
     switch (m_state)
@@ -741,9 +986,59 @@ NrSpectrumPhy::StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
 }
 
 void
+NrSpectrumPhy::StartTxCsiRs(uint16_t rnti, uint16_t beamId)
+{
+    NS_LOG_LOGIC(this << " state: " << m_state);
+    // we simulate 1ns signals for CSi-RS during DL CTRL duration,
+    // the real overhead is correctly calculated in the TB size
+    Time duration = NanoSeconds(1);
+
+    switch (m_state)
+    {
+    case RX_DATA:
+        /* no break */
+    case RX_DL_CTRL:
+        /* no break */
+    case RX_UL_CTRL:
+        /* no break*/
+    case RX_UL_SRS:
+        NS_FATAL_ERROR("Cannot TX while RX.");
+        break;
+    case TX:
+        NS_FATAL_ERROR("Cannot TX while already TX.");
+        break;
+    case CCA_BUSY:
+        NS_LOG_WARN("Start transmitting CSI-RS while in CCA_BUSY state.");
+        /* no break */
+    case IDLE: {
+        NS_ASSERT(m_txPsd);
+        Ptr<NrSpectrumSignalParametersCsiRs> csiRs = Create<NrSpectrumSignalParametersCsiRs>();
+        csiRs->duration = duration;
+        csiRs->txPhy = GetObject<SpectrumPhy>();
+        csiRs->psd = m_txPsd;
+        csiRs->cellId = GetCellId();
+        csiRs->rnti = rnti;
+        csiRs->beamId = beamId;
+
+        if (m_channel)
+        {
+            NS_LOG_DEBUG("gNB with cellId " << GetCellId()
+                                            << " transmitting CSI-RS for RNTI:" << csiRs->rnti);
+            m_channel->StartTx(csiRs);
+        }
+        else
+        {
+            NS_LOG_WARN("Working without channel (i.e., under test)");
+        }
+    }
+    }
+}
+
+void
 NrSpectrumPhy::StartTxUlControlFrames(const std::list<Ptr<NrControlMessage>>& ctrlMsgList,
                                       const Time& duration)
 {
+    NS_LOG_FUNCTION(this << duration.As(Time::S));
     NS_LOG_LOGIC(this << " state: " << m_state);
 
     switch (m_state)
@@ -810,7 +1105,7 @@ NrSpectrumPhy::StartTxUlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
 void
 NrSpectrumPhy::AddDataPowerChunkProcessor(const Ptr<NrChunkProcessor>& p)
 {
-    NS_LOG_FUNCTION(this);
+    NS_LOG_FUNCTION(this << p);
     m_interferenceData->AddRsPowerChunkProcessor(p);
 }
 
@@ -891,13 +1186,6 @@ NrSpectrumPhy::UpdateSinrPerceived(const SpectrumValue& sinr)
 }
 
 void
-NrSpectrumPhy::InstallHarqPhyModule(const Ptr<NrHarqPhy>& harq)
-{
-    NS_ABORT_IF(m_harqPhyModule != nullptr);
-    m_harqPhyModule = harq;
-}
-
-void
 NrSpectrumPhy::InstallPhy(const Ptr<NrPhy>& phyModel)
 {
     m_phy = phyModel;
@@ -912,19 +1200,26 @@ NrSpectrumPhy::GetPhy() const
 void
 NrSpectrumPhy::SetAntenna(const Ptr<Object> antenna)
 {
-    m_antenna = antenna;
+    m_antennaPanels.resize(1);
+    m_antennaPanels[0] = antenna;
+}
+
+void
+NrSpectrumPhy::AddPanel(const Ptr<Object> antenna)
+{
+    m_antennaPanels.emplace_back(antenna);
+}
+
+void
+NrSpectrumPhy::SetActivePanel(const uint8_t panelIndex)
+{
+    m_activePanelIndex = panelIndex;
 }
 
 Ptr<SpectrumChannel>
 NrSpectrumPhy::GetSpectrumChannel() const
 {
     return m_channel;
-}
-
-Ptr<NrHarqPhy>
-NrSpectrumPhy::GetHarqPhyModule() const
-{
-    return m_harqPhyModule;
 }
 
 Ptr<NrInterference>
@@ -1007,9 +1302,16 @@ NrSpectrumPhy::StartRxData(const Ptr<NrSpectrumSignalParametersDataFrame>& param
         {
             // Sanity check, that we do not transmit on the same RBs; this sanity check will not
             // be the same for sidelink/V2X
-            NS_ASSERT_MSG((Sum((*m_txPsd) * (*params->psd)) == 0),
-                          "Transmissions overlap in frequency. Their cellId is:" << params->cellId);
-            return;
+            if (Sum((*m_txPsd) * (*params->psd)) != 0)
+            {
+                // Stale transmission overlap during handover: log and ignore
+                // rather than crashing. This can occur when old MAC scheduling
+                // state persists during CONNECTED_HANDOVER.
+                NS_LOG_WARN("Stale overlapping transmission detected during handover. "
+                            "Ignoring overlapping RX. cellId:"
+                            << params->cellId);
+                return;
+            }
         }
         break;
     case RX_DL_CTRL:
@@ -1026,6 +1328,36 @@ NrSpectrumPhy::StartRxData(const Ptr<NrSpectrumSignalParametersDataFrame>& param
                   // multiple UEs at the same time
         /* no break */
     case IDLE: {
+        // During handover, the UE should only receive signals from its current
+        // serving cell. Ignore signals from other cells to prevent the interference
+        // model from crashing due to overlapping non-orthogonal signals from
+        // source and target gNBs.
+        if (!m_isGnb && params->cellId != GetCellId())
+        {
+            NS_LOG_WARN("NrSpectrumPhy::StartRxData: ignoring signal from cellId:"
+                        << params->cellId << " (UE serving cellId:" << GetCellId() << ")");
+            return;
+        }
+        // Only the first reception schedules EndRxData, and the SINR of every simultaneously
+        // decoded signal is integrated over that single window, so all of them must be
+        // time-aligned. A misaligned signal can arrive when the cell/RNTI identity changes in
+        // the middle of an ongoing reception (handover or RLF re-synchronisation): the
+        // in-flight reception is not aborted, so the next allocation from the new cell, which
+        // generally starts on a different symbol and spans a different number of symbols,
+        // reaches this point while a reception is still open. Decline to decode it rather than
+        // corrupting the interference window; its power is still accounted for, because
+        // AddSignalMimo() has already registered it as interference in StartRx().
+        if (!m_rxPacketBurstList.empty() &&
+            ((m_firstRxStart != Simulator::Now()) || (m_firstRxDuration != params->duration)))
+        {
+            NS_LOG_WARN("NrSpectrumPhy::StartRxData: discarding misaligned signal from cellId:"
+                        << params->cellId << " rnti:" << params->rnti << " (firstRxStart:"
+                        << m_firstRxStart.As(Time::US) << " now:" << Simulator::Now().As(Time::US)
+                        << " firstRxDuration:" << m_firstRxDuration.As(Time::US)
+                        << " duration:" << params->duration.As(Time::US) << ")");
+            return;
+        }
+
         m_interferenceData->StartRxMimo(params);
 
         if (m_rxPacketBurstList.empty())
@@ -1082,8 +1414,14 @@ NrSpectrumPhy::StartRxDlCtrl(const Ptr<NrSpectrumSignalParametersDlCtrlFrame>& p
     switch (m_state)
     {
     case TX:
-        NS_FATAL_ERROR("Cannot RX while TX.");
-        break;
+        // NTN patch (07 family): a half-duplex UE that is transmitting does not receive this
+        // downlink control. Over NTN the UE keeps the slot timing it acquired at attach and
+        // has no Timing Advance, so as the slant range drifts the round-trip-shifted symbols
+        // slide across slot boundaries and can overlap its own uplink. Counted, see
+        // GetDlCtrlRxDropCount(); a lost DL CTRL costs the UE a DCI.
+        ++m_dlCtrlRxDroppedHalfDuplex;
+        NS_LOG_WARN("Dropping received DL CTRL: half-duplex UE is transmitting");
+        return;
     case RX_DATA:
         NS_FATAL_ERROR("Cannot RX CTRL while receiving DATA.");
         break;
@@ -1127,9 +1465,19 @@ NrSpectrumPhy::StartRxUlCtrl(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& p
     // RDF: method currently supports Uplink control only!
     switch (m_state)
     {
-    case TX:
-        NS_FATAL_ERROR("Cannot RX UL CTRL while TX.");
-        break;
+    case TX: {
+        // NTN patch (07 family): a TDD gNB transmitting on this carrier cannot receive the uplink
+        // control that arrives now; the modelled outcome is that it is lost, not that the
+        // simulation stops. Over NTN without per-UE Timing Advance the UE's uplink control lands
+        // one round trip (2 x slant / c, e.g. 4.0 ms = 8 slots at LEO-600, mu=1) after the UE's
+        // slot, so it can fall into a downlink slot of the gNB's TDD pattern. COUNTED, see
+        // GetUlCtrlRxDropCount(): a run with a large count is missing uplink control (SR, HARQ
+        // feedback, CSI) and its KPIs mean something different from a run with zero.
+        ++m_ulCtrlRxDroppedHalfDuplex;
+        NS_LOG_WARN("Dropping received UL CTRL (" << params->ctrlMsgList.size()
+                                                  << " msgs): half-duplex gNB is transmitting");
+        return;
+    }
     case RX_DATA:
         NS_FATAL_ERROR("Cannot RX UL CTRL while receiving DATA.");
         break;
@@ -1192,8 +1540,12 @@ NrSpectrumPhy::StartRxSrs(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& para
     switch (m_state)
     {
     case TX:
-        NS_FATAL_ERROR("Cannot RX SRS while TX.");
-        break;
+        // NTN patch 07 (ported onto v5.1, whose switch has an explicit TX case ahead of the
+        // default branch that carried the counted drop in v3.3): a transmitting TDD gNB does not
+        // receive this SRS; counted, see GetSrsDropCount().
+        ++m_srsDroppedHalfDuplex;
+        NS_LOG_WARN("Dropping SRS reception: half-duplex gNB is transmitting");
+        return;
     case RX_DATA:
         NS_FATAL_ERROR("Cannot RX SRS while receiving DATA.");
         break;
@@ -1211,7 +1563,8 @@ NrSpectrumPhy::StartRxSrs(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& para
         // at the gNB we can receive only one SRS at a time, and the only allowed states before
         // starting it are IDLE or BUSY
         m_interferenceSrs->StartRxMimo(params);
-        // first transmission, i.e., we're IDLE and we start RX, CTRL message list should be empty
+        // first transmission, i.e., we're IDLE and we start RX, CTRL message list should be
+        // empty
         NS_ASSERT(m_rxControlMessageList.empty());
         m_firstRxStart = Simulator::Now();
         m_firstRxDuration = params->duration;
@@ -1285,8 +1638,8 @@ NrSpectrumPhy::EndTx()
 {
     NS_LOG_FUNCTION(this);
 
-    // In case of OFDMA DL, this function will be called multiple times, after each transmission to
-    // a different UE. In the first call to this function, m_state is changed to IDLE.
+    // In case of OFDMA DL, this function will be called multiple times, after each transmission
+    // to a different UE. In the first call to this function, m_state is changed to IDLE.
     NS_ASSERT_MSG(m_state == TX, "In EndTx() but state is not TX; state: " << m_state);
     NS_LOG_DEBUG("Number of active transmissions (before decrement): " << m_activeTransmissions);
     NS_ASSERT_MSG(m_activeTransmissions, "Ending Tx but no active transmissions");
@@ -1310,13 +1663,19 @@ NrSpectrumPhy::EndTx()
 std::vector<MimoSinrChunk>
 NrSpectrumPhy::GetMimoSinrForRnti(uint16_t rnti, uint8_t rank)
 {
-    // Filter chunks by RNTI of the expected TB. For DL, this step selects only the RX signals that
-    // were sent towards this UE. For UL, it selects only signals that were sent from the UE that is
-    // currently being decoded.
+    // Filter chunks by the RNTI of the expected TB and by the cell they were received from.
+    // For DL, this step selects only the RX signals that were sent towards this UE. For UL, it
+    // selects only signals that were sent from the UE that is currently being decoded.
+    //
+    // The cell must be part of the match: RNTIs are allocated per cell and reused, so after a
+    // handover a chunk measured against the previous cell can carry the same RNTI as a
+    // transport block now expected from the new one. Averaging those together mixes unrelated
+    // signals, and because the two cells may have granted different ranks it also produces a
+    // SINR matrix whose row count disagrees with the expected rank.
     std::vector<MimoSinrChunk> res;
     for (const auto& chunk : m_mimoSinrPerceived)
     {
-        if (chunk.rnti == rnti)
+        if (chunk.rnti == rnti && chunk.cellId == GetCellId())
         {
             res.emplace_back(chunk);
         }
@@ -1324,20 +1683,22 @@ NrSpectrumPhy::GetMimoSinrForRnti(uint16_t rnti, uint8_t rank)
     if (res.empty())
     {
         // No received signal found, create all-zero SINR matrix with minimum duration
-        NS_LOG_WARN("Did not find any SINR matrix matching the current UE's RNTI " << rnti);
+        NS_LOG_WARN("Did not find any SINR matrix matching the current UE's RNTI "
+                    << rnti << " and cellId " << GetCellId());
         auto sinrMat = NrSinrMatrix{rank, m_rxSpectrumModel->GetNumBands()};
         auto dur = NanoSeconds(1);
-        res.emplace_back(MimoSinrChunk{sinrMat, rnti, dur});
+        res.emplace_back(MimoSinrChunk{sinrMat, rnti, GetCellId(), dur});
     }
     return res;
 }
 
 void
-TransportBlockInfo::UpdatePerceivedSinr(const SpectrumValue& perceivedSinr)
+TransportBlockInfo::UpdatePerceivedSinr(const SpectrumValue& perceivedSinr,
+                                        const std::vector<int>& rbMap)
 {
     m_sinrAvg = 0.0;
     m_sinrMin = 99999999999;
-    for (const auto& rbIndex : m_expected.m_rbBitmap)
+    for (const auto& rbIndex : rbMap)
     {
         m_sinrAvg += perceivedSinr.ValuesAt(rbIndex);
         if (perceivedSinr.ValuesAt(rbIndex) < m_sinrMin)
@@ -1346,7 +1707,7 @@ TransportBlockInfo::UpdatePerceivedSinr(const SpectrumValue& perceivedSinr)
         }
     }
 
-    m_sinrAvg = m_sinrAvg / m_expected.m_rbBitmap.size();
+    m_sinrAvg = m_sinrAvg / rbMap.size();
 
     NS_LOG_INFO("Finishing RX, sinrAvg=" << m_sinrAvg << " sinrMin=" << m_sinrMin
                                          << " SinrAvg (dB) " << 10 * log(m_sinrAvg) / log(10));
@@ -1360,34 +1721,36 @@ NrSpectrumPhy::CheckTransportBlockCorruptionStatus()
         auto rnti = tbIt.first;
         auto& tbInfo = tbIt.second;
 
-        tbInfo.UpdatePerceivedSinr(m_sinrPerceived);
+        tbInfo.UpdatePerceivedSinr(m_sinrPerceived, tbInfo.m_expected.m_rbBitmap);
 
         if ((!m_dataErrorModelEnabled) || (m_rxPacketBurstList.empty()))
         {
             continue;
         }
 
-        // TS 38.321 5.3.2.2: a new transmission (NDI toggled, signalled here by
-        // rv 0) replaces the soft buffer of its HARQ process instead of being
-        // combined with it. nr kept a NACKed TB's history whenever the gNB did
-        // not retransmit it (a feedback-disabled process, downlinkHARQ-
-        // FeedbackDisabled-r17, or a process the scheduler expired), so the next
-        // new TB on that process was decoded with the stale TB's mutual
-        // information added: an optimistic, unphysical decode.
-        if (m_flushDlSoftBufferOnNewData && tbInfo.m_expected.m_isDownlink &&
-            tbInfo.m_expected.m_rv == 0 &&
-            !m_harqPhyModule
-                 ->GetHarqProcessInfoDl(rnti, tbInfo.m_expected.m_harqProcessId)
-                 .empty())
+        // A new transmission (NDI set) must not soft-combine with history left
+        // on this HARQ process by an earlier corrupted transport block. Such
+        // history can survive process reuse when the retransmission chain ends
+        // without a successful reception (e.g. the chain reaches MaxHarqReTx
+        // and is released, or HARQ retransmissions are disabled), so clearing
+        // it here on NDI = 1 is what guarantees a fresh transport block starts
+        // from an empty soft buffer.
+        if (tbInfo.m_expected.m_ndi == 1)
         {
-            m_harqPhyModule->ResetDlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
-            ++m_dlSoftBufferFlushes;
+            if (tbInfo.m_expected.m_isDownlink)
+            {
+                m_harqPhyModule.ResetDlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
+            }
+            else
+            {
+                m_harqPhyModule.ResetUlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
+            }
         }
 
         const NrErrorModel::NrErrorModelHistory& harqInfoList =
-            m_harqPhyModule->GetHarqProcessInfoDlUl(tbInfo.m_expected.m_isDownlink,
-                                                    rnti,
-                                                    tbInfo.m_expected.m_harqProcessId);
+            m_harqPhyModule.GetHarqProcessInfoDlUl(tbInfo.m_expected.m_isDownlink,
+                                                   rnti,
+                                                   tbInfo.m_expected.m_harqProcessId);
 
         NS_ABORT_MSG_IF(!m_errorModelType.IsChildOf(NrErrorModel::GetTypeId()),
                         "The error model must be a child of NrErrorModel");
@@ -1409,6 +1772,12 @@ NrSpectrumPhy::CheckTransportBlockCorruptionStatus()
             const auto& expectedTb = tbInfo.m_expected;
             auto sinrChunks = GetMimoSinrForRnti(expectedTb.m_rnti, expectedTb.m_rank);
             NS_ASSERT(!sinrChunks.empty());
+
+            // Report the SINR the error model decodes with, i.e. the per-layer post-equalization
+            // SINR, instead of the SISO SINR computed from the received PSD
+            tbInfo.UpdatePerceivedSinr(
+                m_errorModel->ComputeAvgSinrMimo(sinrChunks).GetVectorizedSpecVal(),
+                m_errorModel->CreateVectorizedRbMap(expectedTb.m_rbBitmap, expectedTb.m_rank));
 
             tbInfo.m_outputOfEM = m_errorModel->GetTbDecodificationStatsMimo(sinrChunks,
                                                                              expectedTb.m_rbBitmap,
@@ -1468,15 +1837,15 @@ NrSpectrumPhy::SendUlHarqFeedback(uint16_t rnti, TransportBlockInfo& tbInfo)
     m_phyUlHarqFeedbackCallback(harqUlInfo);
 
     // Arrange the history
-    if (!tbInfo.m_isCorrupted || tbInfo.m_expected.m_rv == 3)
+    if (!tbInfo.m_isCorrupted)
     {
-        m_harqPhyModule->ResetUlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
+        m_harqPhyModule.ResetUlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
     }
     else
     {
-        m_harqPhyModule->UpdateUlHarqProcessStatus(rnti,
-                                                   tbInfo.m_expected.m_harqProcessId,
-                                                   tbInfo.m_outputOfEM);
+        m_harqPhyModule.UpdateUlHarqProcessStatus(rnti,
+                                                  tbInfo.m_expected.m_harqProcessId,
+                                                  tbInfo.m_outputOfEM);
     }
 }
 
@@ -1502,19 +1871,19 @@ NrSpectrumPhy::SendDlHarqFeedback(uint16_t rnti, TransportBlockInfo& tbInfo)
     m_phyDlHarqFeedbackCallback(harqDlInfo);
 
     // Arrange the history
-    if (!tbInfo.m_isCorrupted || tbInfo.m_expected.m_rv == 3)
+    if (!tbInfo.m_isCorrupted)
     {
         NS_LOG_DEBUG("Reset Dl process: " << +tbInfo.m_expected.m_harqProcessId << " for RNTI "
                                           << rnti);
-        m_harqPhyModule->ResetDlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
+        m_harqPhyModule.ResetDlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
     }
     else
     {
         NS_LOG_DEBUG("Update Dl process: " << +tbInfo.m_expected.m_harqProcessId << " for RNTI "
                                            << rnti);
-        m_harqPhyModule->UpdateDlHarqProcessStatus(rnti,
-                                                   tbInfo.m_expected.m_harqProcessId,
-                                                   tbInfo.m_outputOfEM);
+        m_harqPhyModule.UpdateDlHarqProcessStatus(rnti,
+                                                  tbInfo.m_expected.m_harqProcessId,
+                                                  tbInfo.m_outputOfEM);
     }
     return harqDlInfo;
 }
@@ -1522,6 +1891,7 @@ NrSpectrumPhy::SendDlHarqFeedback(uint16_t rnti, TransportBlockInfo& tbInfo)
 void
 NrSpectrumPhy::ProcessReceivedPacketBurst()
 {
+    NS_LOG_FUNCTION(this);
     Ptr<NrGnbNetDevice> gnbRx = DynamicCast<NrGnbNetDevice>(GetDevice());
     Ptr<NrUeNetDevice> ueRx = DynamicCast<NrUeNetDevice>(GetDevice());
     std::map<uint16_t, DlHarqInfo> harqDlInfoMap;
@@ -1580,10 +1950,6 @@ NrSpectrumPhy::ProcessReceivedPacketBurst()
             {
                 Ptr<NrUePhy> phy = (DynamicCast<NrUePhy>(m_phy));
                 uint8_t cqi = phy->ComputeCqi(m_sinrPerceived);
-                // ntn-patch 10: label the TB with the UE's SERVING cell, not
-                // the attach-time gNB (GetTargetGnb() is never updated by a
-                // handover, so every TB after the first X2 handover carried
-                // the old cell id and (cellId, RNTI) consumers lost the UE).
                 RxPacketTraceParams traceParams(tbInfo,
                                                 m_dataErrorModelEnabled,
                                                 rnti,
@@ -1591,6 +1957,15 @@ NrSpectrumPhy::ProcessReceivedPacketBurst()
                                                 GetBwpId(),
                                                 cqi);
                 m_rxPacketTraceUe(traceParams);
+
+                if (m_enableDlDataPathlossTrace)
+                {
+                    m_dlDataPathlossTrace(GetCellId(),
+                                          GetBwpId(),
+                                          GetMobility()->GetObject<Node>()->GetId(),
+                                          m_dlDataPathloss,
+                                          cqi);
+                }
             }
 
             // send HARQ feedback (if not already done for this TB)
@@ -1613,37 +1988,12 @@ NrSpectrumPhy::ProcessReceivedPacketBurst()
 }
 
 void
-NrSpectrumPhy::AbortDlDataRx()
-{
-    NS_LOG_FUNCTION(this);
-    if (!m_isGnb && m_state == RX_DATA)
-    {
-        m_dlDataRxAborted = true;
-    }
-}
-
-void
 NrSpectrumPhy::EndRxData()
 {
     NS_LOG_FUNCTION(this);
     m_interferenceData->EndRx();
 
     NS_ASSERT(m_state == RX_DATA);
-
-    // ntn-patch 20: the reception started in the source cell and the MAC was
-    // reset by a reconfigurationWithSync meanwhile (TS 38.321 5.12): nothing of
-    // it reaches the MAC, no HARQ-ACK goes out, and the chunk processors have
-    // already skipped the CSI (NrUePhy checks IsDlDataRxAborted()).
-    if (m_dlDataRxAborted)
-    {
-        m_dlDataRxAborted = false;
-        ++m_dlDataRxAbortedCount;
-        ChangeState(IDLE, Seconds(0));
-        m_rxPacketBurstList.clear();
-        m_transportBlocks.clear();
-        m_rxControlMessageList.clear();
-        return;
-    }
 
     // check if transport blocks are corrupted
     CheckTransportBlockCorruptionStatus();
@@ -1687,7 +2037,7 @@ NrSpectrumPhy::EndRxCtrl()
     {
         if (m_phyRxCtrlEndOkCallback)
         {
-            m_phyRxCtrlEndOkCallback(m_rxControlMessageList, GetBwpId());
+            m_phyRxCtrlEndOkCallback(m_rxControlMessageList, GetNrPhy()->DoGetArfcn());
         }
     }
 
@@ -1842,6 +2192,112 @@ NrSpectrumPhy::AddDataMimoChunkProcessor(const Ptr<NrMimoChunkProcessor>& p)
 {
     NS_LOG_FUNCTION(this);
     m_interferenceData->AddMimoChunkProcessor(p);
+}
+
+void
+NrSpectrumPhy::AddCsiRsMimoChunkProcessor(const Ptr<NrMimoChunkProcessor>& p)
+{
+    NS_LOG_FUNCTION(this);
+    m_interferenceCsiRs->AddMimoChunkProcessor(p);
+}
+
+void
+NrSpectrumPhy::AddCsiImMimoChunkProcessor(const Ptr<NrMimoChunkProcessor>& p)
+{
+    NS_LOG_FUNCTION(this);
+    m_interferenceCsiIm->AddMimoChunkProcessor(p);
+}
+
+void
+NrSpectrumPhy::StartRxCsiRs(const Ptr<NrSpectrumSignalParametersCsiRs>& csiRsParams)
+{
+    // TODO extend in future to support a predefined set of beams
+    // A UE without an RNTI (not connected yet) is not the target of any CSI-RS
+    if (m_rnti != 0 && csiRsParams->rnti == m_rnti)
+    {
+        // add this signal to all the signals
+        m_interferenceCsiRs->AddSignalMimo(csiRsParams, csiRsParams->duration);
+        // declare the start of the reception of the CSI-RS signal
+        m_interferenceCsiRs->StartRxMimo(csiRsParams);
+        // declare the end of the reception of the CSI-RS signal
+        Simulator::Schedule(csiRsParams->duration, &NrInterference::EndRx, m_interferenceCsiRs);
+
+        // Check after the DL control, which tells whether the UE is scheduled in
+        // this slot; with a propagation delay, the CSI-RS sent at the end of the
+        // DL control arrives after the control ended on the UE timeline
+        Simulator::Schedule(std::max(m_ctrlEndTime - Simulator::Now(), Time(0)) + NanoSeconds(2),
+                            &NrSpectrumPhy::CheckIfCsiImNeeded,
+                            this,
+                            csiRsParams);
+    }
+}
+
+void
+NrSpectrumPhy::CheckIfCsiImNeeded(const Ptr<NrSpectrumSignalParametersCsiRs>& csiRsParams)
+{
+    NS_LOG_FUNCTION(this);
+
+    // The UE may have changed its bandwidth, and so its spectrum model, since it received
+    // the CSI-RS, for example when it connects to a cell; that CSI-RS is then stale
+    if (csiRsParams->psd->GetSpectrumModel() != m_rxSpectrumModel)
+    {
+        NS_LOG_DEBUG("Ignoring a CSI-RS received before a bandwidth change");
+        return;
+    }
+
+    Ptr<NrUePhy> nrUePhy = DynamicCast<NrUePhy>(m_phy);
+    bool pdschCsiEnabled = nrUePhy->GetCsiFeedbackType() & CsiFeedbackFlag::CQI_PDSCH_MIMO;
+
+    // CSI-IM enabled
+    if (m_interferenceCsiIm->IsChunkProcessorSet())
+    {
+        // Schedule only CSI-IM if either PDSCH is disabled, or it is enabled but the UE is not
+        // scheduled in this slot
+        if ((!pdschCsiEnabled) || (pdschCsiEnabled && !IsUeScheduled()))
+        {
+            ScheduleCsiIm(csiRsParams);
+        }
+    }
+    else // CSI-IM not enabled
+    {
+        // if CSI-IM and PDSCH are both disable, generate CSI based on CSI-RS
+        if (!pdschCsiEnabled)
+        {
+            nrUePhy->GenerateCsiRsCqi();
+        }
+        // else CSI will be generated once PDSCH is being received
+    }
+}
+
+void
+NrSpectrumPhy::ScheduleCsiIm(Ptr<SpectrumSignalParameters> csiRsParams) const
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT(m_interferenceCsiIm);
+    // add fake signal to trigger NrInterference calculation for the duration of the fake CSI-IM
+    // signal, simulating device wake-up triggered by CSI-RS for interference measurement of channel
+    Ptr<SpectrumSignalParameters> fakeCsiImSignal = Create<SpectrumSignalParameters>();
+    fakeCsiImSignal->duration =
+        m_phy->GetSymbolPeriod() * (DynamicCast<NrUePhy>(m_phy))->GetCsiImDuration();
+    fakeCsiImSignal->psd = csiRsParams->psd;
+    fakeCsiImSignal->spectrumChannelMatrix = csiRsParams->spectrumChannelMatrix;
+    m_interferenceCsiIm->AddSignalMimo(fakeCsiImSignal, fakeCsiImSignal->duration);
+    m_interferenceCsiIm->StartRxMimo(fakeCsiImSignal);
+    // schedule NrInterference event when CSI-IM ends to calculate pass the CSI-IM interference
+    // to the corresponding callback function
+    Simulator::Schedule(fakeCsiImSignal->duration, &NrInterference::EndRx, m_interferenceCsiIm);
+}
+
+bool
+NrSpectrumPhy::IsUeScheduled() const
+{
+    return m_transportBlocks.contains(m_rnti);
+}
+
+void
+NrSpectrumPhy::AddExpectedDlCtrlEnd(Time ctrlEndTime)
+{
+    m_ctrlEndTime = ctrlEndTime;
 }
 
 } // namespace ns3

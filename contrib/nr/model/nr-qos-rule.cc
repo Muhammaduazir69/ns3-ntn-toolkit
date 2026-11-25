@@ -1,0 +1,430 @@
+// Copyright (c) 2011 CTTC
+//
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Author: Nicola Baldo <nbaldo@cttc.es>
+//
+// Ported from LteEpcTft
+
+#include "nr-qos-rule.h"
+
+#include "ns3/abort.h"
+#include "ns3/log.h"
+
+namespace ns3
+{
+
+NS_LOG_COMPONENT_DEFINE("NrQosRule");
+
+/**
+ * Output stream operator for QoS rule direction
+ *
+ * @param os output stream
+ * @param d NrQosRule direction
+ * @return ostream
+ */
+std::ostream&
+operator<<(std::ostream& os, const NrQosRule::Direction& d)
+{
+    switch (d)
+    {
+    case NrQosRule::DOWNLINK:
+        os << "DOWNLINK";
+        break;
+    case NrQosRule::UPLINK:
+        os << "UPLINK";
+        break;
+    default:
+        os << "BIDIRECTIONAL";
+        break;
+    }
+    return os;
+}
+
+/**
+ * Output stream operator for PDU session type
+ *
+ * @param os output stream
+ * @param t PDU session type
+ * @return ostream
+ */
+std::ostream&
+operator<<(std::ostream& os, const NrPduSessionType& t)
+{
+    switch (t)
+    {
+    case NrPduSessionType::IPV4:
+        os << "IPV4";
+        break;
+    case NrPduSessionType::IPV6:
+        os << "IPV6";
+        break;
+    case NrPduSessionType::IPV4V6:
+        os << "IPV4V6";
+        break;
+    case NrPduSessionType::ETHERNET:
+        os << "ETHERNET";
+        break;
+    default:
+        os << "UNSTRUCTURED";
+        break;
+    }
+    return os;
+}
+
+/**
+ * Output stream for QoS rule packet filter
+ *
+ * @param os output stream
+ * @param f QoS rule packet filter
+ * @return ostream
+ */
+std::ostream&
+operator<<(std::ostream& os, const NrQosRule::PacketFilter& f)
+{
+    os << " direction: " << f.direction << " remoteAddress: " << f.remoteAddress
+       << " remoteMask: " << f.remoteMask << " remoteIpv6Address: " << f.remoteIpv6Address
+       << " remoteIpv6Prefix: " << f.remoteIpv6Prefix << " localAddress: " << f.localAddress
+       << " localMask: " << f.localMask << " localIpv6Address: " << f.localIpv6Address
+       << " localIpv6Prefix: " << f.localIpv6Prefix << " remotePortStart: " << f.remotePortStart
+       << " remotePortEnd: " << f.remotePortEnd << " localPortStart: " << f.localPortStart
+       << " localPortEnd: " << f.localPortEnd << " typeOfService: 0x" << std::hex
+       << (uint16_t)f.typeOfService << std::dec << " typeOfServiceMask: 0x" << std::hex
+       << (uint16_t)f.typeOfServiceMask << std::dec;
+    return os;
+}
+
+NrQosRule::PacketFilter::PacketFilter()
+    : direction(BIDIRECTIONAL),
+      remoteAddress(Ipv4Address("0.0.0.0")),
+      remoteMask("0.0.0.0"),
+      localAddress(Ipv4Address("0.0.0.0")),
+      localMask("0.0.0.0"),
+      remoteIpv6Address(Ipv6Address("::")),
+      remoteIpv6Prefix(static_cast<uint8_t>(0)),
+      localIpv6Address(Ipv6Address("::")),
+      localIpv6Prefix(static_cast<uint8_t>(0)),
+      remotePortStart(0),
+      remotePortEnd(65535),
+      localPortStart(0),
+      localPortEnd(65535),
+      typeOfService(0),
+      typeOfServiceMask(0)
+{
+    NS_LOG_FUNCTION(this);
+}
+
+bool
+NrQosRule::PacketFilter::Matches(Direction d,
+                                 Ipv4Address ra,
+                                 Ipv4Address la,
+                                 uint16_t rp,
+                                 uint16_t lp,
+                                 uint8_t tos)
+{
+    NS_LOG_FUNCTION(this << d << ra << la << rp << lp << (uint16_t)tos);
+    if (d & direction)
+    {
+        NS_LOG_LOGIC("d matches");
+        if (remoteMask.IsMatch(remoteAddress, ra))
+        {
+            NS_LOG_LOGIC("ra matches");
+            if (localMask.IsMatch(localAddress, la))
+            {
+                NS_LOG_LOGIC("la matches");
+                if (remotePortStart <= rp && rp <= remotePortEnd)
+                {
+                    NS_LOG_LOGIC("rp matches");
+                    if (localPortStart <= lp && lp <= localPortEnd)
+                    {
+                        NS_LOG_LOGIC("lp matches");
+                        if ((tos & typeOfServiceMask) == (typeOfService & typeOfServiceMask))
+                        {
+                            NS_LOG_LOGIC("tos matches --> have match!");
+                            return true;
+                        }
+                        else
+                        {
+                            NS_LOG_LOGIC("tos doesn't match: tos="
+                                         << tos << " f.tos=" << typeOfService
+                                         << " f.tosmask=" << typeOfServiceMask);
+                        }
+                    }
+                    else
+                    {
+                        NS_LOG_LOGIC("lp doesn't match: lp=" << lp << " f.lps=" << localPortStart
+                                                             << " f.lpe=" << localPortEnd);
+                    }
+                }
+                else
+                {
+                    NS_LOG_LOGIC("rp doesn't match: rp=" << rp << " f.rps=" << remotePortStart
+                                                         << " f.lpe=" << remotePortEnd);
+                }
+            }
+            else
+            {
+                NS_LOG_LOGIC("la doesn't match: la=" << la << " f.la=" << localAddress
+                                                     << " f.lmask=" << localMask);
+            }
+        }
+        else
+        {
+            NS_LOG_LOGIC("ra doesn't match: ra=" << ra << " f.ra=" << remoteAddress
+                                                 << " f.rmask=" << remoteMask);
+        }
+    }
+    else
+    {
+        NS_LOG_LOGIC("d doesn't match: d=0x" << std::hex << d << " f.d=0x" << std::hex << direction
+                                             << std::dec);
+    }
+    return false;
+}
+
+bool
+NrQosRule::PacketFilter::Matches(Direction d,
+                                 Ipv6Address ra,
+                                 Ipv6Address la,
+                                 uint16_t rp,
+                                 uint16_t lp,
+                                 uint8_t tos)
+{
+    NS_LOG_FUNCTION(this << d << ra << la << rp << lp << (uint16_t)tos);
+    if (d & direction)
+    {
+        NS_LOG_LOGIC("d matches");
+        if (remoteIpv6Prefix.IsMatch(remoteIpv6Address, ra))
+        {
+            NS_LOG_LOGIC("ra matches");
+            if (localIpv6Prefix.IsMatch(localIpv6Address, la))
+            {
+                NS_LOG_LOGIC("la matches");
+                if (remotePortStart <= rp && rp <= remotePortEnd)
+                {
+                    NS_LOG_LOGIC("rp matches");
+                    if (localPortStart <= lp && lp <= localPortEnd)
+                    {
+                        NS_LOG_LOGIC("lp matches");
+                        if ((tos & typeOfServiceMask) == (typeOfService & typeOfServiceMask))
+                        {
+                            NS_LOG_LOGIC("tos matches --> have match!");
+                            return true;
+                        }
+                        else
+                        {
+                            NS_LOG_LOGIC("tos doesn't match: tos="
+                                         << tos << " f.tos=" << typeOfService
+                                         << " f.tosmask=" << typeOfServiceMask);
+                        }
+                    }
+                    else
+                    {
+                        NS_LOG_LOGIC("lp doesn't match: lp=" << lp << " f.lps=" << localPortStart
+                                                             << " f.lpe=" << localPortEnd);
+                    }
+                }
+                else
+                {
+                    NS_LOG_LOGIC("rp doesn't match: rp=" << rp << " f.rps=" << remotePortStart
+                                                         << " f.lpe=" << remotePortEnd);
+                }
+            }
+            else
+            {
+                NS_LOG_LOGIC("la doesn't match: la=" << la << " f.la=" << localIpv6Address
+                                                     << " f.lprefix=" << localIpv6Prefix);
+            }
+        }
+        else
+        {
+            NS_LOG_LOGIC("ra doesn't match: ra=" << ra << " f.ra=" << remoteIpv6Address
+                                                 << " f.rprefix=" << remoteIpv6Prefix);
+        }
+    }
+    else
+    {
+        NS_LOG_LOGIC("d doesn't match: d=0x" << std::hex << d << " f.d=0x" << std::hex << direction
+                                             << std::dec);
+    }
+    return false;
+}
+
+Ptr<NrQosRule>
+NrQosRule::Default()
+{
+    NS_LOG_FUNCTION_NOARGS();
+    Ptr<NrQosRule> rule = Create<NrQosRule>();
+    NrQosRule::PacketFilter defaultPacketFilter;
+    rule->Add(defaultPacketFilter);
+    rule->SetPrecedence(255);
+    return rule;
+}
+
+Ptr<NrQosRule>
+NrQosRule::Unstructured(uint16_t protocolNumber)
+{
+    NS_LOG_FUNCTION(protocolNumber);
+    Ptr<NrQosRule> rule = Create<NrQosRule>();
+    rule->SetPduSessionType(NrPduSessionType::UNSTRUCTURED);
+    rule->SetProtocolNumber(protocolNumber);
+    rule->SetPrecedence(255);
+    return rule;
+}
+
+NrQosRule::NrQosRule()
+    : m_numFilters(0),
+      m_precedence(128),
+      m_qfi(0),
+      m_pduSessionType(NrPduSessionType::IPV4V6),
+      m_protocolNumber(0)
+{
+    NS_LOG_FUNCTION(this);
+}
+
+uint8_t
+NrQosRule::Add(PacketFilter f)
+{
+    NS_LOG_FUNCTION(this << f);
+    NS_ABORT_MSG_IF(m_numFilters >= 16, "Maximum number of packet filters limited to 16");
+
+    std::list<PacketFilter>::iterator it;
+    for (it = m_filters.begin(); it != m_filters.end(); ++it)
+    {
+    }
+    m_filters.insert(it, f);
+    ++m_numFilters;
+    return (m_numFilters - 1);
+}
+
+bool
+NrQosRule::Matches(Direction direction,
+                   Ipv4Address remoteAddress,
+                   Ipv4Address localAddress,
+                   uint16_t remotePort,
+                   uint16_t localPort,
+                   uint8_t typeOfService)
+{
+    NS_LOG_FUNCTION(this << direction << remoteAddress << localAddress << std::dec << remotePort
+                         << localPort << (uint16_t)typeOfService);
+    for (auto it = m_filters.begin(); it != m_filters.end(); ++it)
+    {
+        if (it->Matches(direction,
+                        remoteAddress,
+                        localAddress,
+                        remotePort,
+                        localPort,
+                        typeOfService))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool
+NrQosRule::Matches(Direction direction,
+                   Ipv6Address remoteAddress,
+                   Ipv6Address localAddress,
+                   uint16_t remotePort,
+                   uint16_t localPort,
+                   uint8_t typeOfService)
+{
+    NS_LOG_FUNCTION(this << direction << remoteAddress << localAddress << std::dec << remotePort
+                         << localPort << (uint16_t)typeOfService);
+    for (auto it = m_filters.begin(); it != m_filters.end(); ++it)
+    {
+        if (it->Matches(direction,
+                        remoteAddress,
+                        localAddress,
+                        remotePort,
+                        localPort,
+                        typeOfService))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::list<NrQosRule::PacketFilter>
+NrQosRule::GetPacketFilters() const
+{
+    NS_LOG_FUNCTION(this);
+    return m_filters;
+}
+
+bool
+NrQosRule::IsDefault() const
+{
+    // A default rule should match what Default() produces
+    if (m_numFilters != 1)
+    {
+        return false;
+    }
+
+    // Compare with the default rule
+    Ptr<NrQosRule> defaultRule = Default();
+    auto defaultFilters = defaultRule->GetPacketFilters();
+
+    NS_ASSERT_MSG(defaultFilters.size() == 1, "Default rule should have one packet filter");
+
+    // Compare the packet filters
+    return (m_filters.front() == defaultFilters.front());
+}
+
+void
+NrQosRule::SetPrecedence(uint8_t precedence)
+{
+    NS_LOG_FUNCTION(this << precedence);
+    NS_ABORT_MSG_IF(!precedence, "Precedence must be greater than 0");
+    m_precedence = precedence;
+}
+
+uint8_t
+NrQosRule::GetPrecedence() const
+{
+    return m_precedence;
+}
+
+void
+NrQosRule::SetQfi(uint8_t qfi)
+{
+    NS_LOG_FUNCTION(this << qfi);
+    NS_ABORT_MSG_IF(qfi > 63, "QFI must be less than 64");
+    m_qfi = qfi;
+}
+
+uint8_t
+NrQosRule::GetQfi() const
+{
+    return m_qfi;
+}
+
+void
+NrQosRule::SetPduSessionType(NrPduSessionType pduSessionType)
+{
+    NS_LOG_FUNCTION(this << pduSessionType);
+    m_pduSessionType = pduSessionType;
+}
+
+NrPduSessionType
+NrQosRule::GetPduSessionType() const
+{
+    return m_pduSessionType;
+}
+
+void
+NrQosRule::SetProtocolNumber(uint16_t protocolNumber)
+{
+    NS_LOG_FUNCTION(this << protocolNumber);
+    m_protocolNumber = protocolNumber;
+}
+
+uint16_t
+NrQosRule::GetProtocolNumber() const
+{
+    return m_protocolNumber;
+}
+
+} // namespace ns3

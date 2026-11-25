@@ -10,16 +10,16 @@
 #define NS_ASSERT_H
 
 /**
- * \file
- * \ingroup assert
+ * @file
+ * @ingroup assert
  * NS_ASSERT() and NS_ASSERT_MSG() macro definitions
  */
 
 /**
- * \ingroup debugging
- * \defgroup assert Assertions
+ * @ingroup debugging
+ * @defgroup assert Assertions
  *
- * \brief Assert functions and macros
+ * @brief Assert functions and macros
  *
  * The assert macros are used to verify
  * at runtime that a certain condition is true. If it is
@@ -44,39 +44,41 @@
 #include <iostream>
 
 /**
- * \ingroup assert
+ * @ingroup assert
  *
  * At runtime, in debugging builds, if this condition is not
  * true, the program prints the source file, line number and
  * unverified condition and halts by calling std::terminate
  *
- * \param [in] condition Condition to verify.
+ * @param [in] condition Condition to verify.
  */
 #define NS_ASSERT(condition)                                                                       \
     do                                                                                             \
     {                                                                                              \
         if (!(condition))                                                                          \
         {                                                                                          \
+            ::ns3::LogLineFlushPartial();                                                          \
             std::cerr << "NS_ASSERT failed, cond=\"" << #condition << "\", ";                      \
             NS_FATAL_ERROR_NO_MSG();                                                               \
         }                                                                                          \
     } while (false)
 
 /**
- * \ingroup assert
+ * @ingroup assert
  *
  * At runtime, in debugging builds, if this condition is not
  * true, the program prints the message to output and
  * halts by calling std::terminate.
  *
- * \param [in] condition Condition to verify.
- * \param [in] message Message to output
+ * @param [in] condition Condition to verify.
+ * @param [in] message Message to output
  */
 #define NS_ASSERT_MSG(condition, message)                                                          \
     do                                                                                             \
     {                                                                                              \
         if (!(condition))                                                                          \
         {                                                                                          \
+            ::ns3::LogLineFlushPartial();                                                          \
             std::cerr << "NS_ASSERT failed, cond=\"" << #condition << "\", ";                      \
             NS_FATAL_ERROR(message);                                                               \
         }                                                                                          \

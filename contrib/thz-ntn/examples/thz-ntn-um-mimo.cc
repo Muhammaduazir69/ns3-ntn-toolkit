@@ -17,6 +17,7 @@
  */
 
 #include "thz-ntn-pass-kit.h"
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/thz-ntn-link-geometry.h"
 
 #include <ns3/command-line.h>
@@ -24,6 +25,8 @@
 #include <ns3/node-container.h>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -120,6 +123,13 @@ main(int argc, char* argv[])
               << "\n";
     std::cout << "  " << std::string(82, '-') << "\n";
 
+    // ntn-dataset@1: sections 1 to 5 as datasets next to the run record in outputDir,
+    // so the results follow the parameters (section 4 is folded into the arrays table).
+    std::filesystem::create_directories(outputDir);
+    std::ofstream arraysCsv(outputDir + "/thz-ntn-um-mimo-arrays.csv");
+    arraysCsv << "array_side,elements,max_gain_dbi,beamwidth_3db_deg,near_field_m,"
+                 "physical_size_mm,coupling_loss_db,sat_550km_near_field\n";
+
     for (uint32_t N : arraySizes)
     {
         Ptr<ThzNtnAntennaArray> array = CreateObject<ThzNtnAntennaArray>();
@@ -144,6 +154,9 @@ main(int argc, char* argv[])
                   << std::setw(12) << physSize * 1000.0
                   << std::setw(12) << coupling
                   << "\n";
+        arraysCsv << N << "," << (N * N) << "," << maxGain << "," << beamwidth << ","
+                  << nearField << "," << physSize * 1000.0 << "," << coupling << ","
+                  << (array->IsInNearField(550e3) ? 1 : 0) << "\n";
     }
 
     // ---- Cassegrain antenna for comparison ----
@@ -186,6 +199,8 @@ main(int argc, char* argv[])
         angles.push_back(a);
     }
 
+    std::ofstream patternCsv(outputDir + "/thz-ntn-um-mimo-pattern.csv");
+    patternCsv << "angle_deg,gain_dbi,normalized_gain_db\n";
     for (int angleDeg : angles)
     {
         double gain = patternArray->ComputeArrayGain_dBi(
@@ -197,6 +212,7 @@ main(int argc, char* argv[])
                   << std::setw(12) << gain
                   << std::setw(12) << normGain
                   << "\n";
+        patternCsv << angleDeg << "," << gain << "," << normGain << "\n";
     }
 
     // ---- Beam squint analysis ----
@@ -232,6 +248,9 @@ main(int argc, char* argv[])
               << "\n";
     std::cout << "  " << std::string(58, '-') << "\n";
 
+    std::ofstream squintCsv(outputDir + "/thz-ntn-um-mimo-squint.csv");
+    squintCsv << "requested_steer_deg,steer_deg,lower_edge_deg,upper_edge_deg,squint_loss_db\n";
+    double maxSquintLoss = 0.0;
     for (double steer : steerAngles)
     {
         // Point the active beam at the requested direction; the engine snaps
@@ -253,6 +272,9 @@ main(int argc, char* argv[])
                   << std::setprecision(2)
                   << std::setw(14) << squintLoss
                   << "\n";
+        squintCsv << steer << "," << actualSteer << "," << lowerEdge << "," << upperEdge << ","
+                  << squintLoss << "\n";
+        maxSquintLoss = std::max(maxSquintLoss, squintLoss);
     }
 
     // ---- Near-field distance analysis ----
@@ -287,6 +309,8 @@ main(int argc, char* argv[])
               << "\n";
     std::cout << "  " << std::string(30, '-') << "\n";
 
+    std::ofstream elementCsv(outputDir + "/thz-ntn-um-mimo-element.csv");
+    elementCsv << "angle_deg,element_gain_dbi\n";
     for (int ang = 0; ang <= 90; ang += 10)
     {
         double elemGain = patternArray->ComputeElementPattern_dBi(static_cast<double>(ang));
@@ -294,11 +318,31 @@ main(int argc, char* argv[])
                   << std::setw(12) << ang
                   << std::setw(14) << elemGain
                   << "\n";
+        elementCsv << ang << "," << elemGain << "\n";
     }
 
     // ---- Run simulation ----
     Simulator::Stop(Seconds(1.0));
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    arraysCsv.close();
+    patternCsv.close();
+    squintCsv.close();
+    elementCsv.close();
+    ns3::ntnobs::WriteDatasetRecord(
+        outputDir,
+        "thz-ntn-um-mimo",
+        "analytic",
+        argc,
+        argv,
+        {{"array_elements", std::to_string(numElements * numElements), "analytic"},
+         {"peak_gain_dbi", std::to_string(peakGain), "analytic"},
+         {"beamwidth_3db_deg", std::to_string(patternArray->ComputeBeamwidth3dB_deg()),
+          "analytic"},
+         {"max_squint_loss_db", std::to_string(maxSquintLoss), "analytic"},
+         {"cassegrain_gain_dbi", std::to_string(cassGain), "analytic"},
+         {"cassegrain_near_field_m", std::to_string(cassNearField), "analytic"}});
     Simulator::Destroy();
 
     std::cout << "\n  Simulation complete.\n";
@@ -363,6 +407,9 @@ main(int argc, char* argv[])
                     }
                 };
                 Simulator::ScheduleNow([update]() { (*update)(); });
+                // Globe scene of the measured pass (SGP4 satellite and the TR 38.811
+                // terminal with the Cassegrain dish).
+                ns3::ntnobs::StartSceneFromNodeList(outputDir);
             });
         std::printf("# measured companion: %ux%u UPA (%.1f dBi) -> %.0f cm Cassegrain (%.1f dBi), "
                     "scan loss %.2f..%.2f dB, squint %.3f dB: PDR %.5f goodput %.2f Mb/s ACM "

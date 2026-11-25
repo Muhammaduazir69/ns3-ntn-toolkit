@@ -9,6 +9,7 @@
 #ifndef PARF_WIFI_MANAGER_H
 #define PARF_WIFI_MANAGER_H
 
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-remote-station-manager.h"
 
 namespace ns3
@@ -17,7 +18,7 @@ namespace ns3
 struct ParfWifiRemoteStation;
 
 /**
- * \ingroup wifi
+ * @ingroup wifi
  * PARF Rate control algorithm
  *
  * This class implements the PARF algorithm as described in
@@ -30,12 +31,12 @@ struct ParfWifiRemoteStation;
  * exit if the user tries to configure this RAA with a Wi-Fi MAC
  * that supports 802.11n or higher.
  */
-class ParfWifiManager : public WifiRemoteStationManager
+class WIFI_EXPORT ParfWifiManager : public WifiRemoteStationManager
 {
   public:
     /**
      * Register this type.
-     * \return The object TypeId.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
     ParfWifiManager();
@@ -66,7 +67,7 @@ class ParfWifiManager : public WifiRemoteStationManager
 
     /** Check for initializations.
      *
-     * \param station The remote station.
+     * @param station The remote station.
      */
     void CheckInit(ParfWifiRemoteStation* station);
 
@@ -80,17 +81,17 @@ class ParfWifiManager : public WifiRemoteStationManager
      * In contrast to rate, power levels do not depend on the remote station.
      * The levels depend only on the physical layer of the device.
      */
-    uint8_t m_minPower;
+    uint8_t m_minPowerLevel{WIFI_MIN_TX_PWR_LEVEL};
 
     /**
      * Maximal power level.
      */
-    uint8_t m_maxPower;
+    uint8_t m_maxPowerLevel{WIFI_MIN_TX_PWR_LEVEL};
 
     /**
      * The trace source fired when the transmission power changes.
      */
-    TracedCallback<double, double, Mac48Address> m_powerChange;
+    TracedCallback<dBm_u, dBm_u, Mac48Address> m_powerChange;
     /**
      * The trace source fired when the transmission rate changes.
      */

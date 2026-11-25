@@ -4,12 +4,12 @@
 
 #include "nr-cb-type-one-sp.h"
 
-#include <ns3/double.h>
-#include <ns3/enum.h>
-#include <ns3/log.h>
-#include <ns3/math.h>
-#include <ns3/nr-spectrum-value-helper.h>
-#include <ns3/uinteger.h>
+#include "ns3/double.h"
+#include "ns3/enum.h"
+#include "ns3/log.h"
+#include "ns3/math.h"
+#include "ns3/nr-spectrum-value-helper.h"
+#include "ns3/uinteger.h"
 
 #include <complex.h>
 
@@ -100,7 +100,7 @@ NrCbTypeOneSp::GetBasePrecMatFromIndex(size_t i11, size_t i12, size_t i13, size_
     for (size_t layer = 0; layer < m_rank; layer++)
     {
         // The beamforming vector for the first polarization
-        auto v = uniqueBfvs[m_uniqueBfvInds[layer]];
+        const auto& v = uniqueBfvs[m_uniqueBfvInds[layer]];
         NS_ASSERT_MSG(v.size() == m_nPorts / 2,
                       "Size of a per-polarization beamforming vector must be nPorts/2");
         for (size_t vIdx = 0; vIdx < v.size(); vIdx++)
@@ -262,8 +262,8 @@ NrCbTypeOneSp::DoInitK1K2Rank34()
     // The factors before O1 and O2 in Table 5.2.2.2.1-4
     if (m_n1 == 2 && m_n2 == 1)
     {
-        m_k1Factors = {1};
-        m_k2Factors = {0};
+        m_k1Factors = std::vector<size_t>{1};
+        m_k2Factors = std::vector<size_t>{0};
     }
     else if (m_n1 == 4 && m_n2 == 1)
     {
@@ -419,7 +419,7 @@ NrCbTypeOneSp::CreateVecV(size_t l, size_t m) const
     for (size_t i = 0; i < m_n1; i++)
     {
         auto phase = (2.0 * M_PI * l * i) / static_cast<double>(m_o1 * m_n1);
-        vecH.push_back({cos(phase), sin(phase)});
+        vecH.emplace_back(cos(phase), sin(phase));
     }
     NS_ASSERT_MSG(vecH.size() == m_n1, "Horizontal beamforming vector size mismatch");
     return Kroneckerproduct(vecH, CreateVecU(m));
@@ -432,7 +432,7 @@ NrCbTypeOneSp::CreateVecVtilde(size_t l, size_t m) const
     for (size_t i = 0; i < m_n1 / 2; i++)
     {
         auto phase = (4.0 * M_PI * l * i) / static_cast<double>(m_o1 * m_n1);
-        vecH.push_back({cos(phase), sin(phase)});
+        vecH.emplace_back(cos(phase), sin(phase));
     }
     NS_ASSERT_MSG(vecH.size() == m_n1 / 2, "Horizontal beamforming vector size mismatch");
     return Kroneckerproduct(vecH, CreateVecU(m));
@@ -468,7 +468,7 @@ NrCbTypeOneSp::CreateVecU(size_t m) const
         for (size_t i = 0; i < m_n2; i++)
         {
             auto phase = (2 * M_PI * m * i) / (m_o2 * m_n2);
-            vecU.push_back({cos(phase), sin(phase)});
+            vecU.emplace_back(cos(phase), sin(phase));
         }
     }
     return vecU;

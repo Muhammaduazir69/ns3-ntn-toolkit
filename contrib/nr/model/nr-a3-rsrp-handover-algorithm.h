@@ -11,13 +11,14 @@
 #include "nr-handover-management-sap.h"
 #include "nr-rrc-sap.h"
 
-#include <ns3/nstime.h>
+#include "ns3/nr-export.h"
+#include "ns3/nstime.h"
 
 namespace ns3
 {
 
 /**
- * \brief Implementation of the strongest cell handover algorithm, based on RSRP
+ * @brief Implementation of the strongest cell handover algorithm, based on RSRP
  *        measurements and Event A3.
  *
  * The algorithm utilizes Event A3 (Section 5.5.4.4 of 3GPP TS 36.331) UE
@@ -44,11 +45,11 @@ namespace ns3
  *                                               TimeValue (MilliSeconds (256)));
  *     NetDeviceContainer nrGnbDevs = nrHelper->InstallGnbDevice (gnbNodes);
  *
- * \note Setting the handover algorithm type and attributes after the call to
+ * @note Setting the handover algorithm type and attributes after the call to
  *       NrHelper::InstallGnbDevice does not have any effect to the devices
  *       that have already been installed.
  */
-class NrA3RsrpHandoverAlgorithm : public NrHandoverAlgorithm
+class NR_EXPORT NrA3RsrpHandoverAlgorithm : public NrHandoverAlgorithm
 {
   public:
     /// Creates a strongest cell handover algorithm instance.
@@ -57,8 +58,8 @@ class NrA3RsrpHandoverAlgorithm : public NrHandoverAlgorithm
     ~NrA3RsrpHandoverAlgorithm() override;
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -82,8 +83,8 @@ class NrA3RsrpHandoverAlgorithm : public NrHandoverAlgorithm
      * Determines if a neighbour cell is a valid destination for handover.
      * Currently always return true.
      *
-     * \param cellId The cell ID of the neighbour cell.
-     * \return True if the cell is a valid destination for handover.
+     * @param cellId The cell ID of the neighbour cell.
+     * @return True if the cell is a valid destination for handover.
      */
     bool IsValidNeighbour(uint16_t cellId);
 
@@ -100,6 +101,24 @@ class NrA3RsrpHandoverAlgorithm : public NrHandoverAlgorithm
      * must continuously higher than serving cell's RSRP "
      */
     Time m_timeToTrigger;
+    /**
+     * The `MinTargetRsrpDbm` attribute. Target-admission floor: a neighbour cell is
+     * not selected as a handover target unless its reported RSRP is at least this
+     * level. Prevents handing a UE into a cell that is already too weak to serve it
+     * (which would immediately radio-link-fail), so a short-TimeToTrigger / low-A3-
+     * offset configuration stops churning UEs into marginal cells. -140 dBm (the
+     * default) effectively disables the floor.
+     */
+    double m_minTargetRsrpDbm;
+    /**
+     * The `MinTargetRsrqDb` attribute. Interference-aware target-admission floor: a
+     * neighbour is not selected as a handover target unless its reported RSRQ is at
+     * least this level (dB). Unlike the RSRP floor, RSRQ tracks SINR/interference, so
+     * this rejects high-RSRP but low-SINR cells that would immediately T310-expire after
+     * a handover (the dominant low-TTT connected-RLF cause in a dense co-channel HetNet).
+     * -100 dB (the default) effectively disables the floor.
+     */
+    double m_minTargetRsrqDb;
 
     /// Interface to the eNodeB RRC instance.
     NrHandoverManagementSapUser* m_handoverManagementSapUser;

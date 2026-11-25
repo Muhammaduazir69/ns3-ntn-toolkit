@@ -121,6 +121,7 @@ build_lib_example(
   NAME oran-ntn-cross-domain-slice
   SOURCE_FILES oran-ntn-cross-domain-slice.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${liboran-ntn}
     ${libntn-traffic}
     ${libntn-cho}

@@ -18,6 +18,7 @@
 #include "ns3/application.h"
 #include "ns3/ipv4-address.h"
 
+#include <limits>
 #include <map>
 
 namespace ns3
@@ -28,17 +29,17 @@ class Socket;
 class Packet;
 
 /**
- * \ingroup dhcp
+ * @ingroup dhcp
  *
- * \class DhcpServer
- * \brief Implements the functionality of a DHCP server
+ * @class DhcpServer
+ * @brief Implements the functionality of a DHCP server
  */
 class DhcpServer : public Application
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -46,12 +47,12 @@ class DhcpServer : public Application
     ~DhcpServer() override;
 
     /**
-     * \brief Add a static entry to the pool.
+     * @brief Add a static entry to the pool.
      *
-     * \param chaddr The client chaddr.
-     * \param addr The address to handle to the client.
+     * @param macAddr The client MAC address.
+     * @param addr The IP address to handle to the client.
      */
-    void AddStaticDhcpEntry(Address chaddr, Ipv4Address addr);
+    void AddStaticDhcpEntry(Address macAddr, Ipv4Address addr);
 
   protected:
     void DoDispose() override;
@@ -63,29 +64,29 @@ class DhcpServer : public Application
     static const int PORT = 67; //!< Port number of DHCP server
 
     /**
-     * \brief Handles incoming packets from the network
-     * \param socket Socket bound to port 67 of the DHCP server
+     * @brief Handles incoming packets from the network
+     * @param socket Socket bound to port 67 of the DHCP server
      */
     void NetHandler(Ptr<Socket> socket);
 
     /**
-     * \brief Sends DHCP offer after receiving DHCP Discover
-     * \param iDev incoming NetDevice
-     * \param header DHCP header of the received message
-     * \param from Address of the DHCP client
+     * @brief Sends DHCP offer after receiving DHCP Discover
+     * @param iDev incoming NetDevice
+     * @param header DHCP header of the received message
+     * @param from Address of the DHCP client
      */
     void SendOffer(Ptr<NetDevice> iDev, DhcpHeader header, InetSocketAddress from);
 
     /**
-     * \brief Sends DHCP ACK (or NACK) after receiving Request
-     * \param iDev incoming NetDevice
-     * \param header DHCP header of the received message
-     * \param from Address of the DHCP client
+     * @brief Sends DHCP ACK (or NACK) after receiving Request
+     * @param iDev incoming NetDevice
+     * @param header DHCP header of the received message
+     * @param from Address of the DHCP client
      */
     void SendAck(Ptr<NetDevice> iDev, DhcpHeader header, InetSocketAddress from);
 
     /**
-     * \brief Modifies the remaining lease time of addresses
+     * @brief Modifies the remaining lease time of addresses
      */
     void TimerHandler();
 
@@ -97,21 +98,16 @@ class DhcpServer : public Application
     Ipv4Address m_gateway;     //!< The gateway address
 
     /// Leased address container - chaddr + IP addr / lease time
-    typedef std::map<Address, std::pair<Ipv4Address, uint32_t>> LeasedAddress;
-    /// Leased address iterator - chaddr + IP addr / lease time
-    typedef std::map<Address, std::pair<Ipv4Address, uint32_t>>::iterator LeasedAddressIter;
-    /// Leased address const iterator - chaddr + IP addr / lease time
-    typedef std::map<Address, std::pair<Ipv4Address, uint32_t>>::const_iterator LeasedAddressCIter;
+    using LeasedAddress = std::map<DhcpChaddr, std::pair<Ipv4Address, uint32_t>>;
 
     /// Expired address container - chaddr
-    typedef std::list<Address> ExpiredAddress;
-    /// Expired address iterator - chaddr
-    typedef std::list<Address>::iterator ExpiredAddressIter;
-    /// Expired address const iterator - chaddr
-    typedef std::list<Address>::const_iterator ExpiredAddressCIter;
+    using ExpiredAddress = std::list<DhcpChaddr>;
 
     /// Available address container - IP addr
-    typedef std::list<Ipv4Address> AvailableAddress;
+    using AvailableAddress = std::list<Ipv4Address>;
+
+    /// The maximum representable lease time means permanent lease.
+    static constexpr uint32_t PERMANENT_LEASE = std::numeric_limits<uint32_t>::max();
 
     LeasedAddress m_leasedAddresses;   //!< Leased address and their status (cache memory)
     ExpiredAddress m_expiredAddresses; //!< Expired addresses to be reused (chaddr of the clients)

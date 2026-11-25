@@ -1213,7 +1213,7 @@ class AiranCodecFidelityTest : public TestCase
 {
   public:
     AiranCodecFidelityTest()
-        : TestCase("Codec fidelity: 16x2x273 CSI bit-exact incl. -0/inf/NaN/denormal, u64 max")
+        : TestCase("Codec fidelity: 16x2x273 CSI bit-exact incl. -0-inf-NaN-denormal, u64 max")
     {
     }
 
@@ -1380,7 +1380,7 @@ class AiranBeamConformanceTest : public TestCase
 {
   public:
     AiranBeamConformanceTest()
-        : TestCase("Beam model: argmax, sorted top-K, tie-break; empty/NaN/mismatched refused")
+        : TestCase("Beam model: argmax, sorted top-K, tie-break; empty-NaN-mismatched refused")
     {
     }
 
@@ -1654,7 +1654,7 @@ class AiranOverloadDrainTest : public TestCase
 {
   public:
     AiranOverloadDrainTest()
-        : TestCase("Overload: 4000-request burst drains at 64/tick, no loss, FIFO, exact tick count")
+        : TestCase("Overload: 4000-request burst drains at 64-tick, no loss, FIFO, exact tick count")
     {
     }
 
@@ -1796,11 +1796,15 @@ class AiranClosedLoopHandoverTest : public TestCase
         sats.Create(2);
         NodeContainer ues;
         ues.Create(1);
-        // Satellite 0 is 3 deg off the UE, satellite 1 straight above it.
+        // Satellite 0 is 10 deg off the UE (~1,250 km slant; measured 10-13 dB weaker RSRP with the
+        // array's element pattern), satellite 1 straight
+        // above it. The gap must exceed the TR 38.811 shadowing/scintillation swing of the measured
+        // RSRP (~3 dB over seconds) plus the 1 dB reporting step: at 3 deg (~1.2 dB) and 6 deg
+        // (~2 dB) the classifier, which has no hysteresis, ping-ponged on that noise.
         for (uint32_t i = 0; i < 2; ++i)
         {
             auto m = CreateObject<ConstantPositionMobilityModel>();
-            m->SetPosition(NtnRealStackHelper::GeodeticToEcef(i == 0 ? 43.0 : 40.0, -3.0, 600e3));
+            m->SetPosition(NtnRealStackHelper::GeodeticToEcef(i == 0 ? 50.0 : 40.0, -3.0, 600e3));
             sats.Get(i)->AggregateObject(m);
         }
         auto um = CreateObject<ConstantPositionMobilityModel>();

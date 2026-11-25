@@ -10,6 +10,7 @@
 #define IDEAL_WIFI_MANAGER_H
 
 #include "ns3/traced-value.h"
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-remote-station-manager.h"
 
 namespace ns3
@@ -18,8 +19,8 @@ namespace ns3
 struct IdealWifiRemoteStation;
 
 /**
- * \brief Ideal rate control algorithm
- * \ingroup wifi
+ * @brief Ideal rate control algorithm
+ * @ingroup wifi
  *
  * This class implements an 'ideal' rate control algorithm
  * similar to RBAR in spirit (see <i>A rate-adaptive MAC
@@ -32,12 +33,12 @@ struct IdealWifiRemoteStation;
  * of SNR thresholds built from a target BER and transmission
  * mode-specific SNR/BER curves.
  */
-class IdealWifiManager : public WifiRemoteStationManager
+class WIFI_EXPORT IdealWifiManager : public WifiRemoteStationManager
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     IdealWifiManager();
@@ -45,7 +46,7 @@ class IdealWifiManager : public WifiRemoteStationManager
 
     void SetupPhy(const Ptr<WifiPhy> phy) override;
 
-  private:
+  protected:
     void DoInitialize() override;
     WifiRemoteStation* DoCreateStation() const override;
     void DoReportRxOk(WifiRemoteStation* station, double rxSnr, WifiMode txMode) override;
@@ -73,10 +74,11 @@ class IdealWifiManager : public WifiRemoteStationManager
     WifiTxVector DoGetDataTxVector(WifiRemoteStation* station, MHz_u allowedWidth) override;
     WifiTxVector DoGetRtsTxVector(WifiRemoteStation* station) override;
 
+  private:
     /**
      * Reset the station, invoked if the maximum amount of retries has failed.
      *
-     * \param station the station for which statistics should be reset
+     * @param station the station for which statistics should be reset
      */
     void Reset(WifiRemoteStation* station) const;
 
@@ -91,24 +93,24 @@ class IdealWifiManager : public WifiRemoteStationManager
      * Return the minimum SNR needed to successfully transmit
      * data with this WifiTxVector at the specified BER.
      *
-     * \param txVector WifiTxVector (containing valid mode, width, and Nss)
+     * @param txVector WifiTxVector (containing valid mode, width, and Nss)
      *
-     * \return the minimum SNR for the given WifiTxVector in linear scale
+     * @return the minimum SNR for the given WifiTxVector in linear scale
      */
     double GetSnrThreshold(WifiTxVector txVector);
     /**
      * Adds a pair of WifiTxVector and the minimum SNR for that given vector
      * to the list.
      *
-     * \param txVector the WifiTxVector storing mode, channel width, and Nss
-     * \param snr the minimum SNR for the given txVector in linear scale
+     * @param txVector the WifiTxVector storing mode, channel width, and Nss
+     * @param snr the minimum SNR for the given txVector in linear scale
      */
     void AddSnrThreshold(WifiTxVector txVector, double snr);
 
     /**
      * Convenience function for selecting a channel width for non-HT mode
-     * \param mode non-HT WifiMode
-     * \return the channel width for the selected mode
+     * @param mode non-HT WifiMode
+     * @return the channel width for the selected mode
      */
     MHz_u GetChannelWidthForNonHtMode(WifiMode mode) const;
 
@@ -118,10 +120,10 @@ class IdealWifiManager : public WifiRemoteStationManager
      * different channel width than the requested one, and/or a different NSS,  the function does
      * some computations to get the corresponding SNR.
      *
-     * \param station the station being queried
-     * \param channelWidth the channel width
-     * \param nss the number of spatial streams
-     * \return the SNR in linear scale
+     * @param station the station being queried
+     * @param channelWidth the channel width
+     * @param nss the number of spatial streams
+     * @return the SNR in linear scale
      */
     double GetLastObservedSnr(IdealWifiRemoteStation* station,
                               MHz_u channelWidth,
@@ -129,18 +131,18 @@ class IdealWifiManager : public WifiRemoteStationManager
 
     /**
      * Check whether a given modulation class is supported by both the node and the peer
-     * \param mc the modulation class
-     * \param station the peer station
-     * \return true if the modulation class can be used, false otherwise
+     * @param mc the modulation class
+     * @param station the peer station
+     * @return true if the modulation class can be used, false otherwise
      */
     bool IsModulationClassSupported(WifiModulationClass mc, IdealWifiRemoteStation* station);
 
     /**
      * Check whether a given modulation class is supported and that there are no higher modulation
      * classes that should instead be candidates
-     * \param mc the modulation class
-     * \param station the peer station
-     * \return true if the modulation class is a candidate, false otherwise
+     * @param mc the modulation class
+     * @param station the peer station
+     * @return true if the modulation class is a candidate, false otherwise
      */
     bool IsCandidateModulationClass(WifiModulationClass mc, IdealWifiRemoteStation* station);
 

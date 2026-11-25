@@ -102,8 +102,7 @@ ListPositionAllocator::Add(const std::string filePath,
 
         Vector pos(x, y, z);
         Add(pos);
-
-    } // while FetchNextRow
+    }
     NS_LOG_INFO("read " << csv.RowNumber() << " rows");
 }
 
@@ -606,7 +605,7 @@ UniformDiscPositionAllocator::GetNext() const
     {
         x = m_rv->GetValue(-m_rho, m_rho);
         y = m_rv->GetValue(-m_rho, m_rho);
-    } while (std::sqrt(x * x + y * y) > m_rho);
+    } while (std::hypot(x, y) > m_rho);
 
     x += m_x;
     y += m_y;

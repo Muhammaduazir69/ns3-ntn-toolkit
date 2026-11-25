@@ -2,7 +2,20 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
-#include <ns3/nstime.h>
+/**
+ * @ingroup examples
+ * @file lena-lte-comparison.h
+ *
+ * @brief Declaration of the ns3::Parameters structure that gathers every knob of the LENA (LTE)
+ * vs 5G-LENA (NR) comparison example (deployment via hexagonal rings or a site file, radio
+ * technology, TDD/FDD operation mode, numerology and TDD pattern, bandwidth, traffic scenario and
+ * direction, error model, scheduler, frequency reuse, antenna downtilt, and REM generation),
+ * together with the LenaLteComparison() entry point that runs the scenario. This header is shared
+ * by the lena-lte-comparison-user.cc and lena-lte-comparison-campaign.cc main programs, which
+ * only differ in the subset of options they expose on the command line.
+ */
+
+#include "ns3/nstime.h"
 
 #include <ostream>
 #include <string>

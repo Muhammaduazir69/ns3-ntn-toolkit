@@ -11,12 +11,11 @@
 #include "heap-scheduler.h"
 
 #include "assert.h"
-#include "event-impl.h"
 #include "log.h"
 
 /**
- * \file
- * \ingroup scheduler
+ * @file
+ * @ingroup scheduler
  * Implementation of ns3::HeapScheduler class.
  */
 

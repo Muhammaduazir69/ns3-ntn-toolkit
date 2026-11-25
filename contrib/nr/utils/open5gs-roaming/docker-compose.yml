@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+#
+# SPDX-License-Identifier: GPL-2.0-only
+
+# Open5GS as the visited network (PLMN 001/01) of the UEs of ns-3, and nr-bridge as the NGAP/NAS
+# side of the gNBs and UEs of ns-3 and as the SEPP of their home network (PLMN 002/02). The
+# ns-3 nr-external-core-roaming example runs from the host build in the network namespace of
+# the core container (see run.py).
+name: nr-open5gs-roaming
+
+services:
+  mongo:
+    image: docker.io/library/mongo:7
+
+  core:
+    build:
+      context: .
+      additional_contexts:
+        # a local checkout can be used instead: PACKETRUSHER_SRC=/path/to/PacketRusher
+        packetrusher: ${PACKETRUSHER_SRC:-https://github.com/Gabrielcarvfer/PacketRusher.git#nr-bridge}
+    image: localhost/nr-roaming-core:latest
+    # an init process stops the container on SIGTERM and reaps the processes run.py starts
+    init: true
+    depends_on: [mongo]
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    # access to /dev/net/tun under SELinux
+    security_opt: ["label=disable"]
+    sysctls:
+      net.ipv4.ip_forward: 1

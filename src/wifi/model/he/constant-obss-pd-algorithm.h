@@ -11,12 +11,14 @@
 
 #include "obss-pd-algorithm.h"
 
+#include "ns3/wifi-export.h"
+
 namespace ns3
 {
 
 /**
- * \brief Constant OBSS PD algorithm
- * \ingroup wifi
+ * @brief Constant OBSS PD algorithm
+ * @ingroup wifi
  *
  * This constant OBSS_PD algorithm is a simple OBSS_PD algorithm which evaluates if a receiving
  * signal should be accepted or rejected based on a constant threshold.
@@ -28,14 +30,14 @@ namespace ns3
  * in case the received RSSI is lower than that constant OBSS PD level value, and is informed
  * about TX power restrictions that might be applied to the next transmission.
  */
-class ConstantObssPdAlgorithm : public ObssPdAlgorithm
+class WIFI_EXPORT ConstantObssPdAlgorithm : public ObssPdAlgorithm
 {
   public:
     ConstantObssPdAlgorithm();
 
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 

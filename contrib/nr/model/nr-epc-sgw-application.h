@@ -11,15 +11,17 @@
 
 #include "ns3/address.h"
 #include "ns3/application.h"
+#include "ns3/nr-export.h"
 #include "ns3/socket.h"
 
+#include <list>
 #include <map>
 
 namespace ns3
 {
 
 /**
- * \ingroup nr
+ * @ingroup nr
  *
  * This application implements the Serving Gateway Entity (SGW)
  * according to the 3GPP TS 23.401 document.
@@ -35,12 +37,12 @@ namespace ns3
  *
  * Others functions enumerated in section 4.4.3.2 of 3GPP TS 23.401 are not supported.
  */
-class NrEpcSgwApplication : public Application
+class NR_EXPORT NrEpcSgwApplication : public Application
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
     void DoDispose() override;
@@ -48,10 +50,10 @@ class NrEpcSgwApplication : public Application
     /**
      * Constructor that binds callback methods of sockets.
      *
-     * \param s1uSocket socket used to send/receive GTP-U packets to/from the gNBs
-     * \param s5Addr IPv4 address of the S5 interface
-     * \param s5uSocket socket used to send/receive GTP-U packets to/from the PGW
-     * \param s5cSocket socket used to send/receive GTP-C packets to/from the PGW
+     * @param s1uSocket socket used to send/receive GTP-U packets to/from the gNBs
+     * @param s5Addr IPv4 address of the S5 interface
+     * @param s5uSocket socket used to send/receive GTP-U packets to/from the PGW
+     * @param s5cSocket socket used to send/receive GTP-C packets to/from the PGW
      */
     NrEpcSgwApplication(const Ptr<Socket> s1uSocket,
                         Ipv4Address s5Addr,
@@ -64,24 +66,24 @@ class NrEpcSgwApplication : public Application
     /**
      * Let the SGW be aware of an MME
      *
-     * \param mmeS11Addr the address of the MME
-     * \param s11Socket the socket to send/receive messages from the MME
+     * @param mmeS11Addr the address of the MME
+     * @param s11Socket the socket to send/receive messages from the MME
      */
     void AddMme(Ipv4Address mmeS11Addr, Ptr<Socket> s11Socket);
 
     /**
      * Let the SGW be aware of a PGW
      *
-     * \param pgwAddr the address of the PGW
+     * @param pgwAddr the address of the PGW
      */
     void AddPgw(Ipv4Address pgwAddr);
 
     /**
      * Let the SGW be aware of a new gNB
      *
-     * \param cellId the cell identifier
-     * \param gnbAddr the address of the gNB
-     * \param sgwAddr the address of the SGW
+     * @param cellId the cell identifier
+     * @param gnbAddr the address of the gNB
+     * @param sgwAddr the address of the SGW
      */
     void AddGnb(uint16_t cellId, Ipv4Address gnbAddr, Ipv4Address sgwAddr);
 
@@ -90,7 +92,7 @@ class NrEpcSgwApplication : public Application
      * Method to be assigned to the recv callback of the S11 socket.
      * It is called when the SGW receives a control packet from the MME.
      *
-     * \param socket pointer to the S11 socket
+     * @param socket pointer to the S11 socket
      */
     void RecvFromS11Socket(Ptr<Socket> socket);
 
@@ -99,7 +101,7 @@ class NrEpcSgwApplication : public Application
      * It is called when the SGW receives a data packet from the PGW
      * that is to be forwarded to an gNB.
      *
-     * \param socket pointer to the S5-U socket
+     * @param socket pointer to the S5-U socket
      */
     void RecvFromS5uSocket(Ptr<Socket> socket);
 
@@ -107,7 +109,7 @@ class NrEpcSgwApplication : public Application
      * Method to be assigned to the recv callback of the S5-C socket.
      * It is called when the SGW receives a control packet from the PGW.
      *
-     * \param socket pointer to the S5-C socket
+     * @param socket pointer to the S5-C socket
      */
     void RecvFromS5cSocket(Ptr<Socket> socket);
 
@@ -116,25 +118,25 @@ class NrEpcSgwApplication : public Application
      * It is called when the SGW receives a data packet from the gNB
      * that is to be forwarded to the PGW.
      *
-     * \param socket pointer to the S1-U socket
+     * @param socket pointer to the S1-U socket
      */
     void RecvFromS1uSocket(Ptr<Socket> socket);
 
     /**
      * Send a data packet to the PGW via the S5 interface
      *
-     * \param packet packet to be sent
-     * \param pgwAddr the address of the PGW
-     * \param teid the Tunnel Endpoint Identifier
+     * @param packet packet to be sent
+     * @param pgwAddr the address of the PGW
+     * @param teid the Tunnel Endpoint Identifier
      */
     void SendToS5uSocket(Ptr<Packet> packet, Ipv4Address pgwAddr, uint32_t teid);
 
     /**
      * Send a data packet to an gNB via the S1-U interface
      *
-     * \param packet packet to be sent
-     * \param gnbS1uAddress the address of the gNB
-     * \param teid the Tunnel Endpoint Identifier
+     * @param packet packet to be sent
+     * @param gnbS1uAddress the address of the gNB
+     * @param teid the Tunnel Endpoint Identifier
      */
     void SendToS1uSocket(Ptr<Packet> packet, Ipv4Address gnbS1uAddress, uint32_t teid);
 
@@ -142,47 +144,59 @@ class NrEpcSgwApplication : public Application
 
     /**
      * Process GTP-C Create Session Request message
-     * \param packet the packet containing the message
+     * @param packet the packet containing the message
      */
     void DoRecvCreateSessionRequest(Ptr<Packet> packet);
 
     /**
-     * Process GTP-C Modify Bearer Request message
-     * \param packet the packet containing the message
+     * Process GTP-C Modify Flow Request message
+     * @param packet the packet containing the message
      */
-    void DoRecvModifyBearerRequest(Ptr<Packet> packet);
+    void DoRecvModifyFlowRequest(Ptr<Packet> packet);
 
     /**
-     * Process GTP-C Delete Bearer Command message
-     * \param packet the packet containing the message
+     * Process GTP-C Delete Flow Command message
+     * @param packet the packet containing the message
      */
-    void DoRecvDeleteBearerCommand(Ptr<Packet> packet);
+    void DoRecvDeleteFlowCommand(Ptr<Packet> packet);
 
     /**
-     * Process GTP-C Delete Bearer Response message
-     * \param packet the packet containing the message
+     * Process GTP-C Delete Session Request message, from the MME
+     * @param packet the packet containing the message
      */
-    void DoRecvDeleteBearerResponse(Ptr<Packet> packet);
+    void DoRecvDeleteSessionRequest(Ptr<Packet> packet);
+
+    /**
+     * Process GTP-C Delete Flow Response message
+     * @param packet the packet containing the message
+     */
+    void DoRecvDeleteFlowResponse(Ptr<Packet> packet);
 
     // Process messages received from the PGW
 
     /**
      * Process GTP-C Create Session Response message
-     * \param packet the packet containing the message
+     * @param packet the packet containing the message
      */
     void DoRecvCreateSessionResponse(Ptr<Packet> packet);
 
     /**
-     * Process GTP-C Modify Bearer Response message
-     * \param packet the packet containing the message
+     * Process GTP-C Modify Flow Response message
+     * @param packet the packet containing the message
      */
-    void DoRecvModifyBearerResponse(Ptr<Packet> packet);
+    void DoRecvModifyFlowResponse(Ptr<Packet> packet);
 
     /**
-     * Process GTP-C Delete Bearer Request message
-     * \param packet the packet containing the message
+     * Process GTP-C Delete Flow Request message
+     * @param packet the packet containing the message
      */
-    void DoRecvDeleteBearerRequest(Ptr<Packet> packet);
+    void DoRecvDeleteFlowRequest(Ptr<Packet> packet);
+
+    /**
+     * Process GTP-C Delete Session Response message, from the PGW
+     * @param packet the packet containing the message
+     */
+    void DoRecvDeleteSessionResponse(Ptr<Packet> packet);
 
     /**
      * SGW address in the S5 interface
@@ -235,7 +249,7 @@ class NrEpcSgwApplication : public Application
     uint32_t m_teidCount;
 
     /// GnbInfo structure
-    struct GnbInfo
+    struct NR_EXPORT GnbInfo
     {
         Ipv4Address gnbAddr; ///< gNB address
         Ipv4Address sgwAddr; ///< SGW address
@@ -250,6 +264,33 @@ class NrEpcSgwApplication : public Application
      * Map for gNB address by TEID
      */
     std::map<uint32_t, Ipv4Address> m_gnbByTeidMap;
+
+    /**
+     * Map for QFI by TEID
+     */
+    std::map<uint32_t, uint8_t> m_qfiByTeidMap;
+
+    /**
+     * TEIDs of the session of each UE, by IMSI
+     */
+    std::map<uint64_t, std::list<uint32_t>> m_teidsByImsi;
+
+    /**
+     * PGW of the session of each UE, by IMSI, when not the PGW of the network of the SGW (e.g.,
+     * the PGW of the home network of a UE with home-routed roaming)
+     */
+    std::map<uint64_t, Ipv4Address> m_pgwByImsi;
+
+    /**
+     * PGW of each uplink TEID, when not the PGW of the network of the SGW
+     */
+    std::map<uint32_t, Ipv4Address> m_pgwByTeid;
+
+    /**
+     * @param imsi the IMSI of a UE
+     * @return the address of the PGW of the session of the UE
+     */
+    Ipv4Address GetPgwAddress(uint64_t imsi) const;
 
     /**
      * MME S11 FTEID by SGW S5C TEID

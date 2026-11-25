@@ -6,41 +6,45 @@
 
 #include "nr-mac-scheduler-tdma.h"
 
+#include "ns3/nr-export.h"
+
+#include <unordered_set>
+
 namespace ns3
 {
 
 /**
- * \ingroup scheduler
- * \brief Assign entire symbols in a round-robin fashion
+ * @class NrMacSchedulerTdmaRR
+ * @brief Implements a Round-Robin (RR) Time-Division Multiple Access (TDMA) MAC scheduler for NR
+ * (New Radio).
  *
- * Each UE will receive a proportional number of symbols. With \f$n\f$ UE,
- * each one will receive:
+ * This class extends NrMacSchedulerTdma and provides a Round-Robin scheduling mechanism for user
+ * equipment (UE). The scheduler allocates resources to UEs in a cyclic and fair manner using RR
+ * principles.
  *
- * \f$ sym_{i} = \frac{totSym}{n} \f$
- *
- * If \f$ n > totSym \f$, then there will be UEs which will not have any
- * symbol assigned. The class does not remember the UEs which did not get
- * any symbol in the previous slot, so this opens the door to a possible
- * starvation.
- *
- * \see NrMacSchedulerUeInfoRR
+ * Key functionalities include:
+ * - Managing UE representations using NrMacSchedulerUeInfoRR.
+ * - Providing comparison functions to handle Downlink (DL) and Uplink (UL) UE scheduling based on
+ * RR policy.
+ * - Updating resource allocation metrics for UEs after DL/UL assignments.
+ * - Maintaining relevant data structures to track UEs in the scheduling queue.
  */
-class NrMacSchedulerTdmaRR : public NrMacSchedulerTdma
+class NR_EXPORT NrMacSchedulerTdmaRR : public NrMacSchedulerTdma
 {
   public:
     /**
-     * \brief GetTypeId
-     * \return The TypeId of the class
+     * @brief GetTypeId
+     * @return The TypeId of the class
      */
     static TypeId GetTypeId();
 
     /**
-     * \brief NrMacSchedulerTdmaRR constructor
+     * @brief NrMacSchedulerTdmaRR constructor
      */
     NrMacSchedulerTdmaRR();
 
     /**
-     * \brief ~NrMacSchedulerTdmaRR deconstructor
+     * @brief ~NrMacSchedulerTdmaRR deconstructor
      */
     ~NrMacSchedulerTdmaRR() override
     {
@@ -48,34 +52,34 @@ class NrMacSchedulerTdmaRR : public NrMacSchedulerTdma
 
   protected:
     /**
-     * \brief Create an UE representation of the type NrMacSchedulerUeInfoRR
-     * \param params parameters
-     * \return NrMacSchedulerUeInfoRR instance
+     * @brief Create an UE representation of the type NrMacSchedulerUeInfoRR
+     * @param params parameters
+     * @return NrMacSchedulerUeInfoRR instance
      */
     std::shared_ptr<NrMacSchedulerUeInfo> CreateUeRepresentation(
         const NrMacCschedSapProvider::CschedUeConfigReqParameters& params) const override;
 
     /**
-     * \brief Return the comparison function to sort DL UE according to the scheduler policy
-     * \return a pointer to NrMacSchedulerUeInfoRR::CompareUeWeightsDl
+     * @brief Return the comparison function to sort DL UE according to the scheduler policy
+     * @return a pointer to NrMacSchedulerUeInfoRR::CompareUeWeightsDl
      */
     std::function<bool(const NrMacSchedulerNs3::UePtrAndBufferReq& lhs,
                        const NrMacSchedulerNs3::UePtrAndBufferReq& rhs)>
     GetUeCompareDlFn() const override;
 
     /**
-     * \brief Return the comparison function to sort UL UE according to the scheduler policy
-     * \return a pointer to NrMacSchedulerUeInfoRR::CompareUeWeightsUl
+     * @brief Return the comparison function to sort UL UE according to the scheduler policy
+     * @return a pointer to NrMacSchedulerUeInfoRR::CompareUeWeightsUl
      */
     std::function<bool(const NrMacSchedulerNs3::UePtrAndBufferReq& lhs,
                        const NrMacSchedulerNs3::UePtrAndBufferReq& rhs)>
     GetUeCompareUlFn() const override;
 
     /**
-     * \brief Update the UE representation after a symbol (DL) has been assigned to it
-     * \param ue UE to which a symbol has been assigned
-     * \param assigned the amount of resources assigned
-     * \param totAssigned the total amount of resources assigned in the slot
+     * @brief Update the UE representation after a symbol (DL) has been assigned to it
+     * @param ue UE to which a symbol has been assigned
+     * @param assigned the amount of resources assigned
+     * @param totAssigned the total amount of resources assigned in the slot
      *
      * Update DL metrics by calling NrMacSchedulerUeInfoRR::UpdateDlMetric
      */
@@ -84,10 +88,10 @@ class NrMacSchedulerTdmaRR : public NrMacSchedulerTdma
                              const FTResources& totAssigned) const override;
 
     /**
-     * \brief Update the UE representation after a symbol (DL) has been assigned to it
-     * \param ue UE to which a symbol has been assigned
-     * \param assigned the amount of resources assigned
-     * \param totAssigned the total amount of resources assigned in the slot
+     * @brief Update the UE representation after a symbol (DL) has been assigned to it
+     * @param ue UE to which a symbol has been assigned
+     * @param assigned the amount of resources assigned
+     * @param totAssigned the total amount of resources assigned in the slot
      *
      * Update DL metrics by calling NrMacSchedulerUeInfoRR::UpdateUlMetric
      */
@@ -118,6 +122,17 @@ class NrMacSchedulerTdmaRR : public NrMacSchedulerTdma
                        const FTResources& assignableInIteration) const override
     {
     }
+
+  private:
+    /**
+     * Deque used to keep priority order of round-robin.
+     * Higher-priority UEs will be at front.
+     * Lower-priority UEs will be at end.
+     * Active UEs are pulled from anywhere when a new resource is allocated to them,
+     * and put at the end whenever the scheduling is done.
+     */
+    mutable std::deque<uint16_t> m_dlRrRntiDeque;
+    mutable std::unordered_set<uint16_t> m_dlRntiSet; ///< Set of known RNTIs in RR deque
 };
 
 } // namespace ns3

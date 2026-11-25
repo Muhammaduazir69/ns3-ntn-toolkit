@@ -27,6 +27,11 @@ function(ns3ai_add_pybind_module TARGET_NAME SOURCE_FILE)
         target_compile_options(${TARGET_NAME} PRIVATE -fno-lto -fvisibility=default)
         target_link_options(${TARGET_NAME} PRIVATE -fno-lto)
     endif()
+
+    # ns-3.49: every compilation unit that includes nstime.h references
+    # ns3::Time::StaticInit, so the module must link the core library (the
+    # Python agent process does not otherwise load it).
+    target_link_libraries(${TARGET_NAME} PRIVATE ${libcore})
 endfunction()
 
 check_include_file_cxx(stdint.h HAVE_STDINT_H)

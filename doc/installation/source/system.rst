@@ -19,7 +19,10 @@ The list of requirements depends on which version of ns-3 you are trying to buil
 extensions you need.
 
 .. note::
-   **"Do I need to install all of these packages?"**  Some users want to install everything so
+
+   **"Do I need to install all of these packages?"**
+
+   Some users want to install everything so
    that their configuration output shows that every feature is enabled.  However, there is
    no real need to install prerequisites related to features you are not yet using; you can always
    come back later and install more prerequisites as needed.  The build system should warn
@@ -29,7 +32,10 @@ In the following, we have classified the prerequisites as either being required,
 for all users, or optional depending on use cases.
 
 .. note::
-   **"Is there a maintained list of all prerequisites?"**  We use GitLab.com's continuous
+
+   **"Is there a maintained list of all prerequisites?"**
+
+   We use GitLab.com's continuous
    integration system for testing; the configuration YAML files for these jobs can be found
    in the directory ``utils/tests/``.  So, for instance, if you want to look at what packages
    the CI is installing for Alpine Linux, look at ``utils/tests/gitlab-ci-alpine.yml``.  The
@@ -75,7 +81,7 @@ Recommended
 
 The following are recommended for most users of |ns3|.
 
-compiler cache optimization (for ns-3.37 and later)
+Compiler cache optimization (for ns-3.37 and later)
 ===================================================
 
 `Ccache <https://ccache.dev>`_ is a compiler cache optimization that will speed up builds across
@@ -93,13 +99,17 @@ Users can invoke these tools directly from the command-line or through the
 Moreover, clang-tidy is integrated with CMake, enabling code scanning during the build phase.
 
 .. note::
-  clang-format-14 through clang-format-16 version is required.
+
+  Check the list of supported versions of clang-format and clang-tidy in the
+  `RELEASE_NOTES.md <https://gitlab.com/nsnam/ns-3-dev/-/blob/master/RELEASE_NOTES.md>`_ document.
 
 clang-format is strongly recommended to write code that follows the ns-3 code conventions, but
 might be skipped for simpler tasks (e.g., writing a simple simulation script for yourself).
 
 clang-tidy is recommended when writing a module, to both follow code conventions and to provide
-hints on possible bugs in code.
+hints on possible bugs in code. Note: when using CMake's ``include_directories()`` to include a
+third-party dependency directory, it is important to set the ``SYSTEM`` flag, to prevent clang-tidy
+from checking code that is not under our control (e.g. ``include_directories(SYSTEM ${SQLite3_INCLUDE_DIRS})``).
 
 Both are used in the CI system, and a merge request will likely fail if you did not use them.
 
@@ -118,6 +128,7 @@ Optional
 The remaining prerequisites listed below are only needed for optional ns-3 components.
 
 .. note::
+
   As of ns-3.30 release (August 2019), ns-3 uses Python 3 by default, but earlier
   releases depend on Python 2 packages, and at least a Python 2 interpreter is recommended.
   If installing the below prerequisites for an earlier release, one may in general substitute
@@ -140,10 +151,10 @@ if you are running LTE or NR simulations (which make use of SQLite databases):
 Python bindings (ns-3.37 and newer)
 ===================================
 
-|ns3| Python support now uses `cppyy <https://cppyy.readthedocs.io/en/latest/>`_.  Version 3.1.2
-is the most recent supported cppyy release since ns-3.42.
+|ns3| Python support now uses `cppyy <https://cppyy.readthedocs.io/en/latest/>`_.  Version 3.5.0
+is the most recent supported cppyy release since ns-3.45, and requires Python 3.10 or later.
 
-Cppyy version 2.4.2 should be used from ns-3.37 up to 3.41.
+Cppyy version 3.1.2 should be used from ns-3.42 up to 3.44, and version 2.4.2 from ns-3.37 up to 3.41.
 
 Due to an `upstream limitation with cppyy <https://github.com/wlav/cppyy/issues/150>`_, Python bindings do not work on macOS machines with Apple silicon (M1 and M2 processors).
 
@@ -160,8 +171,7 @@ setup tools, are typically needed.
 NetAnim animator
 ================
 
-The `Qt <https://www.qt.io>`_ qt5 development tools are needed for NetAnim animator;
-qt4 will also work but we have migrated to qt5. qt6 compatibility is not tested.
+The `Qt5 or Qt6 <https://www.qt.io>`_ development tools are needed for NetAnim animator.
 
 PyViz visualizer
 ================
@@ -190,6 +200,7 @@ reStructuredText for Sphinx, and figures are typically in dia.  To build PDF ver
 
 Eigen3 support
 ==============
+
 `Eigen3 <https://gitlab.com/libeigen/eigen>`_ is used to support more efficient calculations
 when using the `3GPP propagation loss models <https://www.nsnam.org/docs//models/html/propagation.html#threegpppropagationlossmodel>`_
 in LTE and NR simulations.

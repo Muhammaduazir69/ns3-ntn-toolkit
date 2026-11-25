@@ -401,7 +401,7 @@ class CbrDscpMarkingTest : public TestCase
 {
   public:
     CbrDscpMarkingTest()
-        : TestCase("CBR Tos reaches the received IPv4 DS field (RFC 2474, EF/AF41/BE, ECN bits)")
+        : TestCase("CBR Tos reaches the received IPv4 DS field (RFC 2474, EF-AF41-BE, ECN bits)")
     {
     }
 

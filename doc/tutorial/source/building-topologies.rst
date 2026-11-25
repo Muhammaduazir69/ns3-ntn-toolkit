@@ -105,10 +105,10 @@ entirely comfortable with the following code at this point in the tutorial.
   cmd.Parse(argc, argv);
 
   if (verbose)
-    {
+  {
       LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_INFO);
       LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_INFO);
-    }
+  }
 
   nCsma = nCsma == 0 ? 1 : nCsma;
 
@@ -245,8 +245,8 @@ the constructor.
   UdpEchoServerHelper echoServer(9);
 
   ApplicationContainer serverApps = echoServer.Install(csmaNodes.Get(nCsma));
-  serverApps.Start(Seconds(1.0));
-  serverApps.Stop(Seconds(10.0));
+  serverApps.Start(Seconds(1));
+  serverApps.Stop(Seconds(10));
 
 Recall that the ``csmaNodes NodeContainer`` contains one of the
 nodes created for the point-to-point network and ``nCsma`` "extra" nodes.
@@ -269,12 +269,12 @@ leftmost point-to-point node seen in the topology illustration.
 
   UdpEchoClientHelper echoClient(csmaInterfaces.GetAddress(nCsma), 9);
   echoClient.SetAttribute("MaxPackets", UintegerValue(1));
-  echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
+  echoClient.SetAttribute("Interval", TimeValue(Seconds(1)));
   echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 
   ApplicationContainer clientApps = echoClient.Install(p2pNodes.Get(0));
-  clientApps.Start(Seconds(2.0));
-  clientApps.Stop(Seconds(10.0));
+  clientApps.Start(Seconds(2));
+  clientApps.Stop(Seconds(10));
 
 Since we have actually built an internetwork here, we need some form of
 internetwork routing.  |ns3| provides what we call global routing to
@@ -892,10 +892,10 @@ number of devices created.
   cmd.Parse(argc,argv);
 
   if (verbose)
-    {
+  {
       LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_INFO);
       LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_INFO);
-    }
+  }
 
 Just as in all of the previous examples, the next step is to create two nodes
 that we will connect via the point-to-point link.
@@ -1018,8 +1018,8 @@ the WifiNetDevice objects that the helper create.
               "ActiveProbing", BooleanValue(false));
 
 In the above code, the specific kind of MAC layer that
-will be created by the helper is specified by the TypeId value
-of `ns3::StaWifiMac` type.  The "QosSupported" attribute is
+will be created by the helper is specified by the ``TypeId`` value
+of ``ns3::StaWifiMac`` type.  The "QosSupported" attribute is
 set to true by default for ``WifiMacHelper`` objects when the standard
 is at least 802.11n or newer. The combination
 of these two configurations means that the MAC instance next created
@@ -1150,8 +1150,8 @@ start of the file.  We have done this before.
   UdpEchoServerHelper echoServer(9);
 
   ApplicationContainer serverApps = echoServer.Install(csmaNodes.Get(nCsma));
-  serverApps.Start(Seconds(1.0));
-  serverApps.Stop(Seconds(10.0));
+  serverApps.Start(Seconds(1));
+  serverApps.Stop(Seconds(10));
 
 And we put the echo client on the last STA node we created, pointing it to
 the server on the CSMA network.  We have also seen similar operations before.
@@ -1160,13 +1160,13 @@ the server on the CSMA network.  We have also seen similar operations before.
 
   UdpEchoClientHelper echoClient(csmaInterfaces.GetAddress(nCsma), 9);
   echoClient.SetAttribute("MaxPackets", UintegerValue(1));
-  echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
+  echoClient.SetAttribute("Interval", TimeValue(Seconds(1)));
   echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 
   ApplicationContainer clientApps =
       echoClient.Install(wifiStaNodes.Get(nWifi - 1));
-  clientApps.Start(Seconds(2.0));
-  clientApps.Stop(Seconds(10.0));
+  clientApps.Start(Seconds(2));
+  clientApps.Stop(Seconds(10));
 
 Since we have built an internetwork here, we need to enable internetwork routing
 just as we did in the ``second.cc`` example script.
@@ -1186,7 +1186,7 @@ loop.
 
 ::
 
-  Simulator::Stop(Seconds(10.0));
+  Simulator::Stop(Seconds(10));
 
 We create just enough tracing to cover all three networks:
 
@@ -1359,9 +1359,9 @@ following function:
   void
   CourseChange(std::string context, Ptr<const MobilityModel> model)
   {
-    Vector position = model->GetPosition();
-    NS_LOG_UNCOND(context <<
-                " x = " << position.x << ", y = " << position.y);
+      Vector position = model->GetPosition();
+      NS_LOG_UNCOND(context <<
+                    " x = " << position.x << ", y = " << position.y);
   }
 
 This code just pulls the position information from the mobility model and

@@ -12,22 +12,23 @@
 #include "wifi-units.h"
 
 #include "ns3/object.h"
+#include "ns3/wifi-export.h"
 
 namespace ns3
 {
 
 /**
- * \ingroup energy
+ * @ingroup energy
  *
- * \brief Model the transmit current as a function of the transmit power and mode
+ * @brief Model the transmit current as a function of the transmit power and mode
  *
  */
-class WifiTxCurrentModel : public Object
+class WIFI_EXPORT WifiTxCurrentModel : public Object
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
@@ -35,16 +36,16 @@ class WifiTxCurrentModel : public Object
     ~WifiTxCurrentModel() override;
 
     /**
-     * \param txPower the nominal TX power
-     * \returns the transmit current
+     * @param txPower the nominal TX power
+     * @returns the transmit current
      */
     virtual ampere_u CalcTxCurrent(dBm_u txPower) const = 0;
 };
 
 /**
- * \ingroup energy
+ * @ingroup energy
  *
- * \brief a linear model of the Wifi transmit current
+ * @brief a linear model of the Wifi transmit current
  *
  * This model assumes that the transmit current is a linear function
  * of the nominal transmit power used to send the frame.
@@ -72,12 +73,12 @@ class WifiTxCurrentModel : public Object
  * \f$ \eta = \frac{P_{tx}}{(I_{tx}-I_{idle})\cdot V} \f$
  *
  */
-class LinearWifiTxCurrentModel : public WifiTxCurrentModel
+class WIFI_EXPORT LinearWifiTxCurrentModel : public WifiTxCurrentModel
 {
   public:
     /**
-     * \brief Get the type ID.
-     * \return the object TypeId
+     * @brief Get the type ID.
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 

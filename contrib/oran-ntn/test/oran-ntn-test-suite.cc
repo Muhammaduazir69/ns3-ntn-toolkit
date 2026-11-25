@@ -3236,7 +3236,7 @@ class OranNtnSmCccNtnSimulatorTimeTest : public TestCase
 {
   public:
     OranNtnSmCccNtnSimulatorTimeTest()
-        : TestCase("Simulator: 600 s pass-on / pass-off stream encodes and "
+        : TestCase("Simulator: 600 s pass-on - pass-off stream encodes and "
                    "decodes through CCC NTN ext")
     {
     }
@@ -4364,7 +4364,7 @@ class OranNtnOfhPlaneRoutingTest : public TestCase
 {
   public:
     OranNtnOfhPlaneRoutingTest()
-        : TestCase("OFH: C/U/S/M plane routing + outage (4.1.9)")
+        : TestCase("OFH: C-U-S-M plane routing + outage (4.1.9)")
     {
     }
 
@@ -5464,7 +5464,7 @@ class OranNtnKpmProvenanceDistinguishesMeasuredTest : public TestCase
 {
   public:
     OranNtnKpmProvenanceDistinguishesMeasuredTest()
-        : TestCase("AI-07: an injected KPM report carries its own measured/derived label")
+        : TestCase("AI-07: an injected KPM report carries its own measured-derived label")
     {
     }
 
@@ -7467,6 +7467,13 @@ class PrecoderReachesThePhasedArrayTest : public TestCase
         const size_t nElem = array->GetNumElems();
         NS_TEST_ASSERT_MSG_EQ(nElem, 4u, "a 2x2 array has four elements");
 
+        // ns-3.48 asserts on reading a vector that was never set: start from a known uniform one.
+        PhasedArrayModel::ComplexVector uniform(nElem);
+        for (size_t k = 0; k < nElem; ++k)
+        {
+            uniform[k] = 1.0 / std::sqrt(static_cast<double>(nElem));
+        }
+        array->SetBeamformingVector(uniform);
         const auto before = array->GetBeamformingVector();
 
         Ptr<OranNtnSplitGnbEntity> ru = CreateObject<OranNtnSplitGnbEntity>();
@@ -7618,7 +7625,7 @@ class OranNtnE2KpmPayloadRoundTripTest : public TestCase
 {
   public:
     OranNtnE2KpmPayloadRoundTripTest()
-        : TestCase("W2-M2: measured report survives E2SM-KPM Format 1 encode/decode; "
+        : TestCase("W2-M2: measured report survives E2SM-KPM Format 1 encode-decode; "
                    "unmeasured fields travel as noValue")
     {
     }
@@ -7689,7 +7696,7 @@ class OranNtnE2PacketTransportTest : public TestCase
   public:
     OranNtnE2PacketTransportTest()
         : TestCase("W2-M2: E2 over the feeder as packets: setup and subscription precede "
-                   "indications; one-way delay = slant/c + serialization; outage loses messages")
+                   "indications; one-way delay = slant-c + serialization; outage loses messages")
     {
     }
 
@@ -8018,7 +8025,7 @@ class OranNtnA1EnforceStatusTest : public TestCase
 {
   public:
     OranNtnA1EnforceStatusTest()
-        : TestCase("Wave 6B: A1 enforceStatus / enforceReason reported to the Non-RT RIC")
+        : TestCase("Wave 6B: A1 enforceStatus - enforceReason reported to the Non-RT RIC")
     {
     }
 
@@ -8341,7 +8348,7 @@ class OranNtnLinkAdaptationTablesTest : public TestCase
 {
   public:
     OranNtnLinkAdaptationTablesTest()
-        : TestCase("ORAN-06 - CQI/MCS/ModCod tables match TS 38.214 and EN 302 307-1")
+        : TestCase("ORAN-06 - CQI-MCS-ModCod tables match TS 38.214 and EN 302 307-1")
     {
     }
 
@@ -8483,7 +8490,7 @@ class OranNtnPhyKpmUsesStandardTablesTest : public TestCase
 {
   public:
     OranNtnPhyKpmUsesStandardTablesTest()
-        : TestCase("ORAN-06 - the PHY-KPM report carries table-derived CQI/MCS/ModCod "
+        : TestCase("ORAN-06 - the PHY-KPM report carries table-derived CQI-MCS-ModCod "
                    "and a noise floor for its own carrier")
     {
     }

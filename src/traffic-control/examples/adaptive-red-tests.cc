@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2015 NITK Surathkal
  *
@@ -93,7 +92,7 @@ std::stringstream filePlotQueueDiscAvg; //!< Output file name for queue disc ave
 /**
  * Check the queue disc size and write its stats to the output files.
  *
- * \param queue The queue to check.
+ * @param queue The queue to check.
  */
 void
 CheckQueueDiscSize(Ptr<QueueDisc> queue)
@@ -119,7 +118,7 @@ CheckQueueDiscSize(Ptr<QueueDisc> queue)
 /**
  * Setup the apps.
  *
- * \param test The test number.
+ * @param test The test number.
  */
 void
 BuildAppsTest(uint32_t test)
@@ -498,10 +497,8 @@ main(int argc, char* argv[])
 
     if (writeForPlot)
     {
-        filePlotQueueDisc << pathOut << "/"
-                          << "ared-queue-disc.plotme";
-        filePlotQueueDiscAvg << pathOut << "/"
-                             << "ared-queue-disc_avg.plotme";
+        filePlotQueueDisc << pathOut << "/ared-queue-disc.plotme";
+        filePlotQueueDiscAvg << pathOut << "/ared-queue-disc_avg.plotme";
 
         remove(filePlotQueueDisc.str().c_str());
         remove(filePlotQueueDiscAvg.str().c_str());

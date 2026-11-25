@@ -6,6 +6,18 @@
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
 
+/**
+ * @ingroup test
+ * @file nr-simple-net-device.cc
+ *
+ * @brief Test support net device, not a test suite. NrSimpleNetDevice subclasses SimpleNetDevice
+ * to stand in for the real NR net device where only a packet delivery service between protocol
+ * stacks is needed: it forwards Send() to SimpleNetDevice so PDUs travel over a SimpleChannel
+ * (optionally dropped by a receive error model) instead of the NR PHY/MAC. It is instantiated by
+ * NrSimpleHelper and used by the RLC UM and AM end-to-end test suites (nr-test-rlc-um-e2e.cc and
+ * nr-test-rlc-am-e2e.cc).
+ */
+
 #include "nr-simple-net-device.h"
 
 #include "ns3/log.h"

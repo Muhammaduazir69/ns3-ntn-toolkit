@@ -8,10 +8,17 @@
 #include "nr-no-backhaul-epc-helper.h"
 
 #include "ns3/boolean.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/icmpv6-l4-protocol.h"
 #include "ns3/internet-stack-helper.h"
+#include "ns3/ipv4-address-generator.h"
+#include "ns3/ipv4-address.h"
+#include "ns3/ipv4-routing-table-entry.h"
+#include "ns3/ipv4-static-routing-helper.h"
+#include "ns3/ipv6-routing-table-entry.h"
 #include "ns3/ipv6-static-routing-helper.h"
 #include "ns3/log.h"
+#include "ns3/node-list.h"
 #include "ns3/nr-epc-gnb-application.h"
 #include "ns3/nr-epc-mme-application.h"
 #include "ns3/nr-epc-pgw-application.h"
@@ -23,7 +30,6 @@
 #include "ns3/nr-ue-net-device.h"
 #include "ns3/packet-socket-address.h"
 #include "ns3/point-to-point-helper.h"
-#include "ns3/string.h"
 
 namespace ns3
 {
@@ -31,6 +37,26 @@ namespace ns3
 NS_LOG_COMPONENT_DEFINE("NrNoBackhaulEpcHelper");
 
 NS_OBJECT_ENSURE_REGISTERED(NrNoBackhaulEpcHelper);
+
+namespace
+{
+
+/**
+ * @param base an IPv6 prefix of /64 or shorter
+ * @param coreIndex the index of a core network
+ * @return the prefix with the index of the core network in its 7th and 8th octets
+ */
+Ipv6Address
+CoreIpv6Prefix(const char* base, uint32_t coreIndex)
+{
+    uint8_t bytes[16];
+    Ipv6Address(base).GetBytes(bytes);
+    bytes[6] = static_cast<uint8_t>(coreIndex >> 8);
+    bytes[7] = static_cast<uint8_t>(coreIndex);
+    return Ipv6Address(bytes);
+}
+
+} // namespace
 
 NrNoBackhaulEpcHelper::NrNoBackhaulEpcHelper()
     : m_gtpuUdpPort(2152), // fixed by the standard
@@ -43,23 +69,30 @@ NrNoBackhaulEpcHelper::NrNoBackhaulEpcHelper()
       m_s5LinkMtu(3000)
 {
     NS_LOG_FUNCTION(this);
-    // To access the attribute value within the constructor
-    ObjectBase::ConstructSelf(AttributeConstructionList());
+}
+
+void
+NrNoBackhaulEpcHelper::NotifyConstructionCompleted()
+{
+    NrRanEpcHelper::NotifyConstructionCompleted();
 
     int retval;
 
     // since we use point-to-point links for links between the core network nodes,
     // we use a /30 subnet which can hold exactly two addresses
     // (remember that net broadcast and null address are not valid)
-    m_x2Ipv4AddressHelper.SetBase("12.0.0.0", "255.255.255.252");
-    m_s11Ipv4AddressHelper.SetBase("13.0.0.0", "255.255.255.252");
-    m_s5Ipv4AddressHelper.SetBase("14.0.0.0", "255.255.255.252");
+    m_s11Ipv4AddressHelper.SetBase(GetCoreSubnet(13), "255.255.255.252");
+    m_s5Ipv4AddressHelper.SetBase(GetCoreSubnet(14), "255.255.255.252");
 
-    // we use a /8 net for all UEs
-    m_uePgwAddressHelper.SetBase("7.0.0.0", "255.0.0.0");
+    // the first address of the UE network is the one of the TUN device of the PGW
+    NS_ABORT_MSG_IF(
+        Ipv4AddressGenerator::IsAddressAllocated(Ipv4Address(m_ueIpv4Network.Get() + 1)),
+        "Another core network uses the UE network " << m_ueIpv4Network
+                                                    << ": set the UeIpv4Network attribute");
+    m_uePgwAddressHelper.SetBase(m_ueIpv4Network, m_ueIpv4Mask);
 
     // we use a /64 IPv6 net all UEs
-    m_uePgwAddressHelper6.SetBase("7777:f00d::", Ipv6Prefix(64));
+    m_uePgwAddressHelper6.SetBase(CoreIpv6Prefix("7777:f00d::", GetCoreIndex()), Ipv6Prefix(64));
 
     // Create PGW, SGW and MME nodes
     m_pgw = CreateObject<Node>();
@@ -77,7 +110,11 @@ NrNoBackhaulEpcHelper::NrNoBackhaulEpcHelper()
     Ipv6StaticRoutingHelper ipv6RoutingHelper;
     Ptr<Ipv6StaticRouting> pgwStaticRouting =
         ipv6RoutingHelper.GetStaticRouting(m_pgw->GetObject<Ipv6>());
-    pgwStaticRouting->AddNetworkRouteTo("7777:f00d::", Ipv6Prefix(64), Ipv6Address("::"), 1, 0);
+    pgwStaticRouting->AddNetworkRouteTo(CoreIpv6Prefix("7777:f00d::", GetCoreIndex()),
+                                        Ipv6Prefix(64),
+                                        Ipv6Address("::"),
+                                        1,
+                                        0);
 
     // create TUN device implementing tunneling of user data over GTP-U/UDP/IP in the PGW
     m_tunDevice = CreateObject<VirtualNetDevice>();
@@ -126,6 +163,8 @@ NrNoBackhaulEpcHelper::NrNoBackhaulEpcHelper()
 
     Ipv4Address pgwS5Address = pgwSgwIpIfaces.GetAddress(0);
     Ipv4Address sgwS5Address = pgwSgwIpIfaces.GetAddress(1);
+    m_pgwS5Address = pgwS5Address;
+    m_sgwS5Address = sgwS5Address;
 
     // Create S5-U socket in the PGW
     Ptr<Socket> pgwS5uSocket =
@@ -171,6 +210,8 @@ NrNoBackhaulEpcHelper::NrNoBackhaulEpcHelper()
     m_sgw->AddApplication(m_sgwApp);
     m_sgwApp->AddPgw(pgwS5Address);
     m_pgwApp->AddSgw(sgwS5Address);
+    m_pgwApp->SetUnstructuredSessionRequestCallback(
+        MakeCallback(&NrNoBackhaulEpcHelper::CreateUnstructuredSessionDevice, this));
 
     // Create S11 link between MME and SGW
     PointToPointHelper s11P2ph;
@@ -209,6 +250,7 @@ NrNoBackhaulEpcHelper::NrNoBackhaulEpcHelper()
     // Create MME Application and connect with SGW via S11 interface
     m_mmeApp = CreateObject<NrEpcMmeApplication>();
     m_mme->AddApplication(m_mmeApp);
+    m_mmeApp->SetUeAttachCallback(MakeCallback(&NrNoBackhaulEpcHelper::UeAttached, this));
     m_mmeApp->AddSgw(sgwS11Address, mmeS11Address, mmeS11Socket);
     m_sgwApp->AddMme(mmeS11Address, sgwS11Socket);
 }
@@ -224,9 +266,37 @@ NrNoBackhaulEpcHelper::GetTypeId()
     NS_LOG_FUNCTION_NOARGS();
     static TypeId tid =
         TypeId("ns3::NrNoBackhaulEpcHelper")
-            .SetParent<NrEpcHelper>()
+            .SetParent<NrRanEpcHelper>()
             .SetGroupName("Nr")
             .AddConstructor<NrNoBackhaulEpcHelper>()
+            .AddAttribute("UeIpv4Network",
+                          "The IPv4 network of the UEs, from which the UE addresses are assigned",
+                          Ipv4AddressValue("7.0.0.0"),
+                          MakeIpv4AddressAccessor(&NrNoBackhaulEpcHelper::m_ueIpv4Network),
+                          MakeIpv4AddressChecker())
+            .AddAttribute("S8LinkDataRate",
+                          "The data rate of the S8 links created by AddRoamingPartner() for "
+                          "home-routed roaming",
+                          DataRateValue(DataRate("10Gb/s")),
+                          MakeDataRateAccessor(&NrNoBackhaulEpcHelper::m_s8LinkDataRate),
+                          MakeDataRateChecker())
+            .AddAttribute("S8LinkDelay",
+                          "The delay of the S8 links created by AddRoamingPartner() for "
+                          "home-routed roaming",
+                          TimeValue(Seconds(0)),
+                          MakeTimeAccessor(&NrNoBackhaulEpcHelper::m_s8LinkDelay),
+                          MakeTimeChecker())
+            .AddAttribute("S8LinkMtu",
+                          "The MTU of the S8 links created by AddRoamingPartner() for "
+                          "home-routed roaming",
+                          UintegerValue(2000),
+                          MakeUintegerAccessor(&NrNoBackhaulEpcHelper::m_s8LinkMtu),
+                          MakeUintegerChecker<uint16_t>())
+            .AddAttribute("UeIpv4Mask",
+                          "The mask of the IPv4 network of the UEs",
+                          Ipv4MaskValue("255.0.0.0"),
+                          MakeIpv4MaskAccessor(&NrNoBackhaulEpcHelper::m_ueIpv4Mask),
+                          MakeIpv4MaskChecker())
             .AddAttribute("S5LinkDataRate",
                           "The data rate to be used for the next S5 link to be created",
                           DataRateValue(DataRate("10Gb/s")),
@@ -256,40 +326,8 @@ NrNoBackhaulEpcHelper::GetTypeId()
                           "The MTU of the next S11 link to be created.",
                           UintegerValue(2000),
                           MakeUintegerAccessor(&NrNoBackhaulEpcHelper::m_s11LinkMtu),
-                          MakeUintegerChecker<uint16_t>())
-            .AddAttribute("X2LinkDataRate",
-                          "The data rate to be used for the next X2 link to be created",
-                          DataRateValue(DataRate("10Gb/s")),
-                          MakeDataRateAccessor(&NrNoBackhaulEpcHelper::m_x2LinkDataRate),
-                          MakeDataRateChecker())
-            .AddAttribute("X2LinkDelay",
-                          "The delay to be used for the next X2 link to be created",
-                          TimeValue(Seconds(0)),
-                          MakeTimeAccessor(&NrNoBackhaulEpcHelper::m_x2LinkDelay),
-                          MakeTimeChecker())
-            .AddAttribute("X2LinkMtu",
-                          "The MTU of the next X2 link to be created. Note that, because of some "
-                          "big X2 messages, you need a big MTU.",
-                          UintegerValue(3000),
-                          MakeUintegerAccessor(&NrNoBackhaulEpcHelper::m_x2LinkMtu),
-                          MakeUintegerChecker<uint16_t>())
-            .AddAttribute("X2LinkPcapPrefix",
-                          "Prefix for Pcap generated by X2 link",
-                          StringValue("x2"),
-                          MakeStringAccessor(&NrNoBackhaulEpcHelper::m_x2LinkPcapPrefix),
-                          MakeStringChecker())
-            .AddAttribute("X2LinkEnablePcap",
-                          "Enable Pcap for X2 link",
-                          BooleanValue(false),
-                          MakeBooleanAccessor(&NrNoBackhaulEpcHelper::m_x2LinkEnablePcap),
-                          MakeBooleanChecker());
+                          MakeUintegerChecker<uint16_t>());
     return tid;
-}
-
-TypeId
-NrNoBackhaulEpcHelper::GetInstanceTypeId() const
-{
-    return GetTypeId();
 }
 
 void
@@ -308,137 +346,222 @@ NrNoBackhaulEpcHelper::DoDispose()
 }
 
 void
-NrNoBackhaulEpcHelper::AddGnb(Ptr<Node> gnb,
-                              Ptr<NetDevice> nrGnbNetDevice,
-                              std::vector<uint16_t> cellIds)
+NrNoBackhaulEpcHelper::AddRoamingPartner(Ptr<NrNoBackhaulEpcHelper> partner, bool homeRouted)
 {
-    NS_LOG_FUNCTION(this << gnb << nrGnbNetDevice << cellIds.size());
-    NS_ASSERT(gnb == nrGnbNetDevice->GetNode());
-
-    int retval;
-
-    // add an IPv4 stack to the previously created gNB
-    InternetStackHelper internet;
-    internet.Install(gnb);
-    NS_LOG_LOGIC("number of Ipv4 ifaces of the gNB after node creation: "
-                 << gnb->GetObject<Ipv4>()->GetNInterfaces());
-
-    // create NR socket for the gNB
-    Ptr<Socket> nrGnbSocket =
-        Socket::CreateSocket(gnb, TypeId::LookupByName("ns3::PacketSocketFactory"));
-    PacketSocketAddress nrGnbSocketBindAddress;
-    nrGnbSocketBindAddress.SetSingleDevice(nrGnbNetDevice->GetIfIndex());
-    nrGnbSocketBindAddress.SetProtocol(Ipv4L3Protocol::PROT_NUMBER);
-    retval = nrGnbSocket->Bind(nrGnbSocketBindAddress);
-    NS_ASSERT(retval == 0);
-    PacketSocketAddress nrGnbSocketConnectAddress;
-    nrGnbSocketConnectAddress.SetPhysicalAddress(Mac48Address::GetBroadcast());
-    nrGnbSocketConnectAddress.SetSingleDevice(nrGnbNetDevice->GetIfIndex());
-    nrGnbSocketConnectAddress.SetProtocol(Ipv4L3Protocol::PROT_NUMBER);
-    retval = nrGnbSocket->Connect(nrGnbSocketConnectAddress);
-    NS_ASSERT(retval == 0);
-
-    // create NR socket for the gNB
-    Ptr<Socket> nrGnbSocket6 =
-        Socket::CreateSocket(gnb, TypeId::LookupByName("ns3::PacketSocketFactory"));
-    PacketSocketAddress nrGnbSocketBindAddress6;
-    nrGnbSocketBindAddress6.SetSingleDevice(nrGnbNetDevice->GetIfIndex());
-    nrGnbSocketBindAddress6.SetProtocol(Ipv6L3Protocol::PROT_NUMBER);
-    retval = nrGnbSocket6->Bind(nrGnbSocketBindAddress6);
-    NS_ASSERT(retval == 0);
-    PacketSocketAddress nrGnbSocketConnectAddress6;
-    nrGnbSocketConnectAddress6.SetPhysicalAddress(Mac48Address::GetBroadcast());
-    nrGnbSocketConnectAddress6.SetSingleDevice(nrGnbNetDevice->GetIfIndex());
-    nrGnbSocketConnectAddress6.SetProtocol(Ipv6L3Protocol::PROT_NUMBER);
-    retval = nrGnbSocket6->Connect(nrGnbSocketConnectAddress6);
-    NS_ASSERT(retval == 0);
-
-    NS_LOG_INFO("Create NrEpcGnbApplication for cell ID " << cellIds.at(0));
-    Ptr<NrEpcGnbApplication> gnbApp =
-        CreateObject<NrEpcGnbApplication>(nrGnbSocket, nrGnbSocket6, cellIds.at(0));
-    gnb->AddApplication(gnbApp);
-    NS_ASSERT(gnb->GetNApplications() == 1);
-    NS_ASSERT_MSG(gnb->GetApplication(0)->GetObject<NrEpcGnbApplication>(),
-                  "cannot retrieve NrEpcGnbApplication");
-    NS_LOG_LOGIC("gnb: " << gnb << ", gnb->GetApplication (0): " << gnb->GetApplication(0));
-
-    NS_LOG_INFO("Create NrEpcX2 entity");
-    Ptr<NrEpcX2> x2 = CreateObject<NrEpcX2>();
-    gnb->AggregateObject(x2);
+    NS_LOG_FUNCTION(this << partner << homeRouted);
+    m_mmeApp->AddRoamingPartner(partner->m_mmeApp);
+    partner->m_mmeApp->AddRoamingPartner(m_mmeApp);
+    if (homeRouted)
+    {
+        AddS8Link(this, partner);
+        AddS8Link(partner, this);
+    }
 }
 
 void
-NrNoBackhaulEpcHelper::AddX2Interface(Ptr<Node> gnb1, Ptr<Node> gnb2)
+NrNoBackhaulEpcHelper::AddS8Link(Ptr<NrNoBackhaulEpcHelper> visited,
+                                 Ptr<NrNoBackhaulEpcHelper> home)
 {
-    NS_LOG_FUNCTION(this << gnb1 << gnb2);
-
-    // Create a point to point link between the two eNBs with
-    // the corresponding new NetDevices on each side
+    NS_LOG_FUNCTION(this << visited << home);
     PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(m_x2LinkDataRate));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(m_x2LinkMtu));
-    p2ph.SetChannelAttribute("Delay", TimeValue(m_x2LinkDelay));
-    NetDeviceContainer gnbDevices = p2ph.Install(gnb1, gnb2);
-    NS_LOG_LOGIC("number of Ipv4 ifaces of the gNB #1 after installing p2p dev: "
-                 << gnb1->GetObject<Ipv4>()->GetNInterfaces());
-    NS_LOG_LOGIC("number of Ipv4 ifaces of the gNB #2 after installing p2p dev: "
-                 << gnb2->GetObject<Ipv4>()->GetNInterfaces());
+    p2ph.SetDeviceAttribute("DataRate", DataRateValue(m_s8LinkDataRate));
+    p2ph.SetDeviceAttribute("Mtu", UintegerValue(m_s8LinkMtu));
+    p2ph.SetChannelAttribute("Delay", TimeValue(m_s8LinkDelay));
+    NetDeviceContainer devices = p2ph.Install(visited->m_sgw, home->m_pgw);
+    // 15.<visited index>.<home index>.0/30
+    Ipv4AddressHelper addresses(
+        Ipv4Address(15u << 24 | visited->GetCoreIndex() << 16 | home->GetCoreIndex() << 8),
+        "255.255.255.252");
+    addresses.Assign(devices);
 
-    if (m_x2LinkEnablePcap)
+    // The SGW and the PGW use their S5 addresses on S8 too: the S8 link carries the traffic
+    // between them
+    Ipv4StaticRoutingHelper routingHelper;
+    auto sgwIpv4 = visited->m_sgw->GetObject<Ipv4>();
+    auto pgwIpv4 = home->m_pgw->GetObject<Ipv4>();
+    routingHelper.GetStaticRouting(sgwIpv4)->AddHostRouteTo(
+        home->m_pgwS5Address,
+        sgwIpv4->GetInterfaceForDevice(devices.Get(0)));
+    routingHelper.GetStaticRouting(pgwIpv4)->AddHostRouteTo(
+        visited->m_sgwS5Address,
+        pgwIpv4->GetInterfaceForDevice(devices.Get(1)));
+    visited->m_homeRoutedPartners[PeekPointer(home->m_mmeApp)] = PeekPointer(home);
+}
+
+Ptr<NrEpcMmeApplication>
+NrNoBackhaulEpcHelper::GetMmeApplication() const
+{
+    return m_mmeApp;
+}
+
+Ipv4Address
+NrNoBackhaulEpcHelper::UeAttached(uint64_t imsi, NrEpcMmeApplication* home)
+{
+    NS_LOG_FUNCTION(this << imsi << home);
+    Ptr<NrUeNetDevice> ueDevice;
+    for (auto node = NodeList::Begin(); node != NodeList::End() && !ueDevice; ++node)
     {
-        p2ph.EnablePcapAll(m_x2LinkPcapPrefix);
+        for (uint32_t i = 0; i < (*node)->GetNDevices() && !ueDevice; i++)
+        {
+            auto device = DynamicCast<NrUeNetDevice>((*node)->GetDevice(i));
+            ueDevice = device && device->GetImsi() == imsi ? device : nullptr;
+        }
+    }
+    // the IPv4 and IPv6 interfaces of the NR device of the UE, if it has addresses of the family
+    Ptr<Ipv4> ueIpv4 = ueDevice ? ueDevice->GetNode()->GetObject<Ipv4>() : nullptr;
+    const int32_t interface = ueIpv4 ? ueIpv4->GetInterfaceForDevice(ueDevice) : -1;
+    Ptr<Ipv6> ueIpv6 = ueDevice ? ueDevice->GetNode()->GetObject<Ipv6>() : nullptr;
+    const int32_t interface6 = ueIpv6 ? ueIpv6->GetInterfaceForDevice(ueDevice) : -1;
+
+    // Home-routed roaming: the session is in the PGW of the home network, through the S8 link,
+    // and the UE keeps its home addresses
+    auto homeRouted = home ? m_homeRoutedPartners.find(home) : m_homeRoutedPartners.end();
+    if (homeRouted != m_homeRoutedPartners.end())
+    {
+        NrNoBackhaulEpcHelper* homeHelper = homeRouted->second;
+        if (interface >= 0)
+        {
+            SetUeAddress(ueIpv4,
+                         interface,
+                         Ipv4InterfaceAddress(homeHelper->m_pgwApp->GetUeAddress(imsi),
+                                              homeHelper->m_ueIpv4Mask),
+                         homeHelper->GetUeDefaultGatewayAddress());
+        }
+        const Ipv6Address address6 = homeHelper->m_pgwApp->GetUeAddress6(imsi);
+        if (interface6 >= 0 && address6 != Ipv6Address::GetAny())
+        {
+            SetUeAddress6(ueIpv6,
+                          interface6,
+                          Ipv6InterfaceAddress(address6, Ipv6Prefix(64)),
+                          homeHelper->GetUeDefaultGatewayAddress6());
+        }
+        return homeHelper->m_pgwS5Address;
     }
 
-    m_x2Ipv4AddressHelper.NewNetwork();
-    Ipv4InterfaceContainer gnbIpIfaces = m_x2Ipv4AddressHelper.Assign(gnbDevices);
-    NS_LOG_LOGIC("number of Ipv4 ifaces of the gNB #1 after assigning Ipv4 addr to X2 dev: "
-                 << gnb1->GetObject<Ipv4>()->GetNInterfaces());
-    NS_LOG_LOGIC("number of Ipv4 ifaces of the gNB #2 after assigning Ipv4 addr to X2 dev: "
-                 << gnb2->GetObject<Ipv4>()->GetNInterfaces());
-
-    Ipv4Address gnb1X2Address = gnbIpIfaces.GetAddress(0);
-    Ipv4Address gnb2X2Address = gnbIpIfaces.GetAddress(1);
-
-    // Add X2 interface to both eNBs' X2 entities
-    Ptr<NrEpcX2> gnb1X2 = gnb1->GetObject<NrEpcX2>();
-    Ptr<NrEpcX2> gnb2X2 = gnb2->GetObject<NrEpcX2>();
-
-    Ptr<NetDevice> gnb1NrDev = gnb1->GetDevice(0);
-    Ptr<NetDevice> gnb2NrDev = gnb2->GetDevice(0);
-
-    DoAddX2Interface(gnb1X2, gnb1NrDev, gnb1X2Address, gnb2X2, gnb2NrDev, gnb2X2Address);
+    // a subscriber, or a UE roaming with local breakout: the session is in the PGW of this
+    // network, with the addresses of the UE in this network, assigned on its first attachment
+    // if it has none
+    if (interface < 0 && interface6 < 0)
+    {
+        // a UE with no IP stack, whose sessions are unstructured, roaming with local breakout:
+        // its sessions are in the PGW of this network
+        if (ueDevice && home && !m_pgwApp->HasUe(imsi))
+        {
+            m_pgwApp->AddUe(imsi);
+        }
+        // otherwise, not an NR UE device with an address (e.g., in the S1-U tests): its address
+        // is set by its owner
+        return Ipv4Address();
+    }
+    if (!m_pgwApp->HasUe(imsi))
+    {
+        m_pgwApp->AddUe(imsi);
+    }
+    if (interface >= 0)
+    {
+        Ipv4Address address = m_pgwApp->GetUeAddress(imsi);
+        if (address == Ipv4Address())
+        {
+            address = m_uePgwAddressHelper.NewAddress();
+            m_pgwApp->SetUeAddress(imsi, address);
+        }
+        SetUeAddress(ueIpv4,
+                     interface,
+                     Ipv4InterfaceAddress(address, m_ueIpv4Mask),
+                     GetUeDefaultGatewayAddress());
+    }
+    if (interface6 >= 0)
+    {
+        Ipv6Address address6 = m_pgwApp->GetUeAddress6(imsi);
+        if (address6 == Ipv6Address::GetAny())
+        {
+            // the prefix of this network, with the interface identifier of the device
+            address6 = m_uePgwAddressHelper6.NewAddress(ueDevice->GetAddress());
+            m_pgwApp->SetUeAddress6(imsi, address6);
+        }
+        SetUeAddress6(ueIpv6,
+                      interface6,
+                      Ipv6InterfaceAddress(address6, Ipv6Prefix(64)),
+                      GetUeDefaultGatewayAddress6());
+    }
+    return Ipv4Address();
 }
 
 void
-NrNoBackhaulEpcHelper::DoAddX2Interface(const Ptr<NrEpcX2>& gnb1X2,
-                                        const Ptr<NetDevice>& gnb1NrDev,
-                                        const Ipv4Address& gnb1X2Address,
-                                        const Ptr<NrEpcX2>& gnb2X2,
-                                        const Ptr<NetDevice>& gnb2NrDev,
-                                        const Ipv4Address& gnb2X2Address) const
+NrNoBackhaulEpcHelper::SetUeAddress(Ptr<Ipv4> ueIpv4,
+                                    int32_t interface,
+                                    Ipv4InterfaceAddress address,
+                                    Ipv4Address gateway)
 {
-    NS_LOG_FUNCTION(this);
+    // the UE address in the network of the session, which the UE gets with its PDU session
+    if (ueIpv4->GetNAddresses(interface) == 1 &&
+        ueIpv4->GetAddress(interface, 0).GetLocal() == address.GetLocal())
+    {
+        return;
+    }
+    NS_LOG_INFO("UE address " << address.GetLocal());
+    while (ueIpv4->GetNAddresses(interface) > 0)
+    {
+        ueIpv4->RemoveAddress(interface, 0);
+    }
+    ueIpv4->AddAddress(interface, address);
+    Ptr<Ipv4StaticRouting> routing = Ipv4StaticRoutingHelper().GetStaticRouting(ueIpv4);
+    for (uint32_t route = routing->GetNRoutes(); route > 0; route--)
+    {
+        if (routing->GetRoute(route - 1).IsDefault())
+        {
+            routing->RemoveRoute(route - 1);
+        }
+    }
+    routing->SetDefaultRoute(gateway, interface);
+}
 
-    Ptr<NrGnbNetDevice> gnb1NrDevice = gnb1NrDev->GetObject<NrGnbNetDevice>();
-    Ptr<NrGnbNetDevice> gnb2NrDevice = gnb2NrDev->GetObject<NrGnbNetDevice>();
-
-    NS_ABORT_MSG_IF(!gnb1NrDevice, "Unable to find NrGnbNetDevice for the first gNB");
-    NS_ABORT_MSG_IF(!gnb2NrDevice, "Unable to find NrGnbNetDevice for the second gNB");
-
-    std::vector<uint16_t> gnb1CellIds = gnb1NrDevice->GetCellIds();
-    std::vector<uint16_t> gnb2CellIds = gnb2NrDevice->GetCellIds();
-
-    uint16_t gnb1CellId = gnb1CellIds.at(0);
-    uint16_t gnb2CellId = gnb2CellIds.at(0);
-
-    NS_LOG_LOGIC("NrGnbNetDevice #1 = " << gnb1NrDev << " - CellId = " << gnb1CellId);
-    NS_LOG_LOGIC("NrGnbNetDevice #2 = " << gnb2NrDev << " - CellId = " << gnb2CellId);
-
-    gnb1X2->AddX2Interface(gnb1CellId, gnb1X2Address, gnb2CellIds, gnb2X2Address);
-    gnb2X2->AddX2Interface(gnb2CellId, gnb2X2Address, gnb1CellIds, gnb1X2Address);
-
-    gnb1NrDevice->GetRrc()->AddX2Neighbour(gnb2CellId);
-    gnb2NrDevice->GetRrc()->AddX2Neighbour(gnb1CellId);
+void
+NrNoBackhaulEpcHelper::SetUeAddress6(Ptr<Ipv6> ueIpv6,
+                                     int32_t interface,
+                                     Ipv6InterfaceAddress address,
+                                     Ipv6Address gateway)
+{
+    // the global addresses of the UE are replaced, its link-local address is kept
+    bool present = false;
+    std::vector<Ipv6Address> others;
+    for (uint32_t i = 0; i < ueIpv6->GetNAddresses(interface); i++)
+    {
+        const auto current = ueIpv6->GetAddress(interface, i);
+        if (current.GetScope() == Ipv6InterfaceAddress::GLOBAL)
+        {
+            if (current.GetAddress() == address.GetAddress())
+            {
+                present = true;
+            }
+            else
+            {
+                others.push_back(current.GetAddress());
+            }
+        }
+    }
+    if (present && others.empty())
+    {
+        return;
+    }
+    NS_LOG_INFO("UE address " << address.GetAddress());
+    for (const auto& other : others)
+    {
+        ueIpv6->RemoveAddress(interface, other);
+    }
+    if (!present)
+    {
+        ueIpv6->AddAddress(interface, address);
+    }
+    Ptr<Ipv6StaticRouting> routing = Ipv6StaticRoutingHelper().GetStaticRouting(ueIpv6);
+    for (uint32_t route = routing->GetNRoutes(); route > 0; route--)
+    {
+        if (routing->GetRoute(route - 1).IsDefault())
+        {
+            routing->RemoveRoute(route - 1);
+        }
+    }
+    routing->SetDefaultRoute(gateway, interface);
 }
 
 void
@@ -451,10 +574,10 @@ NrNoBackhaulEpcHelper::AddUe(Ptr<NetDevice> ueDevice, uint64_t imsi)
 }
 
 uint8_t
-NrNoBackhaulEpcHelper::ActivateEpsBearer(Ptr<NetDevice> ueDevice,
-                                         uint64_t imsi,
-                                         Ptr<NrEpcTft> tft,
-                                         NrEpsBearer bearer)
+NrNoBackhaulEpcHelper::ActivateQosFlow(Ptr<NetDevice> ueDevice,
+                                       uint64_t imsi,
+                                       Ptr<NrQosRule> rule,
+                                       NrQosFlow flow)
 {
     NS_LOG_FUNCTION(this << ueDevice << imsi);
 
@@ -465,7 +588,7 @@ NrNoBackhaulEpcHelper::ActivateEpsBearer(Ptr<NetDevice> ueDevice,
     Ptr<Ipv4> ueIpv4 = ueNode->GetObject<Ipv4>();
     Ptr<Ipv6> ueIpv6 = ueNode->GetObject<Ipv6>();
     NS_ASSERT_MSG(ueIpv4 || ueIpv6,
-                  "UEs need to have IPv4/IPv6 installed before EPS bearers can be activated");
+                  "UEs need to have IPv4/IPv6 installed before QoS flows can be activated");
 
     if (ueIpv4)
     {
@@ -487,16 +610,69 @@ NrNoBackhaulEpcHelper::ActivateEpsBearer(Ptr<NetDevice> ueDevice,
             m_pgwApp->SetUeAddress6(imsi, ueAddr6);
         }
     }
-    uint8_t bearerId = m_mmeApp->AddBearer(imsi, tft, bearer);
-    DoActivateEpsBearerForUe(ueDevice, tft, bearer);
+    uint8_t qosFlowId = m_mmeApp->AddFlow(imsi, rule, flow);
+    rule->SetQfi(qosFlowId);
+    DoActivateQosFlowForUe(ueDevice, rule, flow);
 
-    return bearerId;
+    return qosFlowId;
+}
+
+uint8_t
+NrNoBackhaulEpcHelper::ActivateUnstructuredQosFlow(Ptr<NetDevice> ueDevice,
+                                                   uint64_t imsi,
+                                                   uint16_t protocolNumber,
+                                                   NrQosFlow flow)
+{
+    NS_LOG_FUNCTION(this << ueDevice << imsi << protocolNumber);
+
+    // The session carries unstructured payload, so the UE has no address to notify to the
+    // core: the session itself identifies the UE, and it is reached through a device
+    // of its own on the PGW rather than by routing on an address.
+    Ptr<NrQosRule> rule = NrQosRule::Unstructured(protocolNumber);
+    uint8_t qosFlowId = m_mmeApp->AddFlow(imsi, rule, flow);
+    rule->SetQfi(qosFlowId);
+
+    CreateUnstructuredSessionDevice(imsi, qosFlowId, protocolNumber);
+
+    DoActivateQosFlowForUe(ueDevice, rule, flow);
+
+    return qosFlowId;
 }
 
 void
-NrNoBackhaulEpcHelper::DoActivateEpsBearerForUe(const Ptr<NetDevice>& ueDevice,
-                                                const Ptr<NrEpcTft>& tft,
-                                                const NrEpsBearer& bearer) const
+NrNoBackhaulEpcHelper::CreateUnstructuredSessionDevice(uint64_t imsi,
+                                                       uint8_t qfi,
+                                                       uint16_t protocolNumber)
+{
+    NS_LOG_FUNCTION(this << imsi << +qfi << protocolNumber);
+    auto& sessionDevice = m_unstructuredSessionDevices[{imsi, qfi}];
+    if (!sessionDevice)
+    {
+        sessionDevice = CreateObject<VirtualNetDevice>();
+        // allow jumbo packets
+        sessionDevice->SetAttribute("Mtu", UintegerValue(30000));
+        sessionDevice->SetAddress(Mac48Address::Allocate());
+        m_pgw->AddDevice(sessionDevice);
+    }
+    m_pgwApp->AddUnstructuredSession(imsi, qfi, protocolNumber, sessionDevice);
+}
+
+Ptr<VirtualNetDevice>
+NrNoBackhaulEpcHelper::GetUnstructuredSessionDevice(uint64_t imsi, uint8_t qfi) const
+{
+    NS_LOG_FUNCTION(this << imsi << qfi);
+    auto it = m_unstructuredSessionDevices.find({imsi, qfi});
+    if (it == m_unstructuredSessionDevices.end())
+    {
+        return nullptr;
+    }
+    return it->second;
+}
+
+void
+NrNoBackhaulEpcHelper::DoActivateQosFlowForUe(const Ptr<NetDevice>& ueDevice,
+                                              const Ptr<NrQosRule>& rule,
+                                              const NrQosFlow& flow) const
 {
     NS_LOG_FUNCTION(this);
     Ptr<NrUeNetDevice> ueNrDevice = DynamicCast<NrUeNetDevice>(ueDevice);
@@ -504,11 +680,17 @@ NrNoBackhaulEpcHelper::DoActivateEpsBearerForUe(const Ptr<NetDevice>& ueDevice,
     {
         // You may wonder why this is not an assert. Well, take a look in epc-test-s1u-downlink
         // and -uplink: we are using CSMA to simulate UEs.
-        NS_LOG_WARN("Unable to find NrUeNetDevice while activating the EPS bearer");
+        NS_LOG_WARN("Unable to find NrUeNetDevice while activating the QoS flow");
     }
     else
     {
-        Simulator::ScheduleNow(&NrEpcUeNas::ActivateEpsBearer, ueNrDevice->GetNas(), bearer, tft);
+        // Schedule with context so that logging statements have Node ID
+        Simulator::ScheduleWithContext(ueNrDevice->GetNode()->GetId(),
+                                       Time(),
+                                       &NrEpcUeNas::ActivateQosFlow,
+                                       ueNrDevice->GetNas(),
+                                       flow,
+                                       rule);
     }
 }
 
@@ -521,7 +703,20 @@ NrNoBackhaulEpcHelper::GetPgwNode() const
 Ipv4InterfaceContainer
 NrNoBackhaulEpcHelper::AssignUeIpv4Address(NetDeviceContainer ueDevices)
 {
-    return m_uePgwAddressHelper.Assign(ueDevices);
+    auto ipv4ifaces = m_uePgwAddressHelper.Assign(ueDevices);
+    Ipv4StaticRoutingHelper ipv4RoutingHelper;
+    for (size_t i = 0; i < ueDevices.GetN(); i++)
+    {
+        if (!DynamicCast<NrUeNetDevice>(ueDevices.Get(i)))
+        {
+            continue;
+        }
+        auto ueNode = ueDevices.Get(i)->GetNode();
+        Ptr<Ipv4StaticRouting> ueStaticRouting =
+            ipv4RoutingHelper.GetStaticRouting(ueNode->GetObject<Ipv4>());
+        ueStaticRouting->SetDefaultRoute(GetUeDefaultGatewayAddress(), 1);
+    }
+    return ipv4ifaces;
 }
 
 Ipv6InterfaceContainer
@@ -532,7 +727,20 @@ NrNoBackhaulEpcHelper::AssignUeIpv6Address(NetDeviceContainer ueDevices)
         Ptr<Icmpv6L4Protocol> icmpv6 = (*iter)->GetNode()->GetObject<Icmpv6L4Protocol>();
         icmpv6->SetAttribute("DAD", BooleanValue(false));
     }
-    return m_uePgwAddressHelper6.Assign(ueDevices);
+    auto ipv6ifaces = m_uePgwAddressHelper6.Assign(ueDevices);
+    Ipv6StaticRoutingHelper ipv6RoutingHelper;
+    for (size_t i = 0; i < ueDevices.GetN(); i++)
+    {
+        if (!DynamicCast<NrUeNetDevice>(ueDevices.Get(i)))
+        {
+            continue;
+        }
+        auto ueNode = ueDevices.Get(i)->GetNode();
+        Ptr<Ipv6StaticRouting> ueStaticRouting =
+            ipv6RoutingHelper.GetStaticRouting(ueNode->GetObject<Ipv6>());
+        ueStaticRouting->SetDefaultRoute(GetUeDefaultGatewayAddress6(), 1);
+    }
+    return ipv6ifaces;
 }
 
 Ipv4Address
@@ -556,30 +764,17 @@ NrNoBackhaulEpcHelper::GetSgwNode() const
 }
 
 void
-NrNoBackhaulEpcHelper::AddS1Interface(Ptr<Node> gnb,
-                                      Ipv4Address gnbAddress,
-                                      Ipv4Address sgwAddress,
-                                      std::vector<uint16_t> cellIds)
+NrNoBackhaulEpcHelper::ConnectGnbToCore(Ptr<NrEpcGnbApplication> gnbApp,
+                                        uint16_t cellId,
+                                        Ipv4Address gnbAddress,
+                                        Ipv4Address sgwAddress)
 {
-    NS_LOG_FUNCTION(this << gnb << gnbAddress << sgwAddress << cellIds.size());
-
-    // create S1-U socket for the gNB
-    Ptr<Socket> gnbS1uSocket =
-        Socket::CreateSocket(gnb, TypeId::LookupByName("ns3::UdpSocketFactory"));
-    int retval = gnbS1uSocket->Bind(InetSocketAddress(gnbAddress, m_gtpuUdpPort));
-    NS_ASSERT(retval == 0);
-
-    Ptr<NrEpcGnbApplication> gnbApp = gnb->GetApplication(0)->GetObject<NrEpcGnbApplication>();
-    NS_ASSERT_MSG(gnbApp, "NrEpcGnbApplication not available");
-    gnbApp->AddS1Interface(gnbS1uSocket, gnbAddress, sgwAddress);
+    NS_LOG_FUNCTION(this << gnbApp << cellId << gnbAddress << sgwAddress);
 
     NS_LOG_INFO("Connect S1-AP interface");
-    for (uint16_t cellId : cellIds)
-    {
-        NS_LOG_DEBUG("Adding MME and SGW for cell ID " << cellId);
-        m_mmeApp->AddGnb(cellId, gnbAddress, gnbApp->GetS1apSapGnb());
-        m_sgwApp->AddGnb(cellId, gnbAddress, sgwAddress);
-    }
+    NS_LOG_DEBUG("Adding MME and SGW for cell ID " << cellId);
+    m_mmeApp->AddGnb(cellId, gnbAddress, gnbApp->GetS1apSapGnb());
+    m_sgwApp->AddGnb(cellId, gnbAddress, sgwAddress);
     gnbApp->SetS1apSapMme(m_mmeApp->GetS1apSapMme());
 }
 
@@ -595,6 +790,103 @@ NrNoBackhaulEpcHelper::AssignStreams(int64_t stream)
     nc.Add(m_mme);
     currentStream += internet.AssignStreams(nc, currentStream);
     return (currentStream - stream);
+}
+
+std::pair<Ptr<Node>, Ipv4Address>
+NrNoBackhaulEpcHelper::SetupRemoteHost(std::optional<std::string> dataRate,
+                                       std::optional<uint16_t> mtu,
+                                       std::optional<Time> delay)
+{
+    // create the internet and install the IP stack on the UEs
+    // get SGW/PGW and create a single RemoteHost
+    Ptr<Node> pgw = GetPgwNode();
+    NodeContainer remoteHostContainer;
+    remoteHostContainer.Create(1);
+    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
+    InternetStackHelper internet;
+    internet.Install(remoteHostContainer);
+
+    // connect a remoteHost to pgw. Setup routing too
+    PointToPointHelper p2ph;
+    if (dataRate.has_value())
+    {
+        p2ph.SetDeviceAttribute("DataRate", StringValue(dataRate.value()));
+    }
+    if (mtu.has_value())
+    {
+        p2ph.SetDeviceAttribute("Mtu", UintegerValue(mtu.value()));
+    }
+    if (delay.has_value())
+    {
+        p2ph.SetChannelAttribute("Delay", TimeValue(delay.value()));
+    }
+    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
+
+    // Setup IPv4 addresses and routing from remoteHost to the UEs through PGW
+    Ipv4AddressHelper ipv4h;
+    Ipv4StaticRoutingHelper ipv4RoutingHelper;
+    // 1.0.0.0/8 for the first core network, 1.<index>.0.0/16 for the others
+    if (GetCoreIndex() == 0)
+    {
+        ipv4h.SetBase("1.0.0.0", "255.0.0.0");
+    }
+    else
+    {
+        ipv4h.SetBase(GetCoreSubnet(1), "255.255.0.0");
+    }
+    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting4 =
+        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
+    remoteHostStaticRouting4->AddNetworkRouteTo(m_ueIpv4Network, m_ueIpv4Mask, 1);
+    return std::make_pair(remoteHost, internetIpIfaces.GetAddress(1, 0));
+}
+
+std::pair<Ptr<Node>, Ipv6Address>
+NrNoBackhaulEpcHelper::SetupRemoteHost6(std::optional<std::string> dataRate,
+                                        std::optional<uint16_t> mtu,
+                                        std::optional<Time> delay)
+{
+    // create the internet and install the IP stack on the UEs
+    // get SGW/PGW and create a single RemoteHost
+    Ptr<Node> pgw = GetPgwNode();
+    NodeContainer remoteHostContainer;
+    remoteHostContainer.Create(1);
+    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
+    InternetStackHelper internet;
+    internet.Install(remoteHostContainer);
+
+    // connect a remoteHost to pgw. Setup routing too
+    PointToPointHelper p2ph;
+    if (dataRate.has_value())
+    {
+        p2ph.SetDeviceAttribute("DataRate", StringValue(dataRate.value()));
+    }
+    if (mtu.has_value())
+    {
+        p2ph.SetDeviceAttribute("Mtu", UintegerValue(mtu.value()));
+    }
+    if (delay.has_value())
+    {
+        p2ph.SetChannelAttribute("Delay", TimeValue(delay.value()));
+    }
+    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
+
+    // Setup IPv6 addresses and routing from remoteHost to the UEs through PGW
+    Ipv6AddressHelper ipv6h;
+    ipv6h.SetBase(CoreIpv6Prefix("6001:db80::", GetCoreIndex()), Ipv6Prefix(64));
+    Ipv6InterfaceContainer internetIpIfaces = ipv6h.Assign(internetDevices);
+    internetIpIfaces.SetForwarding(0, true);
+    internetIpIfaces.SetDefaultRouteInAllNodes(0);
+
+    Ipv6StaticRoutingHelper ipv6RoutingHelper;
+    Ptr<Ipv6StaticRouting> remoteHostStaticRouting =
+        ipv6RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv6>());
+    remoteHostStaticRouting->AddNetworkRouteTo(CoreIpv6Prefix("7777:f00d::", GetCoreIndex()),
+                                               Ipv6Prefix(64),
+                                               internetIpIfaces.GetAddress(0, 1),
+                                               1,
+                                               0);
+    return std::make_pair(remoteHost, internetIpIfaces.GetAddress(1, 1));
 }
 
 } // namespace ns3

@@ -10,29 +10,29 @@
 #ifndef THREE_GPP_HTTP_SERVER_H
 #define THREE_GPP_HTTP_SERVER_H
 
+#include "sink-application.h"
 #include "three-gpp-http-header.h"
 
-#include <ns3/address.h>
-#include <ns3/application.h>
-#include <ns3/event-id.h>
-#include <ns3/nstime.h>
-#include <ns3/ptr.h>
-#include <ns3/simple-ref-count.h>
-#include <ns3/traced-callback.h>
+#include "ns3/address.h"
+#include "ns3/event-id.h"
+#include "ns3/nstime.h"
+#include "ns3/ptr.h"
+#include "ns3/simple-ref-count.h"
+#include "ns3/traced-callback.h"
 
 #include <map>
+#include <optional>
 #include <ostream>
 
 namespace ns3
 {
 
-class Socket;
 class Packet;
 class ThreeGppHttpVariables;
 class ThreeGppHttpServerTxBuffer;
 
 /**
- * \ingroup http
+ * @ingroup http
  * Model application which simulates the traffic of a web server. This
  * application works in conjunction with ThreeGppHttpClient applications.
  *
@@ -54,9 +54,11 @@ class ThreeGppHttpServerTxBuffer;
  * The application accepts connection request from clients. Every connection is
  * kept open until the client disconnects.
  */
-class ThreeGppHttpServer : public Application
+class ThreeGppHttpServer : public SinkApplication
 {
   public:
+    static constexpr uint16_t HTTP_DEFAULT_PORT{80}; //!< default HTTP port
+
     /**
      * Creates a new instance of HTTP server application.
      *
@@ -72,7 +74,7 @@ class ThreeGppHttpServer : public Application
 
     /**
      * Returns the object TypeId.
-     * \return The object TypeId.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
@@ -83,13 +85,13 @@ class ThreeGppHttpServer : public Application
      * application is created. Values other than the standard 536 and 1460 bytes
      * can be set using this method.
      *
-     * \param mtuSize MTU size in bytes.
+     * @param mtuSize MTU size in bytes.
      */
     void SetMtuSize(uint32_t mtuSize);
 
     /**
      * Returns a pointer to the listening socket.
-     * \return Pointer to the listening socket
+     * @return Pointer to the listening socket
      */
     Ptr<Socket> GetSocket() const;
 
@@ -103,35 +105,35 @@ class ThreeGppHttpServer : public Application
 
     /**
      * Returns the current state of the application.
-     * \return The current state of the application.
+     * @return The current state of the application.
      */
     State_t GetState() const;
 
     /**
      * Returns the current state of the application in string format.
-     * \return The current state of the application in string format.
+     * @return The current state of the application in string format.
      */
     std::string GetStateString() const;
 
     /**
      * Returns the given state in string format.
-     * \param state An arbitrary state of an application.
-     * \return The given state equivalently expressed in string format.
+     * @param state An arbitrary state of an application.
+     * @return The given state equivalently expressed in string format.
      */
     static std::string GetStateString(State_t state);
 
     /**
      * Common callback signature for `MainObject` and `EmbeddedObject` trace
      * sources.
-     * \param size Size of the generated object in bytes.
+     * @param size Size of the generated object in bytes.
      */
     typedef void (*ThreeGppHttpObjectCallback)(uint32_t size);
 
     /**
      * Callback signature for `ConnectionEstablished` trace source.
-     * \param httpServer Pointer to this instance of ThreeGppHttpServer, which is where
+     * @param httpServer Pointer to this instance of ThreeGppHttpServer, which is where
      *                   the trace originated.
-     * \param socket Pointer to the socket where the connection is established.
+     * @param socket Pointer to the socket where the connection is established.
      */
     typedef void (*ConnectionEstablishedCallback)(Ptr<const ThreeGppHttpServer> httpServer,
                                                   Ptr<Socket> socket);
@@ -140,55 +142,57 @@ class ThreeGppHttpServer : public Application
     void DoDispose() override;
 
   private:
-    void StartApplication() override;
-    void StopApplication() override;
+    void DoStartApplication() override;
+    void DoStopApplication() override;
+    void SetLocal(const Address& addr) override;
+    void SetPort(uint32_t port) override;
 
     // SOCKET CALLBACK METHODS
 
     /**
-     * Invoked when #m_initialSocket receives a connection request.
-     * \param socket Pointer to the socket where the event originates from.
-     * \param address The address of the remote client where the connection
+     * Invoked when #m_socket receives a connection request.
+     * @param socket Pointer to the socket where the event originates from.
+     * @param address The address of the remote client where the connection
      *                request comes from.
-     * \return Always true, to indicate to the other end that the connection
+     * @return Always true, to indicate to the other end that the connection
      *         request is accepted.
      */
     bool ConnectionRequestCallback(Ptr<Socket> socket, const Address& address);
     /**
      * Invoked when a new connection has been established.
-     * \param socket Pointer to the socket that maintains the connection to the
+     * @param socket Pointer to the socket that maintains the connection to the
      *               remote client. This socket will be saved to the Tx buffer.
-     * \param address The address the connection is incoming from.
+     * @param address The address the connection is incoming from.
      */
     void NewConnectionCreatedCallback(Ptr<Socket> socket, const Address& address);
     /**
      * Invoked when a connection with a web client is terminated. The
      * corresponding socket will be removed from Tx buffer.
-     * \param socket Pointer to the socket where the event originates from.
+     * @param socket Pointer to the socket where the event originates from.
      */
     void NormalCloseCallback(Ptr<Socket> socket);
     /**
      * Invoked when a connection with a web client is terminated. The
      * corresponding socket will be removed from Tx buffer.
-     * \param socket Pointer to the socket where the event originates from.
+     * @param socket Pointer to the socket where the event originates from.
      */
     void ErrorCloseCallback(Ptr<Socket> socket);
     /**
-     * Invoked when #m_initialSocket receives some packet data. It will check the
+     * Invoked when #m_socket receives some packet data. It will check the
      * packet for ThreeGppHttpHeader. It also fires the `Rx` trace source.
      *
      * Depending on the type of object requested, the method will trigger
      * ServeMainObject() or ServeEmbeddedObject() after some delays.
      *
-     * \param socket Pointer to the socket where the event originates from.
+     * @param socket Pointer to the socket where the event originates from.
      */
     void ReceivedDataCallback(Ptr<Socket> socket);
     /**
      * Invoked when more buffer space for transmission is added to a socket. The
      * method will invoke ServeFromTxBuffer() to start some transmission using
      * the socket.
-     * \param socket Pointer to the socket where the event originates from.
-     * \param availableBufferSize The number of bytes available in the socket's
+     * @param socket Pointer to the socket where the event originates from.
+     * @param availableBufferSize The number of bytes available in the socket's
      *                            transmission buffer.
      */
     void SendCallback(Ptr<Socket> socket, uint32_t availableBufferSize);
@@ -202,7 +206,7 @@ class ThreeGppHttpServer : public Application
      * Fires the `MainObject` trace source. It then immediately triggers
      * ServeFromTxBuffer() to send the object.
      *
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               destination client.
      */
     void ServeNewMainObject(Ptr<Socket> socket);
@@ -213,7 +217,7 @@ class ThreeGppHttpServer : public Application
      * Fires the `EmbeddedObject` trace source. It then immediately triggers
      * ServeFromTxBuffer() to send the object.
      *
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               destination client.
      */
     void ServeNewEmbeddedObject(Ptr<Socket> socket);
@@ -232,22 +236,20 @@ class ThreeGppHttpServer : public Application
      * the socket informs (through SendCallback()) that more buffer space for
      * transmission has become available.
      *
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               destination client.
-     * \return Size of the packet sent (in bytes).
+     * @return Size of the packet sent (in bytes).
      */
     uint32_t ServeFromTxBuffer(Ptr<Socket> socket);
 
     /**
      * Change the state of the server. Fires the `StateTransition` trace source.
-     * \param state The new state.
+     * @param state The new state.
      */
     void SwitchToState(State_t state);
 
     /// The current state of the client application. Begins with NOT_STARTED.
-    State_t m_state;
-    /// The listening socket, for receiving connection requests from clients.
-    Ptr<Socket> m_initialSocket;
+    State_t m_state{NOT_STARTED};
     /// Pointer to the transmission buffer.
     Ptr<ThreeGppHttpServerTxBuffer> m_txBuffer;
 
@@ -255,10 +257,11 @@ class ThreeGppHttpServer : public Application
 
     /// The `Variables` attribute.
     Ptr<ThreeGppHttpVariables> m_httpVariables;
-    /// The `LocalAddress` attribute.
-    Address m_localAddress;
     /// The `LocalPort` attribute.
-    uint16_t m_localPort;
+    /// Note: this is a trick needed because we have 2 ports attributes, Port and LocalPort, where
+    /// the latter is deprecated and hence this will actually go away once we can remove deprecated
+    /// attributes and code.
+    std::optional<uint16_t> m_optPort;
     /// The `Tos` attribute.
     uint8_t m_tos;
     /// The `Mtu` attribute.
@@ -274,8 +277,8 @@ class ThreeGppHttpServer : public Application
     TracedCallback<uint32_t> m_embeddedObjectTrace;
     /// The `Tx` trace source.
     TracedCallback<Ptr<const Packet>> m_txTrace;
-    /// The `Rx` trace source.
-    TracedCallback<Ptr<const Packet>, const Address&> m_rxTrace;
+    /// The `Rx` trace source with the local address.
+    TracedCallback<Ptr<const Packet>, const Address&, const Address&> m_rxTraceWithAddresses;
     /// The `RxDelay` trace source.
     TracedCallback<const Time&, const Address&> m_rxDelayTrace;
     /// The `StateTransition` trace source.
@@ -284,8 +287,8 @@ class ThreeGppHttpServer : public Application
 }; // end of `class ThreeGppHttpServer`
 
 /**
- * \internal
- * \ingroup http
+ * @internal
+ * @ingroup http
  * Transmission buffer used by an HTTP server instance.
  *
  * The class handles the sockets which face the connected HTTP clients. An
@@ -312,8 +315,8 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
      * buffers. On the other hand, all the other methods that accept a pointer to
      * a socket as an argument require the existence of a buffer allocated to the
      * given socket.
-     * \param socket Pointer to the socket to be found.
-     * \return True if the given socket is found within the buffer.
+     * @param socket Pointer to the socket to be found.
+     * @return True if the given socket is found within the buffer.
      */
     bool IsSocketAvailable(Ptr<Socket> socket) const;
 
@@ -321,9 +324,9 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
      * Add a new socket and create an empty transmission buffer for it. After the
      * method is completed, IsSocketAvailable() for the same pointer of socket
      * shall return true.
-     * \param socket Pointer to the new socket to be added (must not exist in the
+     * @param socket Pointer to the new socket to be added (must not exist in the
      *               buffer).
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is false.
      */
     void AddSocket(Ptr<Socket> socket);
@@ -340,8 +343,8 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
      * After the method is completed, IsSocketAvailable() for the same pointer of
      * socket shall return false.
      *
-     * \param socket Pointer to the socket to be removed.
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @param socket Pointer to the socket to be removed.
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true.
      */
     void RemoveSocket(Ptr<Socket> socket);
@@ -357,8 +360,8 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
      * After the method is completed, IsSocketAvailable() for the same pointer of
      * socket shall return false.
      *
-     * \param socket Pointer to the socket to be closed and removed.
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @param socket Pointer to the socket to be closed and removed.
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true.
      */
     void CloseSocket(Ptr<Socket> socket);
@@ -371,19 +374,19 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
     // BUFFER MANAGEMENT
 
     /**
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               transmission buffer of interest.
-     * \return True if the current length of the transmission buffer is zero,
+     * @return True if the current length of the transmission buffer is zero,
      *         i.e., no pending packet.
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true.
      */
     bool IsBufferEmpty(Ptr<Socket> socket) const;
 
     /**
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               transmission buffer of interest
-     * \return The client time stamp that comes from the last request packet
+     * @return The client time stamp that comes from the last request packet
      *         received by the given socket. It indicates the time the request
      *         packet was transmitted by the client.
      */
@@ -393,31 +396,31 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
      * Returns ThreeGppHttpHeader::NOT_SET when the buffer is new and never been filled
      * with any data before. Otherwise, returns either ThreeGppHttpHeader::MAIN_OBJECT
      * or ThreeGppHttpHeader::EMBEDDED_OBJECT.
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               transmission buffer of interest
-     * \return The content type of the current data inside the transmission
+     * @return The content type of the current data inside the transmission
      *         buffer.
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true.
      */
     ThreeGppHttpHeader::ContentType_t GetBufferContentType(Ptr<Socket> socket) const;
 
     /**
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               transmission buffer of interest
-     * \return The length (in bytes) of the current data inside the transmission
+     * @return The length (in bytes) of the current data inside the transmission
      *         buffer.
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true.
      */
     uint32_t GetBufferSize(Ptr<Socket> socket) const;
 
     /**
-     * \param socket pointer to the socket which is associated with the
+     * @param socket pointer to the socket which is associated with the
      *               transmission buffer of interest
-     * \return true if the buffer content has been read since it is written
+     * @return true if the buffer content has been read since it is written
      *
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true.
      *
      * This method returns true after WriteNewObject() method is called. It
@@ -432,13 +435,13 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
      * The stored data can be later consumed wholly of partially by
      * DepleteBufferSize() method.
      *
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               transmission buffer of interest.
-     * \param contentType The content-type of the data to be written (must not
+     * @param contentType The content-type of the data to be written (must not
      *                    equal to ThreeGppHttpHeader:NOT_SET).
-     * \param objectSize The length (in bytes) of the new object to be created
+     * @param objectSize The length (in bytes) of the new object to be created
      *                   (must be greater than zero).
-     * \warning Must be called only when both IsSocketAvailable() and
+     * @warning Must be called only when both IsSocketAvailable() and
      *          IsBufferEmpty() for the given socket are true.
      */
     void WriteNewObject(Ptr<Socket> socket,
@@ -452,13 +455,13 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
      * The method also indicates the time stamp given by the client. The time
      * stamp will be included in every packet sent.
      *
-     * \param socket pointer to the socket which is associated with the
+     * @param socket pointer to the socket which is associated with the
      *               transmission buffer of interest
-     * \param eventId the event to be recorded, e.g., the return value of
+     * @param eventId the event to be recorded, e.g., the return value of
      *                Simulator::Schedule function
-     * \param clientTs client time stamp
+     * @param clientTs client time stamp
      *
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true.
      */
     void RecordNextServe(Ptr<Socket> socket, const EventId& eventId, const Time& clientTs);
@@ -472,12 +475,12 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
      * If the method has consumed all the remaining bytes within the buffer,
      * IsBufferEmpty() for the buffer shall return true.
      *
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               transmission buffer of interest.
-     * \param amount The length (in bytes) to be consumed (must be greater than
+     * @param amount The length (in bytes) to be consumed (must be greater than
      *               zero).
      *
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true. In addition, the requested amount must be larger than
      *          the current buffer size, which can be checked by calling the
      *          GetBufferSize() method.
@@ -487,9 +490,9 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
     /**
      * Tell the buffer to close the associated socket once the buffer becomes
      * empty.
-     * \param socket Pointer to the socket which is associated with the
+     * @param socket Pointer to the socket which is associated with the
      *               transmission buffer of interest.
-     * \warning Must be called only when IsSocketAvailable() for the given socket
+     * @warning Must be called only when IsSocketAvailable() for the given socket
      *          is true.
      */
     void PrepareClose(Ptr<Socket> socket);
@@ -529,7 +532,7 @@ class ThreeGppHttpServerTxBuffer : public SimpleRefCount<ThreeGppHttpServerTxBuf
          */
         bool isClosing;
         /**
-         * \brief True if the buffer content has been read since it is written.
+         * @brief True if the buffer content has been read since it is written.
          *        Accessible using the HasTxedPartOfObject() method.
          */
         bool hasTxedPartOfObject;

@@ -18,6 +18,7 @@
  *   ./ns3 run "ntn-constellation-isl-routed-traffic --duration=40"
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -304,6 +305,8 @@ main(int argc, char* argv[])
 
     Simulator::Schedule(Seconds(0.5), &Tick);
     Simulator::Stop(Seconds(duration));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
 
     // All KPIs measured from in-band header primitives at the sink.
@@ -372,6 +375,9 @@ main(int argc, char* argv[])
               << "  mean e2e delay:    " << meanDelayMs << " ms (real slant + ISL delays)\n"
               << "  delivery ratio:    " << delivery << "\n"
               << "  out-of-contact ticks: " << g_contactDrops << "\n";
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "ntn-constellation-isl-routed-traffic", "measured", argc, argv);
 
     Simulator::Destroy();
     return 0;

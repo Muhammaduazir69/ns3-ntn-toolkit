@@ -1,0 +1,23 @@
+diagram {
+   edge_length = 300;
+   Ue; Gnb; Mme; Sgw; Pgw;
+
+   === RRC connection setup (radio) ===
+   Ue ->> Gnb [label="RRC Connection Request"]
+   Ue <<- Gnb [label="RRC Connection Setup"]
+   Ue ->> Gnb [label="RRC Connection Setup Complete"]
+
+   === S1-AP initial UE message + GTP-C session creation ===
+   Gnb ->> Mme [label="S1-AP INITIAL UE MESSAGE\n(DoInitialUeMessage)"]
+   Mme ->> Sgw [label="GTP-C Create Session Request (S11)\n(one FlowContext per default + dedicated flow)"]
+   Sgw ->> Pgw [label="GTP-C Create Session Request (S5)"]
+   Sgw <<- Pgw [label="GTP-C Create Session Response (S5)\n(PGW installs QoS rules + TEIDs)"]
+   Mme <<- Sgw [label="GTP-C Create Session Response (S11)"]
+
+   === S1-AP context setup + radio bearer activation ===
+   Gnb <<- Mme [label="S1-AP INITIAL CONTEXT SETUP REQUEST\n(ErabToBeSetup list: QFI, NrQosFlow, S1-U TEID)"]
+   Gnb => Gnb [label="Data radio bearer setup\n(per E-RAB);\nUeManager ->\nCONNECTED_NORMALLY"]
+   Ue <<- Gnb [label="RRC Connection Reconfiguration\n(activate DRB / QoS flow)"]
+   Ue ->> Gnb [label="RRC Connection Reconfiguration Complete"]
+   Ue => Ue [label="NrEpcUeNas\n-> ACTIVE;\ninstall NrQosRule\nin uplink classifier"]
+}

@@ -69,7 +69,7 @@ TcpRateLinux::GenerateSample(uint32_t delivered,
      * a SACK reneging event may overestimate bw by including packets that
      * were SACKed before the reneg.
      */
-    if (m_rateSample.m_priorTime == Seconds(0) || is_sack_reneg)
+    if (m_rateSample.m_priorTime.IsZero() || is_sack_reneg)
     {
         NS_LOG_INFO("PriorTime is zero, invalidating sample");
         m_rateSample.m_delivered = -1;
@@ -144,8 +144,7 @@ TcpRateLinux::CalculateAppLimited(uint32_t cWnd,
         && in_flight < cWnd                   // We are not limited by CWND.
         && lostOut <= retransOut)             // All lost packets have been retransmitted.
     {
-        m_rate.m_appLimited = std::max<uint32_t>(m_rate.m_delivered + in_flight, 1);
-        m_rateTrace(m_rate);
+        SetAppLimited(in_flight);
     }
 
     // m_appLimited will be reset once in GenerateSample, if it has to be.
@@ -153,6 +152,13 @@ TcpRateLinux::CalculateAppLimited(uint32_t cWnd,
     //  {
     //    m_rate.m_appLimited = 0;
     //  }
+}
+
+void
+TcpRateLinux::SetAppLimited(uint32_t in_flight)
+{
+    m_rate.m_appLimited = std::max<uint32_t>(m_rate.m_delivered + in_flight, 1);
+    m_rateTrace(m_rate);
 }
 
 void

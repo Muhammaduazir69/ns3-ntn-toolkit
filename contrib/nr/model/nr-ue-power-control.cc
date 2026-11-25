@@ -6,13 +6,13 @@
 
 #include "nr-ue-phy.h"
 
-#include <ns3/boolean.h>
-#include <ns3/double.h>
-#include <ns3/enum.h>
-#include <ns3/integer.h>
-#include <ns3/log.h>
-#include <ns3/math.h>
-#include <ns3/uinteger.h>
+#include "ns3/boolean.h"
+#include "ns3/double.h"
+#include "ns3/enum.h"
+#include "ns3/integer.h"
+#include "ns3/log.h"
+#include "ns3/math.h"
+#include "ns3/uinteger.h"
 
 namespace ns3
 {
@@ -110,6 +110,13 @@ NrUePowerControl::GetTypeId()
                           IntegerValue(7),
                           MakeIntegerAccessor(&NrUePowerControl::m_PsrsOffset),
                           MakeIntegerChecker<int16_t>(0, 15))
+            .AddAttribute("P0Srs",
+                          "P0 parameter in dBm for SRS power control, used when TSpec is "
+                          "TS38.213 (TS 38.213, Section 7.3.1). Its range is the one of the "
+                          "p0 field of SRS-Config (TS 38.331)",
+                          DoubleValue(-80.0),
+                          MakeDoubleAccessor(&NrUePowerControl::SetP0Srs),
+                          MakeDoubleChecker<double>(-202.0, 24.0))
             .AddAttribute("TSpec",
                           "Technical specification TS 36.213 or TS 38.213,"
                           "By default is set TS to 36.213. To configure TS 36.213 "
@@ -782,7 +789,7 @@ NrUePowerControl::CalculateSrsTxPowerNr(std::size_t rbNum)
 
     txPower = std::min(std::max(m_Pcmin, txPower), m_Pcmax);
 
-    NS_LOG_INFO("SrsTxPower after min/max constraints: " << m_curSrsTxPower << " for cellId/rnti: "
+    NS_LOG_INFO("SrsTxPower after min/max constraints: " << txPower << " for cellId/rnti: "
                                                          << m_cellId << "," << m_rnti);
 
     return txPower;

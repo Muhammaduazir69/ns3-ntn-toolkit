@@ -10,8 +10,8 @@
 #ifndef THREE_GPP_HTTP_HEADER_H
 #define THREE_GPP_HTTP_HEADER_H
 
-#include <ns3/header.h>
-#include <ns3/nstime.h>
+#include "ns3/header.h"
+#include "ns3/nstime.h"
 
 namespace ns3
 {
@@ -19,8 +19,8 @@ namespace ns3
 class Packet;
 
 /**
- * \ingroup http
- * \brief Header used by web browsing applications to transmit information about
+ * @ingroup http
+ * @brief Header used by web browsing applications to transmit information about
  *        content type, content length and timestamps for delay statistics.
  *
  * The header contains the following fields (and their respective size when
@@ -48,7 +48,7 @@ class ThreeGppHttpHeader : public Header
 
     /**
      * Returns the object TypeId.
-     * \return The object TypeId.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId();
 
@@ -62,7 +62,7 @@ class ThreeGppHttpHeader : public Header
     void Print(std::ostream& os) const override;
 
     /**
-     * \return The string representation of the header.
+     * @return The string representation of the header.
      */
     std::string ToString() const;
 
@@ -75,52 +75,51 @@ class ThreeGppHttpHeader : public Header
     };
 
     /**
-     * \param contentType The content type.
+     * @param contentType The content type.
      */
     void SetContentType(ContentType_t contentType);
 
     /**
-     * \return The content type.
+     * @return The content type.
      */
     ContentType_t GetContentType() const;
 
     /**
-     * \param contentLength The content length (in bytes).
+     * @param contentLength The content length (in bytes).
      */
     void SetContentLength(uint32_t contentLength);
 
     /**
-     * \return The content length (in bytes).
+     * @return The content length (in bytes).
      */
     uint32_t GetContentLength() const;
 
     /**
-     * \param clientTs The client time stamp.
+     * @param clientTs The client time stamp.
      */
     void SetClientTs(Time clientTs);
 
     /**
-     * \return The client time stamp.
+     * @return The client time stamp.
      */
     Time GetClientTs() const;
 
     /**
-     * \param serverTs The server time stamp.
+     * @param serverTs The server time stamp.
      */
     void SetServerTs(Time serverTs);
 
     /**
-     * \return The server time stamp.
+     * @return The server time stamp.
      */
     Time GetServerTs() const;
 
   private:
-    uint16_t m_contentType;   //!<" Content type field in integer format.
-    uint32_t m_contentLength; //!<" Content length field (in bytes unit).
-    uint64_t m_clientTs;      //!<" Client time stamp field (in time step unit).
-    uint64_t m_serverTs;      //!<" Server time stamp field (in time step unit).
-
-}; // end of `class ThreeGppHttpHeader`
+    uint16_t m_contentType{0};   //!< Content type field in integer format.
+    uint32_t m_contentLength{0}; //!< Content length field (in bytes unit).
+    uint64_t m_clientTs{0};      //!< Client time stamp field (in time step unit).
+    uint64_t m_serverTs{0};      //!< Server time stamp field (in time step unit).
+};
 
 } // namespace ns3
 

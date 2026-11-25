@@ -1,0 +1,15 @@
+diagram {
+   edge_length = 300;
+   Gnb; Mme;
+
+   === Attach / initial context setup ===
+   Gnb ->> Mme [label="INITIAL UE MESSAGE"]
+   Gnb <<- Mme [label="INITIAL CONTEXT SETUP REQUEST\n(ErabToBeSetup list)"]
+
+   === X2 handover completion ===
+   Gnb ->> Mme [label="PATH SWITCH REQUEST"]
+   Gnb <<- Mme [label="PATH SWITCH REQUEST ACKNOWLEDGE"]
+
+   === Bearer release ===
+   Gnb ->> Mme [label="E-RAB RELEASE INDICATION"]
+}

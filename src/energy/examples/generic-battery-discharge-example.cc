@@ -6,9 +6,9 @@
  * Author: Alberto Gallegos Ramonet <alramonet@is.tokushima-u.ac.jp>
  */
 
-#include <ns3/core-module.h>
-#include <ns3/energy-module.h>
-#include <ns3/gnuplot.h>
+#include "ns3/core-module.h"
+#include "ns3/energy-module.h"
+#include "ns3/gnuplot.h"
 
 #include <fstream>
 #include <sstream>
@@ -34,9 +34,9 @@ using namespace ns3::energy;
  *
  * Plot files are produced as a result of this example.
  * Graphs can be obtained from the plot using:
- * \code{.sh}
+ * @code{.sh}
    $> gnuplot <plotname>.plt
-   \endcode
+   @endcode
  *
  */
 

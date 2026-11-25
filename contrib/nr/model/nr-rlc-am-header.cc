@@ -201,14 +201,10 @@ NrRlcAmHeader::OneMoreNackWouldFitIn(uint16_t bytes)
     NS_LOG_FUNCTION(this << bytes);
     NS_ASSERT_MSG(m_dataControlBit == CONTROL_PDU && m_controlPduType == NrRlcAmHeader::STATUS_PDU,
                   "method allowed only for STATUS PDUs");
-    if (m_nackSnList.size() % 2 == 0)
-    {
-        return (m_headerLength < bytes);
-    }
-    else
-    {
-        return (m_headerLength < (bytes - 1));
-    }
+    // A NACK is 12 bits: appending to an even-sized list grows the serialized
+    // header by 2 bytes, to an odd-sized list by 1 byte (see PushNack).
+    const uint16_t nextNackCost = (m_nackSnList.size() % 2 == 0) ? 2 : 1;
+    return (m_headerLength + nextNackCost <= bytes);
 }
 
 void
@@ -493,7 +489,7 @@ NrRlcAmHeader::Deserialize(Buffer::Iterator start)
         m_sequenceNumber = ((byte_1 & 0x03) << 8) | byte_2;
 
         m_lastSegmentFlag = (byte_3 & 0x80) >> 7;
-        m_segmentOffset = (byte_3 & 0x7F) | byte_4;
+        m_segmentOffset = ((byte_3 & 0x7F) << 8) | byte_4;
 
         extensionBit = (byte_1 & 0x04) >> 2;
         m_extensionBits.push_back(extensionBit);

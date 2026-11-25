@@ -21,7 +21,7 @@ namespace ns3
 NS_LOG_COMPONENT_DEFINE("AarfcdWifiManager");
 
 /**
- * \brief hold per-remote-station state for AARF-CD Wifi manager.
+ * @brief hold per-remote-station state for AARF-CD Wifi manager.
  *
  * This struct extends from WifiRemoteStation struct to hold additional
  * information required by the AARF-CD Wifi manager
@@ -319,9 +319,9 @@ AarfcdWifiManager::DoGetDataTxVector(WifiRemoteStation* st, MHz_u allowedWidth)
     NS_LOG_FUNCTION(this << st << allowedWidth);
     auto station = static_cast<AarfcdWifiRemoteStation*>(st);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     WifiMode mode = GetSupported(station, station->m_rate);
     uint64_t rate = mode.GetDataRate(channelWidth);
@@ -346,13 +346,13 @@ WifiTxVector
 AarfcdWifiManager::DoGetRtsTxVector(WifiRemoteStation* st)
 {
     NS_LOG_FUNCTION(this << st);
-    /// \todo we could/should implement the AARF algorithm for
+    /// @todo we could/should implement the AARF algorithm for
     /// RTS only by picking a single rate within the BasicRateSet.
     auto station = static_cast<AarfcdWifiRemoteStation*>(st);
     auto channelWidth = GetChannelWidth(station);
-    if (channelWidth > 20 && channelWidth != 22)
+    if (channelWidth > MHz_u{20} && channelWidth != MHz_u{22})
     {
-        channelWidth = 20;
+        channelWidth = MHz_u{20};
     }
     WifiMode mode;
     if (!GetUseNonErpProtection())

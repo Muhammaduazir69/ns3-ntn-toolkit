@@ -1,35 +1,89 @@
 /*Copyright (c) 2024 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC) */
 /*SPDX-License-Identifier: GPL-2.0-only*/
+
+/* 5G-LENA / CTTC branding: muted purple (#433b67) chrome with tasteful orange
+   (#f56600) links and accents, matching the Sphinx manual. Overrides
+   doxygen-awesome-css. */
 :root {
-  --primary-color: #ea7944;
+  --primary-color: #f56600;
+  --primary-dark-color: #d35a00;
+  --primary-light-color: #ff8534;
+  --primary-lighter-color: #ffd6b8;
+  --primary-lightest-color: #fff3ea;
   --header-foreground: #ffffff;
 }
 
+/* Dark mode: doxygen-awesome otherwise reverts --primary-color to blue. Keep
+   the brand orange as the accent in both the OS/media-query dark mode and the
+   toggle-based one. */
+html.dark-mode {
+  --primary-color: #f56600;
+  --primary-dark-color: #ff9a5c;
+  --primary-light-color: #b34d00;
+}
+@media (prefers-color-scheme: dark) {
+  html:not(.light-mode) {
+    --primary-color: #f56600;
+    --primary-dark-color: #ff9a5c;
+    --primary-light-color: #b34d00;
+  }
+}
+
+/* Top navigation menu bar -> muted purple */
 #main-nav
 {
-  background-color: #375C93;
+  background-color: #433b67;
 }
 
 #main-nav ul,
 {
-  background-color: #375C93;
+  background-color: #433b67;
 }
 
-#titlearea
+/* Dropdown submenus -> bright box so they contrast the purple bar */
+.sm-dox ul
 {
-  color: #000000;
+  background-color: #ffffff;
+  border: 1px solid #d8d4e6;
+  box-shadow: 0 6px 16px rgba(67, 59, 103, 0.25);
 }
-
-.sm-dox ul a
+.sm-dox ul a,
+.sm-dox ul a:visited
 {
-  background-color: #375C93;
+  background-color: #ffffff !important;
+  color: #2d2d33 !important;
+}
+.sm-dox ul a:hover,
+.sm-dox ul a:active,
+.sm-dox ul a:focus,
+.sm-dox ul a.highlighted
+{
+  background-color: #f56600 !important;
   color: #ffffff !important;
 }
 
+/* Title and brief: follow the page foreground so they stay readable in both
+   light (dark text on white) and dark (white text on dark) mode. */
+#titlearea
+{
+  color: var(--page-foreground-color);
+}
+
+/* Sidebar tree: orange hover and orange selected highlight (both modes) */
 #nav-tree .label a:hover {
-    background-color: #ea7944;
+    background-color: #f56600;
     color: #ffffff !important;
     border-radius: var(--border-radius-small) !important;
+}
+
+#nav-tree .selected {
+    background-image: none;
+    background-color: #f56600 !important;
+}
+
+#nav-tree .selected a,
+#nav-tree .selected .arrow {
+    color: #ffffff !important;
 }
 
 #nav-sync {

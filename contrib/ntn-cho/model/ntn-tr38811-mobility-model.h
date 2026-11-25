@@ -103,6 +103,11 @@ class NtnEnuProjectionMobilityModel : public MobilityModel
 {
   public:
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<NtnEnuProjectionMobilityModel>(*this);
+    }
     NtnEnuProjectionMobilityModel();
     ~NtnEnuProjectionMobilityModel() override;
 
@@ -137,6 +142,11 @@ class NtnTr38811MobilityModel : public GeocentricConstantPositionMobilityModel
 {
   public:
     static TypeId GetTypeId();
+    /// ns-3.48: copy for MobilityModel::Copy() (spectrum wraparound); keeps the dynamics.
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<NtnTr38811MobilityModel>(*this);
+    }
     NtnTr38811MobilityModel();
     ~NtnTr38811MobilityModel() override;
 

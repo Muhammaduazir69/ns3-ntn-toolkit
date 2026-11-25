@@ -29,19 +29,21 @@
  * time.
  *
  * Example usage:
- * \code{.sh}
+ * @code{.sh}
  *   ./ns3 run "wifi-power-adaptation-interference --manager=ns3::AparfWifiManager
- * --outputFileName=aparf" \endcode
+ * --outputFileName=aparf"
+ * @endcode
  *
  * Another example (changing STAs position):
- * \code{.sh}
+ * @code{.sh}
  *   ./ns3 run "wifi-power-adaptation-interference --manager=ns3::AparfWifiManager
- * --outputFileName=aparf --STA1_x=5 --STA2_x=205" \endcode
+ * --outputFileName=aparf --STA1_x=5 --STA2_x=205"
+ * @endcode
  *
  * To enable the log of rate and power changes:
- * \code{.sh}
+ * @code{.sh}
  *   export NS_LOG=PowerAdaptationInterference=level_info
- * \endcode
+ * @endcode
  */
 
 #include "ns3/command-line.h"
@@ -72,111 +74,111 @@ NS_LOG_COMPONENT_DEFINE("PowerAdaptationInterference");
 static const uint32_t packetSize = 1420;
 
 /**
- * \brief Class to collect node statistics.
+ * @brief Class to collect node statistics.
  */
 class NodeStatistics
 {
   public:
     /**
-     * \brief Constructor.
+     * @brief Constructor.
      *
-     * \param aps Access points
-     * \param stas WiFi Stations.
+     * @param aps Access points
+     * @param stas WiFi Stations.
      */
     NodeStatistics(NetDeviceContainer aps, NetDeviceContainer stas);
 
     /**
-     * \brief Collects the statistics at a given time.
+     * @brief Collects the statistics at a given time.
      *
-     * \param time Time at which the statistics are collected.
+     * @param time Time at which the statistics are collected.
      */
     void CheckStatistics(double time);
 
     /**
-     * \brief Callback called by WifiNetDevice/Phy/PhyTxBegin.
+     * @brief Callback called by WifiNetDevice/Phy/PhyTxBegin.
      *
-     * \param path The trace path.
-     * \param packet The sent packet.
-     * \param powerW The Tx power.
+     * @param path The trace path.
+     * @param packet The sent packet.
+     * @param powerW The Tx power.
      */
     void PhyCallback(std::string path, Ptr<const Packet> packet, double powerW);
     /**
-     * \brief Callback called by PacketSink/Rx.
+     * @brief Callback called by PacketSink/Rx.
      *
-     * \param path The trace path.
-     * \param packet The received packet.
-     * \param from The sender address.
+     * @param path The trace path.
+     * @param packet The received packet.
+     * @param from The sender address.
      */
     void RxCallback(std::string path, Ptr<const Packet> packet, const Address& from);
     /**
-     * \brief Callback called by WifiNetDevice/RemoteStationManager/x/PowerChange.
+     * @brief Callback called by WifiNetDevice/RemoteStationManager/x/PowerChange.
      *
-     * \param path The trace path.
-     * \param oldPower Old Tx power.
-     * \param newPower Actual Tx power.
-     * \param dest Destination of the transmission.
+     * @param path The trace path.
+     * @param oldPower Old Tx power.
+     * @param newPower Actual Tx power.
+     * @param dest Destination of the transmission.
      */
-    void PowerCallback(std::string path, double oldPower, double newPower, Mac48Address dest);
+    void PowerCallback(std::string path, dBm_u oldPower, dBm_u newPower, Mac48Address dest);
     /**
-     * \brief Callback called by WifiNetDevice/RemoteStationManager/x/RateChange.
+     * @brief Callback called by WifiNetDevice/RemoteStationManager/x/RateChange.
      *
-     * \param path The trace path.
-     * \param oldRate Old rate.
-     * \param newRate Actual rate.
-     * \param dest Destination of the transmission.
+     * @param path The trace path.
+     * @param oldRate Old rate.
+     * @param newRate Actual rate.
+     * @param dest Destination of the transmission.
      */
     void RateCallback(std::string path, DataRate oldRate, DataRate newRate, Mac48Address dest);
     /**
-     * \brief Callback called by YansWifiPhy/State/State.
+     * @brief Callback called by YansWifiPhy/State/State.
      *
-     * \param path The trace path.
-     * \param init Time when the state started.
-     * \param duration Amount of time we've been in (or will be in) the state.
-     * \param state The state.
+     * @param path The trace path.
+     * @param init Time when the state started.
+     * @param duration Amount of time we've been in (or will be in) the state.
+     * @param state The state.
      */
     void StateCallback(std::string path, Time init, Time duration, WifiPhyState state);
 
     /**
-     * \brief Get the Throughput output data
+     * @brief Get the Throughput output data
      *
-     * \return the Throughput output data.
+     * @return the Throughput output data.
      */
     Gnuplot2dDataset GetDatafile();
     /**
-     * \brief Get the Power output data.
+     * @brief Get the Power output data.
      *
-     * \return the Power output data.
+     * @return the Power output data.
      */
     Gnuplot2dDataset GetPowerDatafile();
     /**
-     * \brief Get the IDLE state output data.
+     * @brief Get the IDLE state output data.
      *
-     * \return the IDLE state output data.
+     * @return the IDLE state output data.
      */
     Gnuplot2dDataset GetIdleDatafile();
     /**
-     * \brief Get the BUSY state output data.
+     * @brief Get the BUSY state output data.
      *
-     * \return the BUSY state output data.
+     * @return the BUSY state output data.
      */
     Gnuplot2dDataset GetBusyDatafile();
     /**
-     * \brief Get the TX state output data.
+     * @brief Get the TX state output data.
      *
-     * \return the TX state output data.
+     * @return the TX state output data.
      */
     Gnuplot2dDataset GetTxDatafile();
     /**
-     * \brief Get the RX state output data.
+     * @brief Get the RX state output data.
      *
-     * \return the RX state output data.
+     * @return the RX state output data.
      */
     Gnuplot2dDataset GetRxDatafile();
 
     /**
-     * \brief Get the Busy time.
+     * @brief Get the Busy time.
      *
-     * \return the busy time.
+     * @return the busy time.
      */
     double GetBusyTime() const;
 
@@ -184,16 +186,16 @@ class NodeStatistics
     /// Time, DataRate pair vector.
     typedef std::vector<std::pair<Time, DataRate>> TxTime;
     /**
-     * \brief Setup the WifiPhy object.
+     * @brief Setup the WifiPhy object.
      *
-     * \param phy The WifiPhy to setup.
+     * @param phy The WifiPhy to setup.
      */
     void SetupPhy(Ptr<WifiPhy> phy);
     /**
-     * \brief Get the time at which a given datarate has been recorded.
+     * @brief Get the time at which a given datarate has been recorded.
      *
-     * \param rate The datarate to search.
-     * \return the time.
+     * @param rate The datarate to search.
+     * @return the time.
      */
     Time GetCalcTxTime(DataRate rate);
 
@@ -264,7 +266,7 @@ NodeStatistics::SetupPhy(Ptr<WifiPhy> phy)
         txVector.SetPreambleType(WIFI_PREAMBLE_LONG);
         txVector.SetChannelWidth(phy->GetChannelWidth());
         DataRate dataRate(mode.GetDataRate(phy->GetChannelWidth()));
-        Time time = phy->CalculateTxDuration(packetSize, txVector, phy->GetPhyBand());
+        Time time = WifiPhy::CalculateTxDuration(packetSize, txVector, phy->GetPhyBand());
         NS_LOG_DEBUG(mode.GetUniqueName() << " " << time.GetSeconds() << " " << dataRate);
         m_timeTable.emplace_back(time, dataRate);
     }
@@ -281,7 +283,7 @@ NodeStatistics::GetCalcTxTime(DataRate rate)
         }
     }
     NS_ASSERT(false);
-    return Seconds(0);
+    return Time(0);
 }
 
 void
@@ -293,16 +295,16 @@ NodeStatistics::PhyCallback(std::string path, Ptr<const Packet> packet, double p
 
     if (head.GetType() == WIFI_MAC_DATA)
     {
-        m_totalEnergy += pow(10.0, m_currentPower[dest] / 10.0) *
-                         GetCalcTxTime(m_currentRate[dest]).GetSeconds();
-        m_totalTime += GetCalcTxTime(m_currentRate[dest]).GetSeconds();
+        const auto txTimeSeconds = GetCalcTxTime(m_currentRate[dest]).GetSeconds();
+        m_totalEnergy += DbmToW(m_currentPower[dest]) * txTimeSeconds;
+        m_totalTime += txTimeSeconds;
     }
 }
 
 void
-NodeStatistics::PowerCallback(std::string path, double oldPower, double newPower, Mac48Address dest)
+NodeStatistics::PowerCallback(std::string path, dBm_u oldPower, dBm_u newPower, Mac48Address dest)
 {
-    m_currentPower[dest] = newPower;
+    m_currentPower[dest] = dBm_u{newPower};
 }
 
 void
@@ -413,10 +415,10 @@ NodeStatistics::GetBusyTime() const
 /**
  * Callback called by WifiNetDevice/RemoteStationManager/x/PowerChange.
  *
- * \param path The trace path.
- * \param oldPower Old Tx power.
- * \param newPower Actual Tx power.
- * \param dest Destination of the transmission.
+ * @param path The trace path.
+ * @param oldPower Old Tx power.
+ * @param newPower Actual Tx power.
+ * @param dest Destination of the transmission.
  */
 void
 PowerCallback(std::string path, double oldPower, double newPower, Mac48Address dest)
@@ -426,12 +428,12 @@ PowerCallback(std::string path, double oldPower, double newPower, Mac48Address d
 }
 
 /**
- * \brief Callback called by WifiNetDevice/RemoteStationManager/x/RateChange.
+ * @brief Callback called by WifiNetDevice/RemoteStationManager/x/RateChange.
  *
- * \param path The trace path.
- * \param oldRate Old rate.
- * \param newRate Actual rate.
- * \param dest Destination of the transmission.
+ * @param path The trace path.
+ * @param oldRate Old rate.
+ * @param newRate Actual rate.
+ * @param dest Destination of the transmission.
  */
 void
 RateCallback(std::string path, DataRate oldRate, DataRate newRate, Mac48Address dest)
@@ -578,8 +580,8 @@ main(int argc, char* argv[])
 
     OnOffHelper onoff("ns3::UdpSocketFactory", InetSocketAddress(sinkAddress, port));
     onoff.SetConstantRate(DataRate("54Mb/s"), packetSize);
-    onoff.SetAttribute("StartTime", TimeValue(Seconds(0.0)));
-    onoff.SetAttribute("StopTime", TimeValue(Seconds(100.0)));
+    onoff.SetAttribute("StartTime", TimeValue(Seconds(0)));
+    onoff.SetAttribute("StopTime", TimeValue(Seconds(100)));
     ApplicationContainer apps_source = onoff.Install(wifiApNodes.Get(0));
 
     PacketSinkHelper sink1("ns3::UdpSocketFactory", InetSocketAddress(sinkAddress1, port));
@@ -587,8 +589,8 @@ main(int argc, char* argv[])
 
     OnOffHelper onoff1("ns3::UdpSocketFactory", InetSocketAddress(sinkAddress1, port));
     onoff1.SetConstantRate(DataRate("54Mb/s"), packetSize);
-    onoff1.SetAttribute("StartTime", TimeValue(Seconds(0.0)));
-    onoff1.SetAttribute("StopTime", TimeValue(Seconds(100.0)));
+    onoff1.SetAttribute("StartTime", TimeValue(Seconds(0)));
+    onoff1.SetAttribute("StopTime", TimeValue(Seconds(100)));
     apps_source.Add(onoff1.Install(wifiApNodes.Get(1)));
 
     apps_sink.Start(Seconds(0.5));

@@ -44,7 +44,7 @@ NrRlcTag::GetInstanceTypeId() const
 uint32_t
 NrRlcTag::GetSerializedSize() const
 {
-    return sizeof(Time);
+    return sizeof(Time) + sizeof(uint16_t) + sizeof(uint32_t);
 }
 
 void
@@ -52,6 +52,8 @@ NrRlcTag::Serialize(TagBuffer i) const
 {
     int64_t senderTimestamp = m_senderTimestamp.GetNanoSeconds();
     i.Write((const uint8_t*)&senderTimestamp, sizeof(int64_t));
+    i.WriteU16(m_txRnti);
+    i.WriteU32(m_txEntityId);
 }
 
 void
@@ -60,12 +62,16 @@ NrRlcTag::Deserialize(TagBuffer i)
     int64_t senderTimestamp;
     i.Read((uint8_t*)&senderTimestamp, 8);
     m_senderTimestamp = NanoSeconds(senderTimestamp);
+    m_txRnti = i.ReadU16();
+    m_txEntityId = i.ReadU32();
 }
 
 void
 NrRlcTag::Print(std::ostream& os) const
 {
     os << m_senderTimestamp;
+    os << " " << m_txRnti;
+    os << " " << m_txEntityId;
 }
 
 } // namespace ns3

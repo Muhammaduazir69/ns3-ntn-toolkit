@@ -19,17 +19,17 @@ Waypoint::Waypoint(const Time& waypointTime, const Vector& waypointPosition)
 }
 
 Waypoint::Waypoint()
-    : time(Seconds(0.0)),
+    : time(),
       position(0, 0, 0)
 {
 }
 
 /**
- * \brief Stream insertion operator.
+ * @brief Stream insertion operator.
  *
- * \param os the stream
- * \param waypoint the waypoint
- * \returns a reference to the stream
+ * @param os the stream
+ * @param waypoint the waypoint
+ * @returns a reference to the stream
  */
 std::ostream&
 operator<<(std::ostream& os, const Waypoint& waypoint)
@@ -39,11 +39,11 @@ operator<<(std::ostream& os, const Waypoint& waypoint)
 }
 
 /**
- * \brief Stream extraction operator.
+ * @brief Stream extraction operator.
  *
- * \param is the stream
- * \param waypoint the waypoint
- * \returns a reference to the stream
+ * @param is the stream
+ * @param waypoint the waypoint
+ * @returns a reference to the stream
  */
 std::istream&
 operator>>(std::istream& is, Waypoint& waypoint)

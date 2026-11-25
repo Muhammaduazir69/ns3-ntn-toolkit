@@ -67,7 +67,7 @@ std::stringstream filePlotQueueAvg; //!< Output file name for queue average.
 /**
  * Check the queue size and write its stats to the output files.
  *
- * \param queue The queue to check.
+ * @param queue The queue to check.
  */
 void
 CheckQueueSize(Ptr<QueueDisc> queue)
@@ -92,7 +92,7 @@ CheckQueueSize(Ptr<QueueDisc> queue)
 /**
  * Setup the apps.
  *
- * \param test The test number.
+ * @param test The test number.
  */
 void
 BuildAppsTest(uint32_t test)
@@ -140,7 +140,7 @@ BuildAppsTest(uint32_t test)
         ApplicationContainer clientApps2;
         clientHelper2.SetAttribute("Remote", remoteAddress);
         clientApps2.Add(clientHelper2.Install(n1n2.Get(0)));
-        clientApps2.Start(Seconds(3.0));
+        clientApps2.Start(Seconds(3));
         clientApps2.Stop(Seconds(client_stop_time));
     }
     else // 4 or 5
@@ -208,7 +208,7 @@ BuildAppsTest(uint32_t test)
         AddressValue remoteAddress2(InetSocketAddress(i3i5.GetAddress(1), port2));
         clientHelper2.SetAttribute("Remote", remoteAddress2);
         clientApps2.Add(clientHelper2.Install(n1n2.Get(0)));
-        clientApps2.Start(Seconds(2.0));
+        clientApps2.Start(Seconds(2));
         clientApps2.Stop(Seconds(client_stop_time));
 
         // Connection #3
@@ -240,7 +240,7 @@ BuildAppsTest(uint32_t test)
         AddressValue remoteAddress4(InetSocketAddress(i1i2.GetAddress(0), port4));
         clientHelper4.SetAttribute("Remote", remoteAddress4);
         clientApps4.Add(clientHelper4.Install(n3n5.Get(1)));
-        clientApps4.Start(Seconds(1.0));
+        clientApps4.Start(Seconds(1));
         clientApps4.Stop(Seconds(client_stop_time));
     }
 }
@@ -432,10 +432,8 @@ main(int argc, char* argv[])
 
     if (writeForPlot)
     {
-        filePlotQueue << pathOut << "/"
-                      << "red-queue.plotme";
-        filePlotQueueAvg << pathOut << "/"
-                         << "red-queue_avg.plotme";
+        filePlotQueue << pathOut << "/red-queue.plotme";
+        filePlotQueueAvg << pathOut << "/red-queue_avg.plotme";
 
         remove(filePlotQueue.str().c_str());
         remove(filePlotQueueAvg.str().c_str());

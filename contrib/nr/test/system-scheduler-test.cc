@@ -2,18 +2,32 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/**
+ * @ingroup test
+ * @file system-scheduler-test.cc
+ *
+ * @brief Implementation of SystemSchedulerTest, the base system test case used by the
+ * nr-system-test-schedulers-* suites. It deploys one gNB and a configurable number of UEs per
+ * beam placed along up to four beam directions, with cell-scan beamforming, fixed MCS 28, and the
+ * scheduler type, numerology and bandwidth given by the constructor; per-UE 320 kbps UDP flows
+ * run in downlink and/or uplink for 400 ms. The test asserts that the aggregated received DL+UL
+ * throughput matches the offered rate within 5% and that every UE application achieved non-zero
+ * throughput, i.e. that the scheduler under test served all users in the requested directions.
+ */
+
 #include "system-scheduler-test.h"
 
-#include <ns3/antenna-module.h>
-#include <ns3/applications-module.h>
-#include <ns3/config.h>
-#include <ns3/internet-module.h>
-#include <ns3/nr-module.h>
-#include <ns3/packet.h>
-#include <ns3/point-to-point-helper.h>
-#include <ns3/pointer.h>
-#include <ns3/simulator.h>
-#include <ns3/uinteger.h>
+#include "ns3/antenna-module.h"
+#include "ns3/applications-module.h"
+#include "ns3/config.h"
+#include "ns3/internet-module.h"
+#include "ns3/nr-module.h"
+#include "ns3/packet.h"
+#include "ns3/point-to-point-helper.h"
+#include "ns3/pointer.h"
+#include "ns3/rng-seed-manager.h"
+#include "ns3/simulator.h"
+#include "ns3/uinteger.h"
 
 namespace ns3
 {
@@ -25,6 +39,35 @@ SystemSchedulerTest::CountPkts([[maybe_unused]] Ptr<const Packet> pkt)
     if (m_packets == m_limit)
     {
         Simulator::Stop();
+    }
+}
+
+void
+SystemSchedulerTest::CountDlRx([[maybe_unused]] Ptr<const Packet> pkt)
+{
+    Ipv4Header ipv4Header;
+    if (pkt->PeekHeader(ipv4Header))
+    {
+        // Increment the count for this address, starting at 0 if it doesn't exist
+        m_dlServerAppAddresses[ipv4Header.GetDestination()]++;
+    }
+    else
+    {
+        NS_ABORT_MSG("Ipv6 isn't supported in this test currently.");
+    }
+}
+
+void
+SystemSchedulerTest::CountUlRx([[maybe_unused]] Ptr<const Packet> pkt)
+{
+    Ipv4Header ipv4Header;
+    if (pkt->PeekHeader(ipv4Header))
+    {
+        m_ulServerAppAddresses[ipv4Header.GetSource()]++;
+    }
+    else
+    {
+        NS_ABORT_MSG("Ipv6 isn't supported in this test currently.");
     }
 }
 
@@ -74,7 +117,6 @@ SystemSchedulerTest::DoRun()
 
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
     Config::SetDefault("ns3::NrRlcUm::ReorderingTimer", TimeValue(Seconds(1)));
-    Config::SetDefault("ns3::NrEpsBearer::Release", UintegerValue(15));
 
     Config::SetDefault(
         "ns3::NrUePhy::EnableUplinkPowerControl",
@@ -149,12 +191,16 @@ SystemSchedulerTest::DoRun()
     Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper>();
     idealBeamformingHelper->SetAttribute("BeamformingMethod",
                                          TypeIdValue(CellScanBeamforming::GetTypeId()));
-    idealBeamformingHelper->SetBeamformingAlgorithmAttribute("BeamSearchAngleStep",
-                                                             DoubleValue(10.0));
 
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
     nrHelper->SetBeamformingHelper(idealBeamformingHelper);
 
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    // Set the spectrum channel
+    channelHelper->ConfigureFactories("UMi", "LOS");
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    // Shadowing
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     // set the number of antenna elements of UE
     nrHelper->SetUeAntennaAttribute("NumRows", UintegerValue(2));
     nrHelper->SetUeAntennaAttribute("NumColumns", UintegerValue(4));
@@ -199,53 +245,26 @@ SystemSchedulerTest::DoRun()
     double centralFrequency = 28e9;
     double bandwidth = m_bw1;
     const uint8_t numCcPerBand = 1;
-    BandwidthPartInfo::Scenario scenario = BandwidthPartInfo::UMi_StreetCanyon_LoS;
-    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency,
-                                                   bandwidth,
-                                                   numCcPerBand,
-                                                   scenario);
+    CcBwpCreator::SimpleOperationBandConf bandConf(centralFrequency, bandwidth, numCcPerBand);
 
     // By using the configuration created, it is time to make the operation bands
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
-
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-
-    // Shadowing
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-
-    /*
-     * Initialize channel and pathloss, plus other things inside band1. If needed,
-     * the band configuration can be done manually, but we leave it for more
-     * sophisticated examples. For the moment, this method will take care
-     * of all the spectrum initialization needs.
-     */
-    nrHelper->InitializeOperationBand(&band);
+    // Set and create the channel for the band
+    channelHelper->AssignChannelsToBands({band});
     allBwps = CcBwpCreator::GetAllBwps({band});
 
     uint32_t bwpIdForLowLat = 0;
-    // gNb routing between Bearer and bandwidh part
+    // gNb routing between QoS flow and bandwidh part
     nrHelper->SetGnbBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB",
                                                  UintegerValue(bwpIdForLowLat));
-    // UE routing between Bearer and bandwidh part
+    // UE routing between QoS flow and bandwidh part
     nrHelper->SetUeBwpManagerAlgorithmAttribute("NGBR_LOW_LAT_EMBB", UintegerValue(bwpIdForLowLat));
 
     // install mmWave net devices
     NetDeviceContainer gNbNetDevs = nrHelper->InstallGnbDevice(gNbNodes, allBwps);
     NetDeviceContainer ueNetDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    int64_t randomStream = 1;
-    randomStream += nrHelper->AssignStreams(gNbNetDevs, randomStream);
-    randomStream += nrHelper->AssignStreams(ueNetDevs, randomStream);
-
-    for (auto it = gNbNetDevs.Begin(); it != gNbNetDevs.End(); ++it)
-    {
-        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
-    }
-
-    for (auto it = ueNetDevs.Begin(); it != ueNetDevs.End(); ++it)
-    {
-        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
-    }
+    nrHelper->AssignStreams({.gnbDevs = gNbNetDevs, .ueDevs = ueNetDevs});
 
     // create the internet and install the IP stack on the UEs
     // get SGW/PGW and create a single RemoteHost
@@ -274,14 +293,6 @@ SystemSchedulerTest::DoRun()
     internet.Install(ueNodes);
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = nrEpcHelper->AssignUeIpv4Address(NetDeviceContainer(ueNetDevs));
-
-    // Set the default gateway for the UEs
-    for (uint32_t j = 0; j < ueNodes.GetN(); ++j)
-    {
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(j)->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(nrEpcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // attach UEs to the closest gNB
     nrHelper->AttachToClosestGnb(ueNetDevs, gNbNetDevs);
@@ -314,15 +325,15 @@ SystemSchedulerTest::DoRun()
                                          // short time, how much traffic can handle each BWP
             clientAppsUl.Add(ulClient.Install(ueNodes.Get(j)));
 
-            Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-            NrEpcTft::PacketFilter ulpf;
+            Ptr<NrQosRule> tft = Create<NrQosRule>();
+            NrQosRule::PacketFilter ulpf;
             ulpf.remotePortStart = ulPort;
             ulpf.remotePortEnd = ulPort;
-            ulpf.direction = NrEpcTft::UPLINK;
+            ulpf.direction = NrQosRule::UPLINK;
             tft->Add(ulpf);
 
-            NrEpsBearer bearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
-            nrHelper->ActivateDedicatedEpsBearer(ueNetDevs.Get(j), bearer, tft);
+            NrQosFlow flow(NrQosFlow::NGBR_LOW_LAT_EMBB);
+            nrHelper->ActivateDedicatedQosFlow(ueNetDevs.Get(j), flow, tft);
         }
 
         serverAppsUl.Start(udpAppStartTimeUl);
@@ -348,15 +359,15 @@ SystemSchedulerTest::DoRun()
                                          // short time, how much traffic can handle each BWP
             clientAppsDl.Add(dlClient.Install(remoteHost));
 
-            Ptr<NrEpcTft> tft = Create<NrEpcTft>();
-            NrEpcTft::PacketFilter dlpf;
+            Ptr<NrQosRule> tft = Create<NrQosRule>();
+            NrQosRule::PacketFilter dlpf;
             dlpf.localPortStart = dlPort;
             dlpf.localPortEnd = dlPort;
-            dlpf.direction = NrEpcTft::DOWNLINK;
+            dlpf.direction = NrQosRule::DOWNLINK;
             tft->Add(dlpf);
 
-            NrEpsBearer bearer(NrEpsBearer::NGBR_LOW_LAT_EMBB);
-            nrHelper->ActivateDedicatedEpsBearer(ueNetDevs.Get(j), bearer, tft);
+            NrQosFlow flow(NrQosFlow::NGBR_LOW_LAT_EMBB);
+            nrHelper->ActivateDedicatedQosFlow(ueNetDevs.Get(j), flow, tft);
         }
         // start UDP server and client apps
         serverAppsDl.Start(udpAppStartTimeDl);
@@ -369,17 +380,35 @@ SystemSchedulerTest::DoRun()
 
     for (auto it = serverAppsDl.Begin(); it != serverAppsDl.End(); ++it)
     {
-        (*it)->TraceConnectWithoutContext("Rx",
+        (*it)->TraceConnectWithoutContext("RxWithoutAddress",
                                           MakeCallback(&SystemSchedulerTest::CountPkts, this));
     }
 
     for (auto it = serverAppsUl.Begin(); it != serverAppsUl.End(); ++it)
     {
-        (*it)->TraceConnectWithoutContext("Rx",
+        (*it)->TraceConnectWithoutContext("RxWithoutAddress",
                                           MakeCallback(&SystemSchedulerTest::CountPkts, this));
     }
 
+    for (auto it = gNbNetDevs.Begin(); it != gNbNetDevs.End(); ++it)
+    {
+        (*it)->TraceConnectWithoutContext("Rx",
+                                          MakeCallback(&SystemSchedulerTest::CountUlRx, this));
+    }
+
+    for (auto it = ueNetDevs.Begin(); it != ueNetDevs.End(); ++it)
+    {
+        (*it)->TraceConnectWithoutContext("Rx",
+                                          MakeCallback(&SystemSchedulerTest::CountDlRx, this));
+    }
+
     // nrHelper->EnableTraces();
+
+    RngSeedManager::SetSeed(1);
+    RngSeedManager::SetRun(1);
+    nrHelper->AssignStreams(
+        {.assignEpc = true, .remoteHostNodes = remoteHostContainer, .ueNodes = ueNodes});
+
     Simulator::Stop(simTime);
     Simulator::Run();
 
@@ -411,6 +440,10 @@ SystemSchedulerTest::DoRun()
                               expectedBitRate,
                               expectedBitRate * 0.05,
                               "Wrong total DL + UL throughput");
+
+    NS_TEST_ASSERT_MSG_EQ(ueNodes.GetN() * (m_isDownlink + m_isUplink),
+                          m_dlServerAppAddresses.size() + m_ulServerAppAddresses.size(),
+                          "Not all applications achieved non zero throughput");
 
     Simulator::Destroy();
 }

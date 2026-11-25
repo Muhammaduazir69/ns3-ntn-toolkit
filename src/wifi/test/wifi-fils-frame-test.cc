@@ -39,9 +39,9 @@
 
 using namespace ns3;
 
-/// \ingroup wifi-test
-/// \ingroup tests
-/// \brief Fast Initial Link Setup (FILS) frame Test Suite
+/// @ingroup wifi-test
+/// @ingroup tests
+/// @brief Fast Initial Link Setup (FILS) frame Test Suite
 /// Test suite intended to test (de)serialization and timing
 /// of frames associated with FILS procedure.
 /// The test creates a BSS consisting of an AP and client and
@@ -70,11 +70,13 @@ static const auto DEFAULT_OUTDIR = ".";
 static const auto DEFAULT_ENABLE_PCAP = false;
 static const auto DEFAULT_AP_LOC = Vector(0.01, 0, 0);
 static const auto DEFAULT_CLIENT_LOC = Vector(0, 0, 0);
-static const uint8_t WIFI_6GHZ_FD_PHY_IDX = 4;
+static const uint8_t WIFI_11AX_FD_PHY_IDX = 4;
+static const uint8_t WIFI_11BE_FD_PHY_IDX = 5;
 
 /// @brief  Wi-Fi FILS frame test parameters
 struct WifiFilsFrameTestParams
 {
+    WifiStandard standard{DEFAULT_STANDARD};            ///< Standard
     MHz_u bw{DEFAULT_BANDWIDTH};                        ///< Operation bandwidth
     std::string ssid{DEFAULT_SSID};                     ///< SSID name
     uint8_t nss{0};                                     ///< Number of spatial streams
@@ -175,10 +177,7 @@ WifiFilsFrameTest::SetupDevice(Ptr<YansWifiChannel>& channel, bool isAp)
     MobilityHelper mobility;
     node.Create(1);
     phy.SetChannel(channel);
-    AttributeContainerValue<
-        TupleValue<UintegerValue, UintegerValue, EnumValue<WifiPhyBand>, UintegerValue>,
-        ';'>
-        channelValue;
+    WifiPhy::ChannelSettingsValue channelValue;
     channelValue.Set(WifiPhy::ChannelSegments{
         {INVALID_CHAN_NUM, m_params.bw, DEFAULT_BAND, DEFAULT_PRIMARY_INDEX}});
     phy.Set("ChannelSettings", channelValue);
@@ -186,7 +185,7 @@ WifiFilsFrameTest::SetupDevice(Ptr<YansWifiChannel>& channel, bool isAp)
     phy.Set("MaxSupportedTxSpatialStreams", UintegerValue(m_params.nss));
     phy.Set("MaxSupportedRxSpatialStreams", UintegerValue(m_params.nss));
 
-    wifi.SetStandard(DEFAULT_STANDARD);
+    wifi.SetStandard(m_params.standard);
     wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager");
 
     if (isAp)
@@ -341,7 +340,9 @@ WifiFilsFrameTest::ValidateFilsDiscFrame(const FilsDiscHeader& filsDisc)
                           +m_params.expNssFld,
                           "FILS Discovery frame NSS mismatch");
     NS_TEST_ASSERT_MSG_EQ(+filsDisc.m_fdCap->m_phyIdx,
-                          +WIFI_6GHZ_FD_PHY_IDX,
+                          ((m_params.standard == WifiStandard::WIFI_STANDARD_80211be)
+                               ? +WIFI_11BE_FD_PHY_IDX
+                               : +WIFI_11AX_FD_PHY_IDX),
                           "FILS Discovery frame PHY idx mismatch");
 }
 
@@ -373,6 +374,7 @@ enum class WifiFilsFrameTestCase : uint8_t
     BW80MHZ_NSS2_DISC,
     BW160MHZ_NSS2_DISC,
     BW160MHZ_NSS2_PROBE,
+    BW320MHZ_NSS3_DISC,
     COUNT,
 };
 
@@ -383,14 +385,14 @@ WifiFilsFrameTestBuildCase(const WifiFilsFrameTestCase& tc)
     switch (tc)
     {
     case WifiFilsFrameTestCase::BW20MHZ_NSS1_DISC:
-        params.bw = 20;
+        params.bw = MHz_u{20};
         params.ssid = DEFAULT_SSID;
         params.nss = 1;
         params.expChWidFld = 0;
         params.expNssFld = 0;
         break;
     case WifiFilsFrameTestCase::BW20MHZ_NSS3_DISC:
-        params.bw = 20;
+        params.bw = MHz_u{20};
         params.ssid = "BW20MHZ_NSS3";
         params.nss = 3;
         params.filsIntrvl = 15 * WIFI_TU;
@@ -398,7 +400,7 @@ WifiFilsFrameTestBuildCase(const WifiFilsFrameTestCase& tc)
         params.expNssFld = 2;
         break;
     case WifiFilsFrameTestCase::BW40MHZ_NSS2_DISC:
-        params.bw = 40;
+        params.bw = MHz_u{40};
         params.ssid = "BW40MHZ_NSS2";
         params.nss = 2;
         params.filsIntrvl = 10 * WIFI_TU;
@@ -406,7 +408,7 @@ WifiFilsFrameTestBuildCase(const WifiFilsFrameTestCase& tc)
         params.expNssFld = 1;
         break;
     case WifiFilsFrameTestCase::BW80MHZ_NSS2_DISC:
-        params.bw = 80;
+        params.bw = MHz_u{80};
         params.ssid = "BW80MHZ_NSS2";
         params.nss = 2;
         params.filsIntrvl = 7 * WIFI_TU;
@@ -414,7 +416,7 @@ WifiFilsFrameTestBuildCase(const WifiFilsFrameTestCase& tc)
         params.expNssFld = 1;
         break;
     case WifiFilsFrameTestCase::BW160MHZ_NSS2_DISC:
-        params.bw = 160;
+        params.bw = MHz_u{160};
         params.ssid = "BW160MHZ_NSS2";
         params.nss = 2;
         params.filsIntrvl = 5 * WIFI_TU;
@@ -422,12 +424,21 @@ WifiFilsFrameTestBuildCase(const WifiFilsFrameTestCase& tc)
         params.expNssFld = 1;
         break;
     case WifiFilsFrameTestCase::BW160MHZ_NSS2_PROBE:
-        params.bw = 160;
+        params.bw = MHz_u{160};
         params.ssid = "BW160MHZ_NSS2";
         params.nss = 2;
         params.unsolProbeRespEn = true;
         params.expChWidFld = 3;
         params.expNssFld = 1;
+        break;
+    case WifiFilsFrameTestCase::BW320MHZ_NSS3_DISC:
+        params.standard = WifiStandard::WIFI_STANDARD_80211be;
+        params.bw = MHz_u{320};
+        params.ssid = "BW320MHZ_NSS3";
+        params.nss = 3;
+        params.filsIntrvl = 20 * WIFI_TU;
+        params.expChWidFld = 4;
+        params.expNssFld = 2;
         break;
     default:
         NS_ABORT_MSG("Testcase is unsupported");
@@ -436,9 +447,9 @@ WifiFilsFrameTestBuildCase(const WifiFilsFrameTestCase& tc)
     return params;
 }
 
-/// \ingroup wifi-test
-/// \ingroup tests
-/// \brief WiFi FILS frame Test Suite
+/// @ingroup wifi-test
+/// @ingroup tests
+/// @brief WiFi FILS frame Test Suite
 class WifiFilsFrameTestSuite : public TestSuite
 {
   public:
@@ -455,6 +466,7 @@ WifiFilsFrameTestSuite::WifiFilsFrameTestSuite()
         {WifiFilsFrameTestBuildCase(WifiFilsFrameTestCase::BW80MHZ_NSS2_DISC)},
         {WifiFilsFrameTestBuildCase(WifiFilsFrameTestCase::BW160MHZ_NSS2_DISC)},
         {WifiFilsFrameTestBuildCase(WifiFilsFrameTestCase::BW160MHZ_NSS2_PROBE)},
+        {WifiFilsFrameTestBuildCase(WifiFilsFrameTestCase::BW320MHZ_NSS3_DISC)},
     };
     for (const auto& tc : testCases)
     {

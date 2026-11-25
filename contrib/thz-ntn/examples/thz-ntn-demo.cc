@@ -23,6 +23,7 @@
 
 #include "thz-ntn-pass-kit.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/command-line.h>
 #include <ns3/constant-position-mobility-model.h>
 #include <ns3/constant-velocity-mobility-model.h>
@@ -647,7 +648,15 @@ main(int argc, char* argv[])
         pc.argv = argv;
         pc.link.freqHz = companionFreqGhz * 1e9;
         pc.link.bandwidthHz = 1e9;
-        thzkit::RunPass(pc);
+        // Globe scene of the measured pass (SGP4 satellite and the TR 38.811
+        // terminal), next to the run record.
+        thzkit::RunPass(pc,
+                        [](Ptr<thzntn::ThzNtnPacketLink>, Ptr<MobilityModel>, Ptr<MobilityModel>) {
+                            ns3::ntnobs::StartSceneFromNodeList(".");
+                        });
     }
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "thz-ntn-demo", "analytic", argc, argv);
     return 0;
 }

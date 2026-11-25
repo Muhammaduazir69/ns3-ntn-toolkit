@@ -30,9 +30,9 @@ NS_LOG_COMPONENT_DEFINE("Node");
 NS_OBJECT_ENSURE_REGISTERED(Node);
 
 /**
- * \relates Node
- * \anchor GlobalValueChecksumEnabled
- * \brief A global switch to enable all checksums for all protocols.
+ * @relates Node
+ * @anchor GlobalValueChecksumEnabled
+ * @brief A global switch to enable all checksums for all protocols.
  */
 static GlobalValue g_checksumEnabled =
     GlobalValue("ChecksumEnabled",
@@ -129,7 +129,7 @@ Node::AddDevice(Ptr<NetDevice> device)
     device->SetNode(this);
     device->SetIfIndex(index);
     device->SetReceiveCallback(MakeCallback(&Node::NonPromiscReceiveFromDevice, this));
-    Simulator::ScheduleWithContext(GetId(), Seconds(0.0), &NetDevice::Initialize, device);
+    Simulator::ScheduleWithContext(GetId(), Seconds(0), &NetDevice::Initialize, device);
     NotifyDeviceAdded(device);
     return index;
 }
@@ -156,7 +156,7 @@ Node::AddApplication(Ptr<Application> application)
     uint32_t index = m_applications.size();
     m_applications.push_back(application);
     application->SetNode(this);
-    Simulator::ScheduleWithContext(GetId(), Seconds(0.0), &Application::Initialize, application);
+    Simulator::ScheduleWithContext(GetId(), Seconds(0), &Application::Initialize, application);
     return index;
 }
 

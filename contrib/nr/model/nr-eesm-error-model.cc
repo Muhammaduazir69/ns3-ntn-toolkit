@@ -21,7 +21,7 @@ NS_LOG_COMPONENT_DEFINE("NrEesmErrorModel");
 NS_OBJECT_ENSURE_REGISTERED(NrEesmErrorModel);
 
 /**
- * \brief Table of Lifting Sizes for LDPC
+ * @brief Table of Lifting Sizes for LDPC
  */
 static const std::vector<uint16_t> LiftingSizeTableBG = {
     2,  3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  16,  18,  20,
@@ -46,12 +46,6 @@ NrEesmErrorModel::GetTypeId()
 {
     static TypeId tid = TypeId("ns3::NrEesmErrorModel").SetParent<NrErrorModel>();
     return tid;
-}
-
-TypeId
-NrEesmErrorModel::GetInstanceTypeId() const
-{
-    return NrEesmErrorModel::GetTypeId();
 }
 
 double

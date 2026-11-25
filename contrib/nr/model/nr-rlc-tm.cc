@@ -37,10 +37,17 @@ NrRlcTm::GetTypeId()
                             .SetGroupName("Nr")
                             .AddConstructor<NrRlcTm>()
                             .AddAttribute("MaxTxBufferSize",
-                                          "Maximum Size of the Transmission Buffer (in Bytes)",
+                                          "Maximum Size of the Transmission Buffer (in Bytes). "
+                                          "If set to 0, the buffer is unlimited.",
                                           UintegerValue(2 * 1024 * 1024),
                                           MakeUintegerAccessor(&NrRlcTm::m_maxTxBufferSize),
-                                          MakeUintegerChecker<uint32_t>());
+                                          MakeUintegerChecker<uint32_t>())
+                            .AddAttribute("BufferStatusReportTimer",
+                                          "How much to wait to issue a new Buffer Status Report "
+                                          "while the transmission buffer is not empty",
+                                          TimeValue(MilliSeconds(10)),
+                                          MakeTimeAccessor(&NrRlcTm::m_bsrTimerValue),
+                                          MakeTimeChecker());
     return tid;
 }
 
@@ -48,7 +55,7 @@ void
 NrRlcTm::DoDispose()
 {
     NS_LOG_FUNCTION(this);
-    m_rbsTimer.Cancel();
+    m_bsrTimer.Cancel();
     m_txBuffer.clear();
 
     NrRlc::DoDispose();
@@ -63,7 +70,7 @@ NrRlcTm::DoTransmitPdcpPdu(Ptr<Packet> p)
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << p->GetSize());
 
-    if (m_txBufferSize + p->GetSize() <= m_maxTxBufferSize)
+    if ((m_txBufferSize + p->GetSize() <= m_maxTxBufferSize) || (m_maxTxBufferSize == 0))
     {
         NS_LOG_LOGIC("Tx Buffer: New packet added");
         m_txBuffer.emplace_back(p, Simulator::Now());
@@ -78,11 +85,15 @@ NrRlcTm::DoTransmitPdcpPdu(Ptr<Packet> p)
         NS_LOG_LOGIC("MaxTxBufferSize = " << m_maxTxBufferSize);
         NS_LOG_LOGIC("txBufferSize    = " << m_txBufferSize);
         NS_LOG_LOGIC("packet size     = " << p->GetSize());
+        m_txDropTrace(p);
     }
 
-    /** Report Buffer Status */
-    DoReportBufferStatus();
-    m_rbsTimer.Cancel();
+    /** Transmit Buffer Status Report */
+    // A running report timer is left alone: new data arriving is what triggers a buffer status
+    // report (3GPP TS 38.321, clause 5.4.5), never a reason to stop reporting. Cancelling it here
+    // used to strand the uplink, as the timer is only armed again by a transmission opportunity:
+    // once the uplink stalled, the last cancellation was final and the buffer status went stale.
+    DoTransmitBufferStatusReport();
 }
 
 /**
@@ -121,7 +132,7 @@ NrRlcTm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
     m_txPdu(m_rnti, m_lcid, packet->GetSize());
 
     // Send RLC PDU to MAC layer
-    NrMacSapProvider::TransmitPduParameters params;
+    NrMacSapProvider::TransmitPduParameters params{};
     params.pdu = packet;
     params.rnti = m_rnti;
     params.lcid = m_lcid;
@@ -131,11 +142,7 @@ NrRlcTm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
 
     m_macSapProvider->TransmitPdu(params);
 
-    if (!m_txBuffer.empty())
-    {
-        m_rbsTimer.Cancel();
-        m_rbsTimer = Simulator::Schedule(MilliSeconds(10), &NrRlcTm::ExpireRbsTimer, this);
-    }
+    RestartBsrTimer();
 }
 
 void
@@ -160,7 +167,7 @@ NrRlcTm::DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams)
 }
 
 void
-NrRlcTm::DoReportBufferStatus()
+NrRlcTm::DoTransmitBufferStatusReport()
 {
     Time holDelay(0);
     uint32_t queueSize = 0;
@@ -172,7 +179,7 @@ NrRlcTm::DoReportBufferStatus()
         queueSize = m_txBufferSize; // just data in tx queue (no header overhead for RLC TM)
     }
 
-    NrMacSapProvider::ReportBufferStatusParameters r;
+    NrMacSapProvider::BufferStatusReportParameters r{};
     r.rnti = m_rnti;
     r.lcid = m_lcid;
     r.txQueueSize = queueSize;
@@ -181,19 +188,32 @@ NrRlcTm::DoReportBufferStatus()
     r.retxQueueHolDelay = 0;
     r.statusPduSize = 0;
 
-    NS_LOG_LOGIC("Send ReportBufferStatus = " << r.txQueueSize << ", " << r.txQueueHolDelay);
-    m_macSapProvider->ReportBufferStatus(r);
+    NS_LOG_LOGIC("Send BufferStatusReport = " << r.txQueueSize << ", " << r.txQueueHolDelay);
+    m_macSapProvider->BufferStatusReport(r);
 }
 
 void
-NrRlcTm::ExpireRbsTimer()
+NrRlcTm::ExpireBsrTimer()
 {
-    NS_LOG_LOGIC("RBS Timer expires");
+    NS_LOG_LOGIC("BSR Timer expires");
 
     if (!m_txBuffer.empty())
     {
-        DoReportBufferStatus();
-        m_rbsTimer = Simulator::Schedule(MilliSeconds(10), &NrRlcTm::ExpireRbsTimer, this);
+        DoTransmitBufferStatusReport();
+        RestartBsrTimer();
+    }
+}
+
+void
+NrRlcTm::RestartBsrTimer()
+{
+    NS_LOG_FUNCTION(this);
+
+    m_bsrTimer.Cancel();
+
+    if (!m_txBuffer.empty())
+    {
+        m_bsrTimer = Simulator::Schedule(m_bsrTimerValue, &NrRlcTm::ExpireBsrTimer, this);
     }
 }
 

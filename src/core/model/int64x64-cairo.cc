@@ -1,3 +1,4 @@
+// NOLINTBEGIN
 /*
  * Copyright (c) 2006 INRIA
  *
@@ -24,8 +25,8 @@ extern "C"
 }
 
 /**
- * \file
- * \ingroup highprec
+ * @file
+ * @ingroup highprec
  * Implementation of the ns3::int64x64_t type using the Cairo implementation.
  */
 
@@ -38,15 +39,15 @@ namespace ns3
 NS_LOG_COMPONENT_DEFINE("int64x64-cairo");
 
 /**
- * \ingroup highprec
+ * @ingroup highprec
  * Compute the sign of the result of multiplying or dividing
  * Q64.64 fixed precision operands.
  *
- * \param [in]  sa The signed value of the first operand.
- * \param [in]  sb The signed value of the second operand.
- * \param [out] ua The unsigned magnitude of the first operand.
- * \param [out] ub The unsigned magnitude of the second operand.
- * \returns True if the result will be negative.
+ * @param [in]  sa The signed value of the first operand.
+ * @param [in]  sb The signed value of the second operand.
+ * @param [out] ua The unsigned magnitude of the first operand.
+ * @param [out] ub The unsigned magnitude of the second operand.
+ * @returns True if the result will be negative.
  */
 static inline bool
 output_sign(const cairo_int128_t sa,
@@ -127,7 +128,7 @@ int64x64_t::Udiv(const cairo_uint128_t a, const cairo_uint128_t b)
 
     // Now, manage the remainder
     const uint64_t DIGITS = 64; // Number of fraction digits (bits) we need
-    const cairo_uint128_t ZERO = _cairo_uint32_to_uint128((uint32_t)0);
+    const cairo_uint128_t ZERO = _cairo_uint32_to_uint128(0U);
 
     NS_ASSERT_MSG(_cairo_uint128_lt(rem, den), "Remainder not less than divisor");
 
@@ -228,3 +229,4 @@ int64x64_t::Invert(const uint64_t v)
 } // namespace ns3
 
 #endif /* INT64X64_CAIRO_H */
+// NOLINTEND

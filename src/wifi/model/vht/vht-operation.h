@@ -9,19 +9,20 @@
 #ifndef VHT_OPERATION_H
 #define VHT_OPERATION_H
 
+#include "ns3/wifi-export.h"
 #include "ns3/wifi-information-element.h"
 
 namespace ns3
 {
 
 /**
- * \brief The VHT Operation Information Element
- * \ingroup wifi
+ * @brief The VHT Operation Information Element
+ * @ingroup wifi
  *
- * This class knows how to serialise and deserialise
+ * This class knows how to serialize and deserialize
  * the VHT Operation Information Element
  */
-class VhtOperation : public WifiInformationElement
+class WIFI_EXPORT VhtOperation : public WifiInformationElement
 {
   public:
     VhtOperation();
@@ -33,27 +34,27 @@ class VhtOperation : public WifiInformationElement
     /**
      * Set the Channel Width field in the VHT Operation information element.
      *
-     * \param channelWidth the Channel Width field in the VHT Operation information element
+     * @param channelWidth the Channel Width field in the VHT Operation information element
      */
     void SetChannelWidth(uint8_t channelWidth);
     /**
      * Set the Channel Center Frequency Segment 0 field in the VHT Operation information element.
      *
-     * \param channelCenterFrequencySegment0 the Channel Center Frequency Segment 0 field in the VHT
+     * @param channelCenterFrequencySegment0 the Channel Center Frequency Segment 0 field in the VHT
      * Operation information element
      */
     void SetChannelCenterFrequencySegment0(uint8_t channelCenterFrequencySegment0);
     /**
      * Set the Channel Center Frequency Segment 1 field in the VHT Operation information element.
      *
-     * \param channelCenterFrequencySegment1 the Channel Center Frequency Segment 1 field in the VHT
+     * @param channelCenterFrequencySegment1 the Channel Center Frequency Segment 1 field in the VHT
      * Operation information element
      */
     void SetChannelCenterFrequencySegment1(uint8_t channelCenterFrequencySegment1);
     /**
      * Set the Basic VHT-MCS and NSS field in the VHT Operation information element.
      *
-     * \param basicVhtMcsAndNssSet the Basic VHT-MCS and NSS field in the VHT Operation information
+     * @param basicVhtMcsAndNssSet the Basic VHT-MCS and NSS field in the VHT Operation information
      * element
      */
     void SetBasicVhtMcsAndNssSet(uint16_t basicVhtMcsAndNssSet);
@@ -61,33 +62,33 @@ class VhtOperation : public WifiInformationElement
      * Set the Basic VHT-MCS and NSS field in the VHT Operation information element
      * by specifying the tuple (nss, maxMcs).
      *
-     * \param nss the NSS
-     * \param maxVhtMcs the maximum supported VHT-MCS value corresponding to that NSS
+     * @param nss the NSS
+     * @param maxVhtMcs the maximum supported VHT-MCS value corresponding to that NSS
      */
     void SetMaxVhtMcsPerNss(uint8_t nss, uint8_t maxVhtMcs);
 
     /**
      * Return the Channel Width field in the VHT Operation information element.
      *
-     * \return the Channel Width field in the VHT Operation information element
+     * @return the Channel Width field in the VHT Operation information element
      */
     uint8_t GetChannelWidth() const;
     /**
      * Return the Channel Center Frequency Segment 0 field in the VHT Operation information element.
      *
-     * \return the Channel Center Frequency Segment 0 field in the VHT Operation information element
+     * @return the Channel Center Frequency Segment 0 field in the VHT Operation information element
      */
     uint8_t GetChannelCenterFrequencySegment0() const;
     /**
      * Return the Channel Center Frequency Segment 1 field in the VHT Operation information element.
      *
-     * \return the Channel Center Frequency Segment 1 field in the VHT Operation information element
+     * @return the Channel Center Frequency Segment 1 field in the VHT Operation information element
      */
     uint8_t GetChannelCenterFrequencySegment1() const;
     /**
      * Return the Basic VHT-MCS And Nss field in the VHT Operation information element.
      *
-     * \return the Basic VHT-MCS And Nss field in the VHT Operation information element
+     * @return the Basic VHT-MCS And Nss field in the VHT Operation information element
      */
     uint16_t GetBasicVhtMcsAndNssSet() const;
 

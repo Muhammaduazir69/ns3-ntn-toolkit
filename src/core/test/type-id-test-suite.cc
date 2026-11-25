@@ -20,22 +20,22 @@
 
 using namespace ns3;
 
-/// \return A const string used to build the test name.
+/// @return A const string used to build the test name.
 const std::string suite("type-id: ");
 
 /**
- * \file
- * \ingroup typeid-tests
+ * @file
+ * @ingroup typeid-tests
  * TypeId test suite
  */
 
 /**
- * \ingroup core-tests
- * \defgroup typeid-tests TypeId class tests
+ * @ingroup core-tests
+ * @defgroup typeid-tests TypeId class tests
  */
 
 /**
- * \ingroup typeid-tests
+ * @ingroup typeid-tests
  *
  * Test for uniqueness of all TypeIds.
  */
@@ -109,7 +109,7 @@ UniqueTypeIdTestCase::DoRun()
 }
 
 /**
- * \ingroup typeid-tests
+ * @ingroup typeid-tests
  *
  * Collision test.
  */
@@ -190,7 +190,7 @@ CollisionTestCase::DoRun()
 }
 
 /**
- * \ingroup typeid-tests
+ * @ingroup typeid-tests
  *
  * Class used to test deprecated Attributes.
  */
@@ -216,8 +216,8 @@ class DeprecatedAttribute : public Object
     }
 
     /**
-     * \brief Get the type ID.
-     * \return The object TypeId.
+     * @brief Get the type ID.
+     * @return The object TypeId.
      */
     static TypeId GetTypeId()
     {
@@ -237,7 +237,7 @@ class DeprecatedAttribute : public Object
                               IntegerValue(1),
                               MakeIntegerAccessor(&DeprecatedAttribute::m_attr),
                               MakeIntegerChecker<int>(),
-                              TypeId::DEPRECATED,
+                              TypeId::SupportLevel::DEPRECATED,
                               "use 'attribute' instead")
                 // Obsolete attribute, as an example
                 .AddAttribute("obsoleteAttribute",
@@ -245,7 +245,7 @@ class DeprecatedAttribute : public Object
                               EmptyAttributeValue(),
                               MakeEmptyAttributeAccessor(),
                               MakeEmptyAttributeChecker(),
-                              TypeId::OBSOLETE,
+                              TypeId::SupportLevel::OBSOLETE,
                               "refactor to use 'attribute'")
 
                 // The new trace source
@@ -258,14 +258,14 @@ class DeprecatedAttribute : public Object
                                 "the old trace source",
                                 MakeTraceSourceAccessor(&DeprecatedAttribute::m_trace),
                                 "ns3::TracedValueCallback::Double",
-                                TypeId::DEPRECATED,
+                                TypeId::SupportLevel::DEPRECATED,
                                 "use 'trace' instead")
                 // Obsolete trace source, as an example
                 .AddTraceSource("obsoleteTraceSource",
                                 "the obsolete trace source",
                                 MakeEmptyTraceSourceAccessor(),
                                 "ns3::TracedValueCallback::Void",
-                                TypeId::OBSOLETE,
+                                TypeId::SupportLevel::OBSOLETE,
                                 "refactor to use 'trace'");
 
         return tid;
@@ -273,7 +273,7 @@ class DeprecatedAttribute : public Object
 };
 
 /**
- * \ingroup typeid-tests
+ * @ingroup typeid-tests
  *
  * Check deprecated Attributes and TraceSources.
  */
@@ -311,29 +311,33 @@ DeprecatedAttributeTestCase::DoRun()
                           true,
                           "lookup new attribute");
     std::cerr << suite << "lookup new attribute:"
-              << (ainfo.supportLevel == TypeId::SUPPORTED ? "supported" : "error") << std::endl;
+              << (ainfo.supportLevel == TypeId::SupportLevel::SUPPORTED ? "supported" : "error")
+              << std::endl;
 
     NS_TEST_ASSERT_MSG_EQ(tid.LookupAttributeByName("oldAttribute", &ainfo),
                           true,
                           "lookup old attribute");
     std::cerr << suite << "lookup old attribute:"
-              << (ainfo.supportLevel == TypeId::DEPRECATED ? "deprecated" : "error") << std::endl;
+              << (ainfo.supportLevel == TypeId::SupportLevel::DEPRECATED ? "deprecated" : "error")
+              << std::endl;
 
     TypeId::TraceSourceInformation tinfo;
     Ptr<const TraceSourceAccessor> acc;
     acc = tid.LookupTraceSourceByName("trace", &tinfo);
     NS_TEST_ASSERT_MSG_NE(acc, nullptr, "lookup new trace source");
     std::cerr << suite << "lookup new trace source:"
-              << (tinfo.supportLevel == TypeId::SUPPORTED ? "supported" : "error") << std::endl;
+              << (tinfo.supportLevel == TypeId::SupportLevel::SUPPORTED ? "supported" : "error")
+              << std::endl;
 
     acc = tid.LookupTraceSourceByName("oldTrace", &tinfo);
     NS_TEST_ASSERT_MSG_NE(acc, nullptr, "lookup old trace source");
     std::cerr << suite << "lookup old trace source:"
-              << (tinfo.supportLevel == TypeId::DEPRECATED ? "deprecated" : "error") << std::endl;
+              << (tinfo.supportLevel == TypeId::SupportLevel::DEPRECATED ? "deprecated" : "error")
+              << std::endl;
 }
 
 /**
- * \ingroup typeid-tests
+ * @ingroup typeid-tests
  *
  * Performance test: measure average lookup time.
  */
@@ -348,8 +352,8 @@ class LookupTimeTestCase : public TestCase
     void DoSetup() override;
     /**
      * Report the performance test results.
-     * \param how How the TypeId is searched (name or hash).
-     * \param delta The time required for the lookup.
+     * @param how How the TypeId is searched (name or hash).
+     * @param delta The time required for the lookup.
      */
     void Report(const std::string how, const uint32_t delta) const;
 
@@ -421,7 +425,7 @@ LookupTimeTestCase::Report(const std::string how, const uint32_t delta) const
 }
 
 /**
- * \ingroup typeid-tests
+ * @ingroup typeid-tests
  *
  * TypeId test suites.
  */
@@ -450,7 +454,7 @@ TypeIdTestSuite::TypeIdTestSuite()
 static TypeIdTestSuite g_TypeIdTestSuite;
 
 /**
- * \ingroup typeid-tests
+ * @ingroup typeid-tests
  *
  * TypeId performance test suites.
  */

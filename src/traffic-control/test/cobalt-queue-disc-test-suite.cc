@@ -22,9 +22,9 @@
 using namespace ns3;
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Cobalt Queue Disc Test Item
+ * @brief Cobalt Queue Disc Test Item
  */
 class CobaltQueueDiscTestItem : public QueueDiscItem
 {
@@ -32,9 +32,9 @@ class CobaltQueueDiscTestItem : public QueueDiscItem
     /**
      * Constructor
      *
-     * \param p packet
-     * \param addr address
-     * \param ecnCapable ECN capable
+     * @param p packet
+     * @param addr address
+     * @param ecnCapable ECN capable
      */
     CobaltQueueDiscTestItem(Ptr<Packet> p, const Address& addr, bool ecnCapable);
     ~CobaltQueueDiscTestItem() override;
@@ -75,9 +75,9 @@ CobaltQueueDiscTestItem::Mark()
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Test 1: simple enqueue/dequeue with no drops
+ * @brief Test 1: simple enqueue/dequeue with no drops
  */
 class CobaltQueueDiscBasicEnqueueDequeue : public TestCase
 {
@@ -85,16 +85,16 @@ class CobaltQueueDiscBasicEnqueueDequeue : public TestCase
     /**
      * Constructor
      *
-     * \param mode the mode
+     * @param mode the mode
      */
     CobaltQueueDiscBasicEnqueueDequeue(QueueSizeUnit mode);
     void DoRun() override;
 
     /**
      * Queue test size function
-     * \param queue the queue disc
-     * \param size the size
-     * \param error the error string
+     * @param queue the queue disc
+     * @param size the size
+     * @param error the error string
      *
      */
 
@@ -245,9 +245,9 @@ CobaltQueueDiscBasicEnqueueDequeue::DoRun()
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Test 2: Cobalt Queue Disc Drop Test Item
+ * @brief Test 2: Cobalt Queue Disc Drop Test Item
  */
 class CobaltQueueDiscDropTest : public TestCase
 {
@@ -256,23 +256,23 @@ class CobaltQueueDiscDropTest : public TestCase
     void DoRun() override;
     /**
      * Enqueue function
-     * \param queue the queue disc
-     * \param size the size
-     * \param nPkt the number of packets
+     * @param queue the queue disc
+     * @param size the size
+     * @param nPkt the number of packets
      */
     void Enqueue(Ptr<CobaltQueueDisc> queue, uint32_t size, uint32_t nPkt);
     /**
      * Run Cobalt test function
-     * \param mode the mode
+     * @param mode the mode
      */
     void RunDropTest(QueueSizeUnit mode);
     /**
      * Enqueue the given number of packets, each of the given size,
      * at different times.
      *
-     * \param queue the queue disc
-     * \param size the packet size in bytes
-     * \param nPkt the number of packets
+     * @param queue the queue disc
+     * @param size the packet size in bytes
+     * @param nPkt the number of packets
      */
     void EnqueueWithDelay(Ptr<CobaltQueueDisc> queue, uint32_t size, uint32_t nPkt);
 };
@@ -318,7 +318,7 @@ CobaltQueueDiscDropTest::RunDropTest(QueueSizeUnit mode)
         EnqueueWithDelay(queue, 1, 200);
     }
 
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
 
     QueueDisc::Stats st = queue->GetStats();
@@ -333,11 +333,10 @@ CobaltQueueDiscDropTest::RunDropTest(QueueSizeUnit mode)
 void
 CobaltQueueDiscDropTest::EnqueueWithDelay(Ptr<CobaltQueueDisc> queue, uint32_t size, uint32_t nPkt)
 {
-    Address dest;
     double delay = 0.01; // enqueue packets with delay
     for (uint32_t i = 0; i < nPkt; i++)
     {
-        Simulator::Schedule(Time(Seconds((i + 1) * delay)),
+        Simulator::Schedule(Seconds((i + 1) * delay),
                             &CobaltQueueDiscDropTest::Enqueue,
                             this,
                             queue,
@@ -365,9 +364,9 @@ CobaltQueueDiscDropTest::DoRun()
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Test 3: Cobalt Queue Disc ECN marking Test Item
+ * @brief Test 3: Cobalt Queue Disc ECN marking Test Item
  */
 class CobaltQueueDiscMarkTest : public TestCase
 {
@@ -375,31 +374,31 @@ class CobaltQueueDiscMarkTest : public TestCase
     /**
      * Constructor
      *
-     * \param mode the mode
+     * @param mode the mode
      */
     CobaltQueueDiscMarkTest(QueueSizeUnit mode);
     void DoRun() override;
 
   private:
     /**
-     * \brief Enqueue function
-     * \param queue the queue disc
-     * \param size the size
-     * \param nPkt the number of packets
-     * \param ecnCapable ECN capable traffic
+     * @brief Enqueue function
+     * @param queue the queue disc
+     * @param size the size
+     * @param nPkt the number of packets
+     * @param ecnCapable ECN capable traffic
      */
     void Enqueue(Ptr<CobaltQueueDisc> queue, uint32_t size, uint32_t nPkt, bool ecnCapable);
     /**
-     * \brief Dequeue function
-     * \param queue the queue disc
-     * \param modeSize the mode size
-     * \param testCase the test case number
+     * @brief Dequeue function
+     * @param queue the queue disc
+     * @param modeSize the mode size
+     * @param testCase the test case number
      */
     void Dequeue(Ptr<CobaltQueueDisc> queue, uint32_t modeSize, uint32_t testCase);
     /**
-     * \brief Drop next tracer function
-     * \param oldVal the old value of m_dropNext
-     * \param newVal the new value of m_dropNext
+     * @brief Drop next tracer function
+     * @param oldVal the old value of m_dropNext
+     * @param newVal the new value of m_dropNext
      */
     void DropNextTracer(int64_t oldVal, int64_t newVal);
     QueueSizeUnit m_mode;             ///< mode
@@ -818,9 +817,9 @@ CobaltQueueDiscMarkTest::Dequeue(Ptr<CobaltQueueDisc> queue, uint32_t modeSize, 
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Test 4: Cobalt Queue Disc CE Threshold marking Test Item
+ * @brief Test 4: Cobalt Queue Disc CE Threshold marking Test Item
  */
 class CobaltQueueDiscCeThresholdTest : public TestCase
 {
@@ -828,7 +827,7 @@ class CobaltQueueDiscCeThresholdTest : public TestCase
     /**
      * Constructor
      *
-     * \param mode the queue size unit mode
+     * @param mode the queue size unit mode
      */
     CobaltQueueDiscCeThresholdTest(QueueSizeUnit mode);
     ~CobaltQueueDiscCeThresholdTest() override;
@@ -836,32 +835,32 @@ class CobaltQueueDiscCeThresholdTest : public TestCase
   private:
     void DoRun() override;
     /**
-     * \brief Enqueue function
-     * \param queue the queue disc
-     * \param size the size
-     * \param nPkt the number of packets
+     * @brief Enqueue function
+     * @param queue the queue disc
+     * @param size the size
+     * @param nPkt the number of packets
      */
     void Enqueue(Ptr<CobaltQueueDisc> queue, uint32_t size, uint32_t nPkt);
     /**
-     * \brief Enqueue with delay function
-     * \param queue the queue disc
-     * \param size the size
-     * \param nPkt the number of packets
-     * \param delay the delay between the enqueueing of the packets
+     * @brief Enqueue with delay function
+     * @param queue the queue disc
+     * @param size the size
+     * @param nPkt the number of packets
+     * @param delay the delay between the enqueueing of the packets
      */
     void EnqueueWithDelay(Ptr<CobaltQueueDisc> queue, uint32_t size, uint32_t nPkt, Time delay);
     /**
-     * \brief Dequeue function
-     * \param queue the queue disc
-     * \param modeSize the mode size
+     * @brief Dequeue function
+     * @param queue the queue disc
+     * @param modeSize the mode size
      */
     void Dequeue(Ptr<CobaltQueueDisc> queue, uint32_t modeSize);
     /**
-     * \brief Dequeue with delay function
-     * \param queue the queue disc
-     * \param modeSize the mode size
-     * \param nPkt the number of packets
-     * \param delay the delay between the enqueueing of the packets
+     * @brief Dequeue with delay function
+     * @param queue the queue disc
+     * @param modeSize the mode size
+     * @param nPkt the number of packets
+     * @param delay the delay between the enqueueing of the packets
      */
     void DequeueWithDelay(Ptr<CobaltQueueDisc> queue, uint32_t modeSize, uint32_t nPkt, Time delay);
     QueueSizeUnit m_mode; ///< mode
@@ -895,7 +894,7 @@ CobaltQueueDiscCeThresholdTest::EnqueueWithDelay(Ptr<CobaltQueueDisc> queue,
 {
     for (uint32_t i = 0; i < nPkt; i++)
     {
-        Simulator::Schedule(Time(Seconds((i + 1) * delay.GetSeconds())),
+        Simulator::Schedule(Seconds((i + 1) * delay.GetSeconds()),
                             &CobaltQueueDiscCeThresholdTest::Enqueue,
                             this,
                             queue,
@@ -940,7 +939,7 @@ CobaltQueueDiscCeThresholdTest::DequeueWithDelay(Ptr<CobaltQueueDisc> queue,
 {
     for (uint32_t i = 0; i < nPkt; i++)
     {
-        Simulator::Schedule(Time(Seconds((i + 1) * delay.GetSeconds())),
+        Simulator::Schedule(Seconds((i + 1) * delay.GetSeconds()),
                             &CobaltQueueDiscCeThresholdTest::Dequeue,
                             this,
                             queue,
@@ -1029,9 +1028,9 @@ CobaltQueueDiscCeThresholdTest::DoRun()
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  *
- * \brief Test 5: Cobalt Queue Disc Enhanced Blue Test Item
+ * @brief Test 5: Cobalt Queue Disc Enhanced Blue Test Item
  * This test checks that the Blue Enhancement is working correctly. This test checks that Pdrop
  * should increase as expected with a certain number of dropped packets which is fixed by assigning
  * a stream to the uniform random variable. This test case is divided into 2 sub test cases 1) With
@@ -1046,7 +1045,7 @@ class CobaltQueueDiscEnhancedBlueTest : public TestCase
     /**
      * Constructor
      *
-     * \param mode the queue size unit mode
+     * @param mode the queue size unit mode
      */
     CobaltQueueDiscEnhancedBlueTest(QueueSizeUnit mode);
     ~CobaltQueueDiscEnhancedBlueTest() override;
@@ -1055,21 +1054,21 @@ class CobaltQueueDiscEnhancedBlueTest : public TestCase
     void DoRun() override;
     /**
      * Enqueue function
-     * \param queue the queue disc
-     * \param size the size
-     * \param nPkt the number of packets
+     * @param queue the queue disc
+     * @param size the size
+     * @param nPkt the number of packets
      */
     void Enqueue(Ptr<CobaltQueueDisc> queue, uint32_t size, uint32_t nPkt);
     /**
-     * \brief Dequeue function
-     * \param queue the queue disc
+     * @brief Dequeue function
+     * @param queue the queue disc
      */
     void Dequeue(Ptr<CobaltQueueDisc> queue);
     /**
-     * \brief Dequeue with delay function
-     * \param queue the queue disc
-     * \param nPkt the number of packets
-     * \param delay the delay between the enqueueing of the packets
+     * @brief Dequeue with delay function
+     * @param queue the queue disc
+     * @param nPkt the number of packets
+     * @param delay the delay between the enqueueing of the packets
      */
     void DequeueWithDelay(Ptr<CobaltQueueDisc> queue, uint32_t nPkt, Time delay);
     QueueSizeUnit m_mode; ///< mode
@@ -1106,7 +1105,7 @@ CobaltQueueDiscEnhancedBlueTest::DoRun()
     Enqueue(queue, modeSize, 200);
     DequeueWithDelay(queue, 100, MilliSeconds(10));
 
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
 
     QueueDisc::Stats st = queue->GetStats();
@@ -1135,7 +1134,7 @@ CobaltQueueDiscEnhancedBlueTest::DoRun()
     Enqueue(queue, modeSize, 200);
     DequeueWithDelay(queue, 100, MilliSeconds(10));
 
-    Simulator::Stop(Seconds(8.0));
+    Simulator::Stop(Seconds(8));
     Simulator::Run();
 
     st = queue->GetStats();
@@ -1170,7 +1169,7 @@ CobaltQueueDiscEnhancedBlueTest::DequeueWithDelay(Ptr<CobaltQueueDisc> queue,
 {
     for (uint32_t i = 0; i < nPkt; i++)
     {
-        Simulator::Schedule(Time(Seconds((i + 1) * delay.GetSeconds())),
+        Simulator::Schedule(Seconds((i + 1) * delay.GetSeconds()),
                             &CobaltQueueDiscEnhancedBlueTest::Dequeue,
                             this,
                             queue);
@@ -1178,7 +1177,7 @@ CobaltQueueDiscEnhancedBlueTest::DequeueWithDelay(Ptr<CobaltQueueDisc> queue,
 }
 
 /**
- * \ingroup traffic-control-test
+ * @ingroup traffic-control-test
  * The COBALT queue disc test suite.
  */
 static class CobaltQueueDiscTestSuite : public TestSuite

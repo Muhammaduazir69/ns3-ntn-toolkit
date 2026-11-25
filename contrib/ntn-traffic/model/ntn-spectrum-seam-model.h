@@ -69,7 +69,9 @@ class NtnSpectrumSeamModel : public PhasedArraySpectrumPropagationLossModel
         Ptr<const MobilityModel> a,
         Ptr<const MobilityModel> b,
         Ptr<const PhasedArrayModel> aPhasedArrayModel,
-        Ptr<const PhasedArrayModel> bPhasedArrayModel) const override;
+        Ptr<const PhasedArrayModel> bPhasedArrayModel,
+        const PhasedArrayModel::ComplexVector& aBeamformingVector,
+        const PhasedArrayModel::ComplexVector& bBeamformingVector) const override;
 
     int64_t DoAssignStreams(int64_t stream) override;
 

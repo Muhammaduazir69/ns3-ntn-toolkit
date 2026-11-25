@@ -209,7 +209,7 @@ NrEpcX2HandoverRequestHeader::Serialize(Buffer::Iterator start) const
     for (int j = 0; j < (int)sz; j++)
     {
         i.WriteHtonU16(m_erabsToBeSetupList[j].erabId);
-        i.WriteHtonU16(m_erabsToBeSetupList[j].erabLevelQosParameters.qci);
+        i.WriteHtonU16(m_erabsToBeSetupList[j].erabLevelQosParameters.fiveQi);
         i.WriteHtonU64(m_erabsToBeSetupList[j].erabLevelQosParameters.gbrQosInfo.gbrDl);
         i.WriteHtonU64(m_erabsToBeSetupList[j].erabLevelQosParameters.gbrQosInfo.gbrUl);
         i.WriteHtonU64(m_erabsToBeSetupList[j].erabLevelQosParameters.gbrQosInfo.mbrDl);
@@ -268,7 +268,7 @@ NrEpcX2HandoverRequestHeader::Deserialize(Buffer::Iterator start)
 
         erabItem.erabId = i.ReadNtohU16();
 
-        erabItem.erabLevelQosParameters = NrEpsBearer((NrEpsBearer::Qci)i.ReadNtohU16());
+        erabItem.erabLevelQosParameters = NrQosFlow((NrQosFlow::FiveQi)i.ReadNtohU16());
         erabItem.erabLevelQosParameters.gbrQosInfo.gbrDl = i.ReadNtohU64();
         erabItem.erabLevelQosParameters.gbrQosInfo.gbrUl = i.ReadNtohU64();
         erabItem.erabLevelQosParameters.gbrQosInfo.mbrDl = i.ReadNtohU64();
@@ -834,7 +834,8 @@ NrEpcX2SnStatusTransferHeader::Serialize(Buffer::Iterator start) const
             uint64_t statusValue = 0;
             for (int m = 0; m < 64; m++)
             {
-                statusValue |= item.receiveStatusOfUlPdcpSdus[64 * k + m] << m;
+                statusValue |= static_cast<uint64_t>(item.receiveStatusOfUlPdcpSdus[64 * k + m])
+                               << m;
             }
             i.WriteHtonU64(statusValue);
         }
@@ -856,7 +857,7 @@ NrEpcX2SnStatusTransferHeader::Deserialize(Buffer::Iterator start)
     int sz = i.ReadNtohU16();
 
     m_numberOfIes = 3;
-    m_headerLength = 6 + sz * (14 + (NrEpcX2Sap::m_maxPdcpSn / 64));
+    m_headerLength = 6 + sz * (14 + (NrEpcX2Sap::m_maxPdcpSn / 8));
 
     for (int j = 0; j < sz; j++)
     {

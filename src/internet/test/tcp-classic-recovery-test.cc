@@ -21,18 +21,18 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("TcpClassicRecoveryTestSuite");
 
 /**
- * \brief Classic Recovery algorithm test
+ * @brief Classic Recovery algorithm test
  */
 class ClassicRecoveryTest : public TestCase
 {
   public:
     /**
-     * \brief Constructor.
-     * \param cWnd Congestion window.
-     * \param segmentSize Segment size.
-     * \param ssThresh Slow Start Threshold.
-     * \param dupAckCount Duplicate acknowledgement Threshold.
-     * \param name Test description.
+     * @brief Constructor.
+     * @param cWnd Congestion window.
+     * @param segmentSize Segment size.
+     * @param ssThresh Slow Start Threshold.
+     * @param dupAckCount Duplicate acknowledgement Threshold.
+     * @param name Test description.
      */
     ClassicRecoveryTest(uint32_t cWnd,
                         uint32_t segmentSize,
@@ -79,7 +79,7 @@ ClassicRecoveryTest::DoRun()
                           "TcpClassicRecovery",
                           "The name of recovery used should be TcpClassicRecovery");
 
-    recovery->EnterRecovery(m_state, m_dupAckCount, 1000, 0);
+    recovery->EnterRecovery(m_state, m_dupAckCount, 1000, 0, 0);
     NS_TEST_ASSERT_MSG_EQ(m_state->m_cWnd,
                           m_state->m_ssThresh,
                           "cWnd should be set to ssThresh on entering recovery");
@@ -107,9 +107,9 @@ ClassicRecoveryTest::DoRun()
 }
 
 /**
- * \ingroup internet-test
+ * @ingroup internet-test
  *
- * \brief Classic Recovery TestSuite
+ * @brief Classic Recovery TestSuite
  */
 class ClassicRecoveryTestSuite : public TestSuite
 {

@@ -21,8 +21,8 @@ namespace ns3
 {
 
 /**
- * \ingroup mobility
- * \brief 2D random walk mobility model.
+ * @ingroup mobility
+ * @brief 2D random walk mobility model.
  *
  * Each instance moves with a speed and direction chosen at random
  * with the user-provided random variables until
@@ -42,11 +42,17 @@ class RandomWalk2dMobilityModel : public MobilityModel
   public:
     /**
      * Register this type with the TypeId system.
-     * \return the object TypeId
+     * @return the object TypeId
      */
     static TypeId GetTypeId();
 
     ~RandomWalk2dMobilityModel() override;
+
+    // Inherited from MobilityModel
+    Ptr<MobilityModel> Copy() const override
+    {
+        return CreateObject<RandomWalk2dMobilityModel>(*this);
+    }
 
     /** An enum representing the different working modes of this module. */
     enum Mode
@@ -57,14 +63,14 @@ class RandomWalk2dMobilityModel : public MobilityModel
 
   private:
     /**
-     * \brief Performs the rebound of the node if it reaches a boundary
-     * \param timeLeft The remaining time of the walk
+     * @brief Performs the rebound of the node if it reaches a boundary
+     * @param timeLeft The remaining time of the walk
      */
     void Rebound(Time timeLeft);
     /**
      * Walk according to position and velocity, until distance is reached,
      * time is reached, or intersection with the bounding box
-     * \param timeLeft The remaining time of the walk
+     * @param timeLeft The remaining time of the walk
      */
     void DoWalk(Time timeLeft);
     /**
