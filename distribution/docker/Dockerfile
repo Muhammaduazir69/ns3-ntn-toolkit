@@ -170,6 +170,8 @@ RUN python3 -m venv /home/ntn/.venv \
         /home/ntn/ns-3-dev/contrib/ntn-digital-twin \
     && /home/ntn/.venv/bin/pip install --no-cache-dir -e /home/ntn/ns-3-dev/contrib/ns3-ai-ntn/python_utils \
     && /home/ntn/.venv/bin/pip install --no-cache-dir numpy gymnasium matplotlib \
+    && /home/ntn/.venv/bin/pip install --no-cache-dir protobuf==4.21.12 \
+        -e /home/ntn/ns-3-dev/contrib/ns3-ai-ntn/model/gym-interface/py \
     && /home/ntn/.venv/bin/pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 ENV PATH="/home/ntn/.venv/bin:/home/ntn/ns-3-dev:${PATH}"
@@ -179,6 +181,9 @@ ENV PATH="/home/ntn/.venv/bin:/home/ntn/ns-3-dev:${PATH}"
 # environment. Setting it image-wide is cheap and removes a footgun.
 ENV LD_LIBRARY_PATH="/home/ntn/ns-3-dev/build/lib"
 ENV PYTHONUNBUFFERED=1
+# ns3-ai Python side: ns3ai_utils, and the Gym bridge with its generated messages_pb2 and
+# binding module, which sit beside the ns3ai_gym_env package (protobuf 4.21 matches protoc 3.21).
+ENV PYTHONPATH="/home/ntn/ns-3-dev/contrib/ns3-ai-ntn/python_utils:/home/ntn/ns-3-dev/contrib/ns3-ai-ntn/model/gym-interface/py"
 
 # Useful default workdir for users.
 WORKDIR /home/ntn/ns-3-dev
