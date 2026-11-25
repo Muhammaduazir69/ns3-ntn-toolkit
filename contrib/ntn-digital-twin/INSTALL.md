@@ -19,7 +19,7 @@
 
 `ntn-digital-twin` is a Python package: a refresher loop plus a FastAPI
 prediction service for live LEO constellations. It is one module of the
-[ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) (ns-3.43,
+[ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) (ns-3.49,
 branch `ntn-integration-v2`). Being a pure-Python service package, it has no
 ns-3 C++ build step of its own.
 

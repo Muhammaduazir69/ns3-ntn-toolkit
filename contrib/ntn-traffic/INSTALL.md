@@ -17,7 +17,7 @@
 
 ---
 
-`ntn-traffic` is an ns-3.43 contributed module — the traffic and measurement
+`ntn-traffic` is an ns-3.49 contributed module, the traffic and measurement
 backbone of the toolkit. It provides **`NtnRealStackHelper`** (a real mmwave NR
 NTN cell: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC under SGP4 satellite
 mobility), the **ORAN-NTN application suite** (`NtnOranApplication`,
@@ -30,7 +30,7 @@ The recommended way to use it is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree
 (branch `ntn-integration-v2`), where every dependency below is already present.
 `ntn-traffic` ships **bundled inside that tree** — there is no standalone
-repository to clone. On a vanilla ns-3.43 tree, add the sibling modules in
+repository to clone. On a vanilla ns-3.49 tree, add the sibling modules in
 section 2.
 
 ---
@@ -55,7 +55,7 @@ section 2.
 The library links `mmwave` (and its bundled `lte`) for `NtnRealStackHelper`,
 `magister-stats` for the application-stats collectors, plus the standard
 `network`, `mobility`, `propagation`, `applications`, `flow-monitor`,
-`internet`, and `point-to-point` modules. On a vanilla ns-3.43 tree:
+`internet`, and `point-to-point` modules. On a vanilla ns-3.49 tree:
 
 ```bash
 cd contrib/

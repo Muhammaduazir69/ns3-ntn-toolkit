@@ -19,7 +19,7 @@
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TS%2023.501%20S--NSSAI%20%C2%B7%205QI-orange.svg" alt="3GPP TS 23.501 S-NSSAI and 5QI"/>
   <img src="https://img.shields.io/badge/3GPP-TS%2022.261-orange.svg" alt="3GPP TS 22.261"/>
@@ -123,7 +123,7 @@ Inside the toolkit, where the module is already present and built:
 ./ns3 run "ntn-slice-tenants-leo --policy=contract_trim --contractMbps=12"
 ```
 
-Standalone, into an existing ns-3.43 tree:
+Standalone, into an existing ns-3.49 tree:
 
 ```bash
 git clone -b ntn-slice-v2 https://github.com/Muhammaduazir69/ntn-slice.git contrib/ntn-slice
@@ -155,7 +155,7 @@ The library links `nr` (5G-LENA), `ntn-traffic` and `ntn-constellation`; the exa
 
 ## Dependencies
 
-ns-3.43 with `nr` (5G-LENA) for the quota scheduler; `ntn-traffic`, `ntn-constellation`, `ntn-cho`; `mmwave` and `lte` for the three shared-cell examples.
+ns-3.49 with `nr` (5G-LENA) for the quota scheduler; `ntn-traffic`, `ntn-constellation`, `ntn-cho`; `mmwave` and `lte` for the three shared-cell examples.
 
 ## Scope and limitations
 

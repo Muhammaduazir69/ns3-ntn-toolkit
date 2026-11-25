@@ -3,7 +3,7 @@
 
 <h1 align="center">ns3-ai-ntn</h1>
 
-<p align="center"><strong>A modernized ns3-ai bridge for ns-3.43: Gymnasium 1.0 over versioned shared memory, an AI-RAN inference contract, and NTN reinforcement-learning tooling</strong></p>
+<p align="center"><strong>A modernized ns3-ai bridge for ns-3.49: Gymnasium 1.0 over versioned shared memory, an AI-RAN inference contract, and NTN reinforcement-learning tooling</strong></p>
 
 <p align="center">
   <a href="https://youtu.be/JNStiBst68I"><img src="https://img.shields.io/badge/YouTube-Watch%20the%205--minute%20demo-red?logo=youtube" alt="Watch on YouTube"/></a>
@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/RL-Gymnasium%201.0-yellow.svg" alt="Gymnasium 1.0"/>
   <img src="https://img.shields.io/badge/Python-3.10%20to%203.13-informational.svg" alt="Python 3.10 to 3.13"/>
@@ -115,7 +115,7 @@ cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/ && python3 apb.py
 ./ns3 run "oran-ntn-gym-handover-example --gym=1"
 ```
 
-Standalone, into an existing ns-3.43 tree:
+Standalone, into an existing ns-3.49 tree:
 
 ```bash
 git clone -b fix/ns3-43-compatibility-and-critical-bugs \

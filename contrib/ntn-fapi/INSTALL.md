@@ -17,7 +17,7 @@
 
 ---
 
-`ntn-fapi` is an ns-3.43 contributed module. It provides the **SCF-222 FAPI
+`ntn-fapi` is an ns-3.49 contributed module. It provides the **SCF-222 FAPI
 L1↔L2 message ABI** (DL_TTI / TX_DATA / RX_DATA / CRC.indication) for NR-NTN —
 a header-only set of structs in `namespace ns3::fapi`, plus the
 `fapi-helpers` conversions. The recommended way to use it is inside the
@@ -26,7 +26,7 @@ a header-only set of structs in `namespace ns3::fapi`, plus the
 present. `ntn-fapi` ships **bundled inside that tree** — there is no
 standalone repository to clone.
 
-The library itself only needs `core`; it builds on a vanilla ns-3.43 tree with
+The library itself only needs `core`; it builds on a vanilla ns-3.49 tree with
 no siblings. The **examples** are the part that needs the rest of the toolkit:
 they ride a real mmwave NR NTN cell, so they additionally require
 `ntn-traffic`, `ntn-constellation`, `ntn-cho`, `ntn-observability`, and
@@ -52,7 +52,7 @@ they ride a real mmwave NR NTN cell, so they additionally require
 ### 2a. Library — none beyond `core`
 
 `ntn-fapi`'s `LIBRARIES_TO_LINK` is just `${libcore}` (see `CMakeLists.txt`).
-The structs and helpers compile on a bare ns-3.43 tree, and the
+The structs and helpers compile on a bare ns-3.49 tree, and the
 `./test.py --suite=ntn-fapi` unit suite runs without any sibling module.
 
 ### 2b. Toolkit modules `ntn-traffic` + `ntn-constellation` + `ntn-cho` + `ntn-observability` (REQUIRED for the examples)
@@ -64,7 +64,7 @@ All three examples link the toolkit's `ntn-traffic`
 `ntn-fapi-real-stack` example additionally links `ntn-observability`
 (`NtnSceneHelper` for the optional NetSimulyzer / Cesium output). These are
 **bundled in the toolkit**, so inside `ns3-ntn-toolkit` they are already in
-`contrib/`. On a vanilla ns-3.43 tree, obtain them from the toolkit tree
+`contrib/`. On a vanilla ns-3.49 tree, obtain them from the toolkit tree
 (they have no per-module repositories).
 
 ### 2c. SNS3 `satellite` (REQUIRED for the examples, transitively)

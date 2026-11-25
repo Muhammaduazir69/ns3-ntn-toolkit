@@ -19,7 +19,7 @@
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/service-FastAPI%20%2B%20SGP4-purple.svg" alt="FastAPI and SGP4"/>
   <img src="https://img.shields.io/badge/loop-predict%20then%20actuate-orange.svg" alt="predict then actuate"/>
@@ -177,7 +177,7 @@ directory holding `twin-orbits.tle` and `twin-pred.txt` (for example the
 Python 3.10 or newer, the sibling `ntn-constellation` Python package (SGP4),
 FastAPI 0.110 or newer, Uvicorn, Pydantic v2, requests; pytest and httpx for
 the tests, Skyfield for the gate-9 test. The
-C++ half needs ns-3.43 core and mobility and `ntn-constellation`. See
+C++ half needs ns-3.49 core and mobility and `ntn-constellation`. See
 [INSTALL.md](INSTALL.md).
 
 ## Honest scope

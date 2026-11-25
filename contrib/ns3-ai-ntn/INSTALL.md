@@ -18,7 +18,7 @@
 ---
 
 This guide installs the **fork** of `ns3-ai` that is patched for
-ns-3.43, Python 3.13, NumPy 2.0, and Gymnasium 1.0.
+ns-3.49, Python 3.13, NumPy 2.0, and Gymnasium 1.0.
 
 > **Branch:** `fix/ns3-43-compatibility-and-critical-bugs`
 > **Upstream:** https://github.com/hust-diangroup/ns3-ai
@@ -48,7 +48,7 @@ pip install "numpy>=2.0" "gymnasium>=1.0" "torch>=2.0"
 
 ## 2. Prerequisites
 
-### 2a. ns-3.43
+### 2a. ns-3.49
 
 ```bash
 git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
@@ -89,7 +89,7 @@ cd ..
 
 ## 4. Configure & build
 
-The fork's CMake helper handles the per-target LTO disable that ns-3.43 needs:
+The fork's CMake helper handles the per-target LTO disable that ns-3.49 needs:
 
 ```bash
 ./ns3 configure --enable-examples --enable-tests

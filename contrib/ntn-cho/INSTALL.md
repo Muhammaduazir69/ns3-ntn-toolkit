@@ -17,11 +17,11 @@
 
 ---
 
-`ntn-cho` is an ns-3.43 contributed module. The recommended way to run it is
+`ntn-cho` is an ns-3.49 contributed module. The recommended way to run it is
 inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
 tree (branch `ntn-integration-v2`), where every dependency below is already
 present. It also builds on a
-vanilla ns-3.43 tree, provided you add the sibling toolkit modules listed in
+vanilla ns-3.49 tree, provided you add the sibling toolkit modules listed in
 section 2 (the library itself needs `satellite`; the examples additionally
 need `ntn-traffic`, `ntn-constellation`, and `mmwave`).
 
@@ -63,7 +63,7 @@ Since v2.1 the examples (`ntn-cho-leo-basic`, `ntn-cho-full-constellation`,
 applications) and `ntn-constellation` (`Sgp4MobilityModel`,
 `WalkerConstellation`). The traffic helper is **no longer vendored** into
 this module. Inside `ns3-ntn-toolkit` both modules are already in
-`contrib/`; on a vanilla ns-3.43 tree, clone them from the toolkit into
+`contrib/`; on a vanilla ns-3.49 tree, clone them from the toolkit into
 `contrib/ntn-traffic` and `contrib/ntn-constellation`.
 
 ### 2c. mmWave NR PHY (REQUIRED for the examples)

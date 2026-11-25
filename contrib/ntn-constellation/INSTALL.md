@@ -17,13 +17,13 @@
 
 ---
 
-`ntn-constellation` is an ns-3.43 contributed module with two independent parts:
+`ntn-constellation` is an ns-3.49 contributed module with two independent parts:
 an in-simulation **C++ ns-3 module** and a tool-side **Python package**
 (`ntn_constellation`). You can install either or both. The recommended way to
 run the C++ side is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree (branch
 `ntn-integration-v2`), where every dependency below is already present. It also
-builds on a vanilla ns-3.43 tree once the sibling toolkit modules in section 2
+builds on a vanilla ns-3.49 tree once the sibling toolkit modules in section 2
 are added.
 
 ---
@@ -61,7 +61,7 @@ cd ..
 All four examples link the toolkit's `ntn-traffic` module (`NtnRealStackHelper`,
 `NtnOranApplication`/`NtnOranSink`, the standards traffic applications) and
 `ntn-cho` (`NtnTr38811MobilityHelper`, `NtnEnuProjectionMobilityModel`). Inside
-`ns3-ntn-toolkit` both modules are already in `contrib/`; on a vanilla ns-3.43
+`ns3-ntn-toolkit` both modules are already in `contrib/`; on a vanilla ns-3.49
 tree they ship with the toolkit checkout.
 
 ### 2c. mmWave NR PHY (REQUIRED for the two access-link examples)
@@ -126,7 +126,7 @@ You still need the section 2 dependencies (`satellite`, `ntn-traffic`,
 ## 5. Run the examples
 
 Built binaries land in `build/contrib/ntn-constellation/examples/` as
-`ns3.43-<NAME>-default`.
+`ns3.49-<NAME>-default`.
 
 ### 5a. ntn-constellation-walker-traffic — Walker-Delta + one real mmwave cell
 

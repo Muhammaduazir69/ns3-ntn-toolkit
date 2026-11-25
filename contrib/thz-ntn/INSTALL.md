@@ -17,13 +17,13 @@
 
 ---
 
-`thz-ntn` is an ns-3.43 contributed module: a physics-grounded Sub-THz /
+`thz-ntn` is an ns-3.49 contributed module: a physics-grounded Sub-THz /
 D-band (100 GHz – 1 THz) PHY for non-terrestrial links — molecular-absorption-
 gated LEO-ground and inter-satellite links, RIS relays, ultra-massive MIMO,
 EKF beam tracking, and ISAC. The recommended way to run it is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree
 (branch `ntn-integration-v2`), where every dependency below is already
-present. It also builds on a vanilla ns-3.43 tree once you add the sibling
+present. It also builds on a vanilla ns-3.49 tree once you add the sibling
 modules in section 2 — the library links `satellite` and `mmwave`; the
 examples additionally pull in `ntn-cho`, `ntn-constellation`, `ntn-traffic`,
 `oran-ntn`, and `ntn-observability`.

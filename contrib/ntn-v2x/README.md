@@ -19,7 +19,7 @@
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.885%20%7C%20TR%2037.885-orange.svg" alt="3GPP TS 38.885 and TR 37.885"/>
   <img src="https://img.shields.io/badge/messages-SAE%20J2735%20BSM-purple.svg" alt="SAE J2735 BSM"/>
@@ -102,7 +102,7 @@ Inside the toolkit, where the module is already present and built:
 ./test.py -s ntn-v2x
 ```
 
-Standalone, into an existing ns-3.43 tree:
+Standalone, into an existing ns-3.49 tree:
 
 ```bash
 git clone -b ntn-v2x-v2 https://github.com/Muhammaduazir69/ntn-v2x.git contrib/ntn-v2x
@@ -114,7 +114,7 @@ git clone -b ntn-v2x-v2 https://github.com/Muhammaduazir69/ntn-v2x.git contrib/n
 
 ## Examples
 
-Binaries land at `build/contrib/ntn-v2x/examples/ns3.43-<name>-default`.
+Binaries land at `build/contrib/ntn-v2x/examples/ns3.49-<name>-default`.
 
 | Example | What it shows | Command |
 |---|---|---|
@@ -136,7 +136,7 @@ Binaries land at `build/contrib/ntn-v2x/examples/ns3.43-<name>-default`.
 
 ## Dependencies
 
-- ns-3.43 `core`, `mobility`, `network` (linked by `CMakeLists.txt`).
+- ns-3.49 `core`, `mobility`, `network` (linked by `CMakeLists.txt`).
 - Examples: `ntn-traffic` (`NtnRealStackHelper`, `NtnOranApplication`), `ntn-constellation` (SGP4), `ntn-cho` (TR 38.811 terminals), `ntn-sagin` (AIS replay), `oran-ntn` (xApp in the URLLC example), the toolkit's `mmwave`.
 - Data: `data/starlink_dtc_20261002.tle` (public CelesTrak), `traces/*.csv` (synthetic constant-speed FCD fixtures).
 
@@ -174,4 +174,4 @@ GPL-2.0-only, matching ns-3. See [LICENSE](LICENSE). Element sets are public Cel
 **Muhammad Uzair**, Independent Researcher
 muhammaduzairr69@gmail.com · [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.43 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.49 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

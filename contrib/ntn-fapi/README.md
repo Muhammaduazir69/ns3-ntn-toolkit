@@ -3,7 +3,7 @@
 <p align="center"><strong>A Small Cell Forum FAPI MAC-PHY adapter on a live NR service access point, with a latency figure that says what it does not contain</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/SCF-FAPI%20222.10.02%20%2F%20.04-orange.svg" alt="Small Cell Forum FAPI 222.10.02 and 222.10.04"/>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.211%20%C2%B7%20TS%2038.213-orange.svg" alt="3GPP TS 38.211 and TS 38.213"/>
@@ -107,7 +107,7 @@ The `ntn-fapi` suite (`Type::UNIT`, 9 test cases) checks SCF 222.10.02/.04 messa
 
 ## Dependencies
 
-ns-3.43 core and network; the in-tree `mmwave` module (the decorated SAP); `ntn-traffic`, `ntn-constellation` and `ntn-cho` for the examples.
+ns-3.49 core and network; the in-tree `mmwave` module (the decorated SAP); `ntn-traffic`, `ntn-constellation` and `ntn-cho` for the examples.
 
 ## Scope and limitations
 

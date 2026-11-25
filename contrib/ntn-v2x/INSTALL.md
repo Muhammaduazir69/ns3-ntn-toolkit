@@ -17,10 +17,10 @@
 
 ---
 
-`ntn-v2x` is an ns-3.43 contributed module. The recommended way to run it is
+`ntn-v2x` is an ns-3.49 contributed module. The recommended way to run it is
 inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
 tree (branch `ntn-integration-v2`), where every dependency below is already
-present. It also builds on a vanilla ns-3.43 tree — the library links only core
+present. It also builds on a vanilla ns-3.49 tree, the library links only core
 ns-3 modules; the examples additionally need the sibling toolkit modules listed
 in section 2.
 
@@ -89,7 +89,7 @@ git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolk
 GitLab mirror: `https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit`.
 Docker: `uzairdocker69/ns3-ntn-toolkit:latest`.
 
-### Standalone repo (into a vanilla ns-3.43 tree)
+### Standalone repo (into a vanilla ns-3.49 tree)
 
 ```bash
 cd contrib/
@@ -147,7 +147,7 @@ Six example programs ship under `examples/`:
 Example target names: `ntn-v2x-pc5-sidelink-bsm`, `ntn-v2x-edge-urllc`,
 `ntn-v2x-rural-highway`, `ntn-v2x-real-stack`, `ntn-v2x-leo-relay-traffic`,
 `ntn-v2x-maritime-ais`.
-Each produces the binary `build/contrib/ntn-v2x/examples/ns3.43-<name>-default`.
+Each produces the binary `build/contrib/ntn-v2x/examples/ns3.49-<name>-default`.
 See the README for the full per-example argument list.
 
 ---
@@ -161,7 +161,7 @@ See the README for the full per-example argument list.
 Or run the test runner directly:
 
 ```bash
-./build/utils/ns3.43-test-runner-default --suite=ntn-v2x
+./build/utils/ns3.49-test-runner-default --suite=ntn-v2x
 ```
 
 The suite registers as `TestSuite("ntn-v2x")` and has 7 unit tests:

@@ -17,9 +17,9 @@
 
 ---
 
-`ntn-sionna` is an ns-3.43 contributed module that bridges NVIDIA Sionna RT
+`ntn-sionna` is an ns-3.49 contributed module that bridges NVIDIA Sionna RT
 into ns-3 as an opt-in propagation loss model. It can be built on a vanilla
-ns-3.43 tree or as part of the
+ns-3.49 tree or as part of the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
 (branch `ntn-integration-v2`).
 
@@ -70,7 +70,7 @@ mmwave NR NTN cell via `NtnRealStackHelper` and project SGP4 Walker mobility
 into the local ENU frame. They additionally link `ntn-traffic`, `ntn-cho`,
 `ntn-constellation`, `oran-ntn`, and the in-tree `mmwave` stack (with its
 bundled `lte`). All are already present inside the `ns3-ntn-toolkit` tree; on a
-vanilla ns-3.43 tree clone `mmwave`
+vanilla ns-3.49 tree clone `mmwave`
 (`https://github.com/nyuwireless-unipd/ns3-mmwave.git mmwave`) and the toolkit
 modules into `contrib/`. The library itself and the physics/channel examples
 build without them.

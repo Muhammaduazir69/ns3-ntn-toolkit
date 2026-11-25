@@ -17,12 +17,12 @@
 
 ---
 
-`ntn-rrc` is an ns-3.43 contributed module (3GPP Rel-17 NR-NTN RRC procedures:
+`ntn-rrc` is an ns-3.49 contributed module (3GPP Rel-17 NR-NTN RRC procedures:
 SIB19 ephemeris broadcast, timing advance, pass-aware DRX, UE location
 reporting). The recommended way to run it is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree (branch
 `ntn-integration-v2`), where every dependency below is already present. It also
-builds on a vanilla ns-3.43 tree once the sibling toolkit modules in section 2
+builds on a vanilla ns-3.49 tree once the sibling toolkit modules in section 2
 are added.
 
 ---
@@ -126,7 +126,7 @@ You still need the section 2 dependencies (`ntn-traffic`, `ntn-cho`,
 
 All five examples run real UDP traffic over a real mmwave NR NTN cell and write a
 `sim_health.csv` to `--outputDir`. Binaries live under
-`build/contrib/ntn-rrc/examples/` as `ns3.43-<name>-default`.
+`build/contrib/ntn-rrc/examples/` as `ns3.49-<name>-default`.
 
 ### 5a. ntn-rrc-leo-pass — TA + SIB19 over a real SGP4 pass
 

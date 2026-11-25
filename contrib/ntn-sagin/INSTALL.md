@@ -17,10 +17,10 @@
 
 ---
 
-`ntn-sagin` is an ns-3.43 contributed module. The recommended way to run it is
+`ntn-sagin` is an ns-3.49 contributed module. The recommended way to run it is
 inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
 tree (branch `ntn-integration-v2`), where every dependency below is already
-present. It also builds on a vanilla ns-3.43 tree, provided you add the sibling
+present. It also builds on a vanilla ns-3.49 tree, provided you add the sibling
 toolkit modules listed in section 2 (the library itself needs `ntn-slice`; the
 real-stack examples additionally need `ntn-traffic`, `ntn-cho`,
 `ntn-constellation`, `mmwave`, and — for `sagin-flight-leo-e2` — `oran-ntn`).
@@ -95,7 +95,7 @@ git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolk
 GitLab mirror: `https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit`.
 Docker: `uzairdocker69/ns3-ntn-toolkit:latest`.
 
-### Standalone repo (into a vanilla ns-3.43 tree)
+### Standalone repo (into a vanilla ns-3.49 tree)
 
 ```bash
 cd contrib/

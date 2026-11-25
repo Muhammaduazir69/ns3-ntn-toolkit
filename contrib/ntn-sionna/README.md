@@ -19,7 +19,7 @@
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/Sionna%20RT-GPU%20ray%20tracing-red.svg" alt="Sionna RT GPU ray tracing"/>
   <img src="https://img.shields.io/badge/3GPP-TR%2038.811-orange.svg" alt="3GPP TR 38.811"/>
@@ -129,7 +129,7 @@ python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
 ./ns3 run "ntn-sionna-leo-downlink-traffic --simSeconds=60 --rainMmH=10"
 ```
 
-Standalone, into an existing ns-3.43 tree:
+Standalone, into an existing ns-3.49 tree:
 
 ```bash
 git clone -b ntn-sionna-v2 https://github.com/Muhammaduazir69/ntn-sionna.git contrib/ntn-sionna
@@ -184,7 +184,7 @@ The `ntn-sionna` C++ suite (`Type::UNIT`, 44 test cases) runs against the stub s
 
 ## Dependencies
 
-ns-3.43 core, network, mobility and propagation; `ntn-traffic`, `ntn-constellation`, `ntn-cho`, `mmwave` or `nr` for the measured-radio examples. For live tracing: Python 3, CUDA and Sionna RT on the server machine.
+ns-3.49 core, network, mobility and propagation; `ntn-traffic`, `ntn-constellation`, `ntn-cho`, `mmwave` or `nr` for the measured-radio examples. For live tracing: Python 3, CUDA and Sionna RT on the server machine.
 
 ## Scope and limitations
 

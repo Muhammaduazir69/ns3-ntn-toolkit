@@ -19,7 +19,7 @@
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/sinks-InfluxDB%20%C2%B7%20NetSimulyzer%20%C2%B7%20CZML-purple.svg" alt="InfluxDB NetSimulyzer CZML"/>
   <img src="https://img.shields.io/badge/metrics-TS%2028.552%20names-orange.svg" alt="TS 28.552 measurement names"/>
@@ -112,7 +112,7 @@ Inside the toolkit, where the module is present and built:
 cd contrib/ntn-observability/docker && docker compose up -d   # then open http://localhost:3000
 ```
 
-Standalone, into an existing ns-3.43 tree (the examples need `ntn-traffic` and
+Standalone, into an existing ns-3.49 tree (the examples need `ntn-traffic` and
 `ntn-rrc`, so the toolkit tree is the easier path):
 
 ```bash
@@ -153,7 +153,7 @@ and handover links reaching the NetSimulyzer sink.
 
 ## Dependencies
 
-ns-3.43 core, mobility and network; `ntn-traffic`, `ntn-rrc`, `ntn-cho`,
+ns-3.49 core, mobility and network; `ntn-traffic`, `ntn-rrc`, `ntn-cho`,
 `ntn-constellation` and `mmwave` for the examples; optionally the vendored `netsimulyzer`
 module for the official demo. Docker and Docker Compose for the dashboard stack.
 See [INSTALL.md](INSTALL.md), including the Telegraf setting that rewrites

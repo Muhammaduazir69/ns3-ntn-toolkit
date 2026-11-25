@@ -19,7 +19,7 @@
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.331%20SIB19-orange.svg" alt="3GPP TS 38.331 SIB19"/>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.213%20%C2%A74.2-orange.svg" alt="3GPP TS 38.213 section 4.2"/>
@@ -117,7 +117,7 @@ Inside the toolkit, where the module is already present and built:
 ./ns3 run "ntn-rrc-drx-data-traffic --simSeconds=20 --numUes=4 --drxOn=true"
 ```
 
-Standalone, into an existing ns-3.43 tree:
+Standalone, into an existing ns-3.49 tree:
 
 ```bash
 git clone -b ntn-rrc-v2 https://github.com/Muhammaduazir69/ntn-rrc.git contrib/ntn-rrc
@@ -150,7 +150,7 @@ The `ntn-rrc` suite (`Type::UNIT`, 28 test cases) covers closed-form TA for both
 
 ## Dependencies
 
-ns-3.43 core, network and mobility. Examples additionally use `ntn-traffic`, `ntn-constellation`, `ntn-cho`, the in-tree `mmwave` or `nr` stack, and SNS3 `satellite` for `ntn-rrc-from-tle`.
+ns-3.49 core, network and mobility. Examples additionally use `ntn-traffic`, `ntn-constellation`, `ntn-cho`, the in-tree `mmwave` or `nr` stack, and SNS3 `satellite` for `ntn-rrc-from-tle`.
 
 ## Scope and limitations
 

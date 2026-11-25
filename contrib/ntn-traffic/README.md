@@ -3,7 +3,7 @@
 <p align="center"><strong>The real-stack spine: a 5G NR NTN data plane under satellite mobility, with every KPI measured in band</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20%7C%20TR%2038.821-orange.svg" alt="3GPP TR 38.811 and TR 38.821"/>
   <img src="https://img.shields.io/badge/backends-mmWave%20%7C%205G--LENA%20nr-purple.svg" alt="mmWave and 5G-LENA nr backends"/>
@@ -146,7 +146,7 @@ Eight suites, 55 test cases in all. `ntn-real-stack-helper` alone has 40, among 
 
 ## Dependencies
 
-ns-3.43 `core`, `network`, `internet`, `applications`, `point-to-point`, `propagation`, `mobility`, `flow-monitor`, `lte`, the toolkit's vendored `mmwave` and `nr` (with the ntn patches in `contrib/nr/ntn-patches/`), and `magister-stats`.
+ns-3.49 `core`, `network`, `internet`, `applications`, `point-to-point`, `propagation`, `mobility`, `flow-monitor`, `lte`, the toolkit's vendored `mmwave` and `nr` (with the ntn patches in `contrib/nr/ntn-patches/`), and `magister-stats`.
 
 ## Scope and limitations
 
@@ -184,4 +184,4 @@ GPL-2.0-only, matching ns-3. See [LICENSE](LICENSE).
 **Muhammad Uzair**, Independent Researcher
 muhammaduzairr69@gmail.com · [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.43 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.49 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

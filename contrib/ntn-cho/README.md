@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.331%20CondEvent-orange.svg" alt="3GPP TS 38.331 CondEvent"/>
   <img src="https://img.shields.io/badge/triggers-A3%20%7C%20D1%20%7C%20D2%20%7C%20T1%20%7C%20elev%20%7C%20TA-purple.svg" alt="trigger classes"/>
@@ -103,7 +103,7 @@ Inside the toolkit, where the module is already present and built:
 ./test.py -s ntn-cho
 ```
 
-Standalone, into an existing ns-3.43 tree:
+Standalone, into an existing ns-3.49 tree:
 
 ```bash
 git clone -b main https://github.com/Muhammaduazir69/ntn-cho-framework.git contrib/ntn-cho
@@ -138,7 +138,7 @@ Binaries land in `build/contrib/ntn-cho/examples/`.
 
 ## Dependencies
 
-- **Required:** ns-3.43 and the SNS3 [`satellite`](https://github.com/sns3/sns3-satellite) module (`NtnOrbitPredictor` uses its SGP4 mobility and antenna patterns); toolkit module `ntn-rrc` (linked by `CMakeLists.txt`).
+- **Required:** ns-3.49 and the SNS3 [`satellite`](https://github.com/sns3/sns3-satellite) module (`NtnOrbitPredictor` uses its SGP4 mobility and antenna patterns); toolkit module `ntn-rrc` (linked by `CMakeLists.txt`).
 - **Examples:** `ntn-traffic` (`NtnRealStackHelper`, `NtnRealisticTrafficHelper`), `ntn-constellation` (`Sgp4MobilityModel`, `WalkerConstellation`), the toolkit's `mmwave` and `lte`.
 - **Optional:** `ns3-ai` or `ns3-ai-ntn`, only for `NtnAiInterface`.
 
@@ -176,4 +176,4 @@ GPL-2.0-only, matching ns-3. See [LICENSE](LICENSE).
 **Muhammad Uzair**, Independent Researcher
 muhammaduzairr69@gmail.com · [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.43 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.49 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

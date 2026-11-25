@@ -19,7 +19,7 @@
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/propagation-Kepler%2BJ2%20%7C%20Vallado%20SGP4-orange.svg" alt="Kepler plus J2 or Vallado SGP4"/>
   <img src="https://img.shields.io/badge/3GPP-TR%2038.821%20%7C%20TR%2038.811-purple.svg" alt="3GPP TR 38.821 and TR 38.811"/>
@@ -109,7 +109,7 @@ Inside the toolkit, where the module is already present and built:
 ./test.py -s ntn-constellation
 ```
 
-Standalone, into an existing ns-3.43 tree:
+Standalone, into an existing ns-3.49 tree:
 
 ```bash
 git clone -b ntn-constellation-v2 https://github.com/Muhammaduazir69/ntn-constellation.git contrib/ntn-constellation
@@ -121,7 +121,7 @@ git clone -b ntn-constellation-v2 https://github.com/Muhammaduazir69/ntn-constel
 
 ## Examples
 
-Binaries land in `build/contrib/ntn-constellation/examples/` as `ns3.43-<name>-default`.
+Binaries land in `build/contrib/ntn-constellation/examples/` as `ns3.49-<name>-default`.
 
 | Example | What it shows | Command |
 |---|---|---|
@@ -155,7 +155,7 @@ Against an independent Skyfield reference it showed 0 NaN over 24 h, 66 satellit
 
 ## Dependencies
 
-- ns-3.43 with `core` and `mobility`; `satellite` (SNS3) and `thz-ntn` are linked by the module's `CMakeLists.txt`.
+- ns-3.49 with `core` and `mobility`; `satellite` (SNS3) and `thz-ntn` are linked by the module's `CMakeLists.txt`.
 - Examples: `ntn-traffic` (NR stack, `NtnOranApplication`), `ntn-cho` (TR 38.811 terminals, ENU projection), the toolkit's `mmwave`.
 - Python companion: Python 3.10+, `sgp4`, `skyfield` (see `pyproject.toml`).
 
@@ -193,4 +193,4 @@ GPL-2.0-only, matching ns-3. See [LICENSE](LICENSE). Element sets in `paper/` an
 **Muhammad Uzair**, Independent Researcher
 muhammaduzairr69@gmail.com · [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.43 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.49 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

@@ -19,7 +19,7 @@
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/band-100%20GHz%20to%201%20THz-success.svg" alt="100 GHz to 1 THz"/>
   <img src="https://img.shields.io/badge/ITU--R-P.676--13%20%C2%B7%20P.835--6%20%C2%B7%20P.838%20%C2%B7%20P.840%20%C2%B7%20P.618-orange.svg" alt="ITU-R P.676-13, P.835-6, P.838, P.840, P.618"/>
@@ -120,7 +120,7 @@ Inside the toolkit, where the module is already present and built:
 ./ns3 run "thz-ntn-real-stack --rainMmH=25"
 ```
 
-Standalone, into an existing ns-3.43 tree (the GitHub repository of this module is `ns3-thz-ntn`):
+Standalone, into an existing ns-3.49 tree (the GitHub repository of this module is `ns3-thz-ntn`):
 
 ```bash
 git clone -b thz-ntn-v2 https://github.com/Muhammaduazir69/ns3-thz-ntn.git contrib/thz-ntn
@@ -172,7 +172,7 @@ The `thz-ntn` suite (`Type::UNIT`, 49 test cases) covers FSPL, P.676-13 zenith a
 
 ## Dependencies
 
-ns-3.43 core, network, mobility, propagation and spectrum; `ntn-constellation` and `ntn-cho` for SGP4 and terminal geometry; `ntn-traffic`, `mmwave` and `lte` for the measured-radio examples; `oran-ntn` for the RIC-controlled example.
+ns-3.49 core, network, mobility, propagation and spectrum; `ntn-constellation` and `ntn-cho` for SGP4 and terminal geometry; `ntn-traffic`, `mmwave` and `lte` for the measured-radio examples; `oran-ntn` for the RIC-controlled example.
 
 ## Scope and limitations
 

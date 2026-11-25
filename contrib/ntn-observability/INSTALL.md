@@ -17,12 +17,12 @@
 
 ---
 
-`ntn-observability` is an ns-3.43 contributed module: InfluxDB sinks, a
+`ntn-observability` is an ns-3.49 contributed module: InfluxDB sinks, a
 NetSimulyzer JSON exporter, reproducibility manifests, and pre-built Grafana
 dashboards. The recommended way to run it is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree (branch
 `ntn-integration-v2`), where every dependency below is already present. It also
-builds on a vanilla ns-3.43 tree once the sibling toolkit modules in section 2
+builds on a vanilla ns-3.49 tree once the sibling toolkit modules in section 2
 are added.
 
 ---
@@ -127,7 +127,7 @@ You still need the section 2 dependencies (`ntn-traffic`, `ntn-cho`,
 ## 5. Run the examples
 
 Binaries land in `build/contrib/ntn-observability/examples/` as
-`ns3.43-<name>-default`.
+`ns3.49-<name>-default`.
 
 ### 5a. ntn-observability-demo — end-to-end telemetry
 

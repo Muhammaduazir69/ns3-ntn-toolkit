@@ -17,10 +17,10 @@
 
 ---
 
-`ntn-slice` is an ns-3.43 contributed module. The recommended way to run it is
+`ntn-slice` is an ns-3.49 contributed module. The recommended way to run it is
 inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
 tree (branch `ntn-integration-v2`), where every dependency below is already
-present. It also builds on a vanilla ns-3.43 tree — the library links only the
+present. It also builds on a vanilla ns-3.49 tree, the library links only the
 ns-3 core; the examples additionally need the sibling toolkit modules listed in
 section 2.
 
@@ -84,7 +84,7 @@ git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolk
 GitLab mirror: `https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit`.
 Docker: `uzairdocker69/ns3-ntn-toolkit:latest`.
 
-### Standalone repo (into a vanilla ns-3.43 tree)
+### Standalone repo (into a vanilla ns-3.49 tree)
 
 ```bash
 cd contrib/

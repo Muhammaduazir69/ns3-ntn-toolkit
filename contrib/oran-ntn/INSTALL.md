@@ -17,14 +17,14 @@
 
 ---
 
-`oran-ntn` is an ns-3.43 contributed module that brings the O-RAN
+`oran-ntn` is an ns-3.49 contributed module that brings the O-RAN
 disaggregated RAN control architecture to non-terrestrial networks: a
 multi-tier RIC (real-time / Near-RT / on-board **Space-RIC**), E2AP-style
 termination over SCTP/TCP, A1 policy ingest, KPM/RC/CCC service models, and
 xApps with a conflict manager. The recommended way to run it is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree
 (branch `ntn-integration-v2`), where every dependency below is already
-present. It also builds on a vanilla ns-3.43 tree, provided you add the
+present. It also builds on a vanilla ns-3.49 tree, provided you add the
 sibling toolkit modules listed in section 2 — the library links `satellite`,
 `mmwave`, and `ntn-traffic`; the examples additionally pull in `ntn-cho`,
 `ntn-constellation`, `ntn-slice`, and `ntn-observability`.
