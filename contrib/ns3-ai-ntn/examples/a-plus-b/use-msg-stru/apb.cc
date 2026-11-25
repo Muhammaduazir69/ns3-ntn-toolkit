@@ -19,28 +19,61 @@
  *          Muyuan Shen <muyuan_shen@hust.edu.cn>
  */
 
+#include "../apb-leo-path.h"
 #include "apb.h"
 
+#include "ns3/core-module.h"
 #include "ns3/ntn-dataset-writer.h"
+
 #include <ns3/ns3-ai-ntn-module.h>
 
-#include <chrono>
 #include <iostream>
-#include <random>
 
-#define NUM_ENV 10000
-
-// Interface test: this example exercises only the ns3-ai C++/Python bridge
-// (struct-based shared-memory messages).
-// It has no network, channel or NTN node on purpose: the C++ side draws two random
-// integers, the Python agent returns their sum, and the C++ side prints both.
-// No physics is modeled, so the dataset record carries only the run metadata.
+// NTN version of the a-plus-b bridge test. The C++ side samples a LEO bent pipe (Walker shell,
+// SGP4, ntn-constellation) between a terminal in Toulouse and a feeder gateway in Madrid and sends
+// the two one-way delays, terminal to satellite (a) and satellite to gateway (b), in microseconds;
+// the Python agent returns a + b, the end-to-end one-way delay. Each exchange is an event of a
+// simulation run as long as the pass, so the serving satellites and ground ends are recorded as a
+// globe scene (ntn-observability). The run checks every answer and writes the delay statistics.
 
 using namespace ns3;
 
-int
-main()
+namespace
 {
+
+/// One exchange: one sample of the pass in the shared struct.
+void
+Exchange(Ns3AiMsgInterfaceImpl<EnvStruct, ActStruct>* msg,
+         const apbleo::Sample* s,
+         apbleo::PassStats* stats)
+{
+    msg->CppSendBegin();
+    msg->GetCpp2PyStruct()->env_a = s->upUs;
+    msg->GetCpp2PyStruct()->env_b = s->downUs;
+    msg->CppSendEnd();
+    msg->CppRecvBegin();
+    stats->Add(*s, msg->GetPy2CppStruct()->act_c);
+    msg->CppRecvEnd();
+}
+
+} // namespace
+
+int
+main(int argc, char* argv[])
+{
+    double altKm = 550.0;
+    double inclinationDeg = 53.0;
+    double minElevationDeg = 25.0;
+    uint32_t steps = 10000;
+    double dtS = 0.1;
+    CommandLine cmd(__FILE__);
+    cmd.AddValue("altKm", "Walker shell altitude (km)", altKm);
+    cmd.AddValue("inclinationDeg", "Walker shell inclination (deg)", inclinationDeg);
+    cmd.AddValue("minElevationDeg", "minimum elevation at both ground ends (deg)", minElevationDeg);
+    cmd.AddValue("steps", "number of exchanges with the Python agent", steps);
+    cmd.AddValue("dtS", "time between samples of the pass (s)", dtS);
+    cmd.Parse(argc, argv);
+
     auto interface = Ns3AiMsgInterface::Get();
     interface->SetIsMemoryCreator(false);
     interface->SetUseVector(false);
@@ -48,28 +81,22 @@ main()
     Ns3AiMsgInterfaceImpl<EnvStruct, ActStruct>* msgInterface =
         interface->GetInterface<EnvStruct, ActStruct>();
 
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::mt19937 gen(seed);
-    std::uniform_int_distribution<int> distrib(1, 10);
+    apbleo::LeoPath path;
+    path.Build(altKm, inclinationDeg, minElevationDeg);
+    const std::vector<apbleo::Sample> samples = path.Plan(steps, dtS);
+    path.AddSceneNodes();
+    ns3::ntnobs::StartSceneFromNodeList(".");
 
-    for (int i = 0; i < NUM_ENV; ++i)
+    apbleo::PassStats stats;
+    for (uint32_t i = 0; i < steps; ++i)
     {
-        msgInterface->CppSendBegin();
-        std::cout << "set: ";
-        uint32_t temp_a = distrib(gen);
-        uint32_t temp_b = distrib(gen);
-        std::cout << temp_a << "," << temp_b << ";";
-        msgInterface->GetCpp2PyStruct()->env_a = temp_a;
-        msgInterface->GetCpp2PyStruct()->env_b = temp_b;
-        std::cout << "\n";
-        msgInterface->CppSendEnd();
-
-        msgInterface->CppRecvBegin();
-        std::cout << "get: ";
-        std::cout << msgInterface->GetPy2CppStruct()->act_c;
-        std::cout << "\n";
-        msgInterface->CppRecvEnd();
+        Simulator::Schedule(Seconds(i * dtS), &Exchange, msgInterface, &samples[i], &stats);
     }
-    // ntn-dataset@1: standard manifest + sim_health (shared-memory IPC demo, no network)
-    ns3::ntnobs::WriteDatasetRecord(".", "ns3ai_apb_msg_stru", "analytic", 0, nullptr);
+    Simulator::Stop(Seconds(steps * dtS));
+    Simulator::Run();
+    stats.Print(path);
+    ns3::ntnobs::WriteDatasetRecord(".", "ns3ai_apb_msg_stru", "analytic", argc, argv,
+                                    stats.Metrics(path, dtS));
+    Simulator::Destroy();
+    return stats.GetWrong() == 0 ? 0 : 1;
 }

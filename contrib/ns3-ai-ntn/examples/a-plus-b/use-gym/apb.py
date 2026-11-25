@@ -21,6 +21,10 @@ import gymnasium as gym
 import sys
 import traceback
 
+# Pass-through of --key=value arguments to the C++ side (altKm, inclinationDeg,
+# minElevationDeg, steps, dtS), e.g. python3 apb.py --altKm=1200
+ns3_setting = dict(a[2:].split("=", 1) for a in sys.argv[1:] if a.startswith("--") and "=" in a)
+
 APB_SIZE = 3
 
 
@@ -37,7 +41,8 @@ class ApbAgent:
 
         return [act]
 
-env = gym.make("ns3ai_gym_env/Ns3-v0", targetName="ns3ai_apb_gym", ns3Path="../../../../../")
+env = gym.make("ns3ai_gym_env/Ns3-v0", targetName="ns3ai_apb_gym", ns3Path="../../../../../",
+               ns3Settings=ns3_setting or None)
 ob_space = env.observation_space
 ac_space = env.action_space
 print("Observation space: ", ob_space, ob_space.dtype)

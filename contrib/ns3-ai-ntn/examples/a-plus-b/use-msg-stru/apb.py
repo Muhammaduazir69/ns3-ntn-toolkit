@@ -24,9 +24,13 @@ from ns3ai_utils import Experiment
 import sys
 import traceback
 
+# Pass-through of --key=value arguments to the C++ side (altKm, inclinationDeg,
+# minElevationDeg, steps, dtS), e.g. python3 apb.py --altKm=1200
+ns3_setting = dict(a[2:].split("=", 1) for a in sys.argv[1:] if a.startswith("--") and "=" in a)
+
 exp = Experiment("ns3ai_apb_msg_stru", "../../../../../", py_binding,
                  handleFinish=True)
-msgInterface = exp.run(show_output=True)
+msgInterface = exp.run(setting=ns3_setting or None, show_output=True)
 
 try:
     while True:

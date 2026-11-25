@@ -2,12 +2,32 @@
 
 ## Introduction
 
-In this example, C++ side starts by setting 2 random numbers between 0 and 10 in shared memory. Then, Python side gets the
-numbers and sets the sum of the numbers in shared memory (in another region). Finally, C++ gets the sum that Python set.
-The procedure is analogous to C++ passing RL states to Python and Python passing RL actions back to C++, and is
-repeated many times.
+The C++ side samples a LEO bent pipe between a user terminal in Toulouse and a feeder gateway in
+Madrid. The satellites are a 72 x 22 Walker-delta shell propagated with SGP4 (`ntn-constellation`);
+the serving satellite is the one highest over both ends, kept until it drops below the minimum
+elevation at either end. Each step, C++ writes the two one-way delays into shared memory, terminal
+to satellite (a) and satellite to gateway (b), in microseconds. The Python side returns a + b,
+the end-to-end one-way delay, and C++ checks every answer. The exchange is the same pattern as
+C++ passing RL states to Python and Python passing actions back.
 
-We created this example to demonstrate the basic usage of ns3-ai's two interfaces: Gym interface and message interface.
+Each exchange is an event of a simulation run as long as the pass, so the ground ends and the
+satellites that served are recorded as a globe scene (`scene.czml`, `ntn-observability`), and the
+run writes `repro-manifest.json` and `sim_health.csv` with the delay range, handovers and outage.
+
+The examples demonstrate ns3-ai's two interfaces: the Gym interface and the message interface.
+
+### Parameters
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `altKm` | 550 | Walker shell altitude (km) |
+| `inclinationDeg` | 53 | Walker shell inclination (deg) |
+| `minElevationDeg` | 25 | minimum elevation at both ground ends (deg) |
+| `steps` | 10000 | exchanges with the Python agent |
+| `dtS` | 0.1 | time between samples of the pass (s) |
+
+`python apb.py --altKm=1200 --minElevationDeg=40` passes them to the C++ side. With the defaults
+the one-way delay spans about 4.2 to 7.5 ms; at 1200 km and 40 degrees it is about 8.3 to 11.3 ms.
 
 ### Cmake targets
 

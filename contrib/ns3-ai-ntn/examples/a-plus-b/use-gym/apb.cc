@@ -17,21 +17,20 @@
  * Author:  Muyuan Shen <muyuan_shen@hust.edu.cn>
  */
 
+#include "../apb-leo-path.h"
+
 #include "ns3/ntn-dataset-writer.h"
 #include <ns3/ns3-ai-ntn-module.h>
 #include <ns3/core-module.h>
 
-#include <chrono>
 #include <iostream>
-#include <random>
 
-#define NUM_ENV 10000
-
-// Interface test: this example exercises only the ns3-ai C++/Python bridge
-// (the Gym-style OpenGymEnv interface).
-// It has no network, channel or NTN node on purpose: the C++ side draws two random
-// integers, the Python agent returns their sum, and the C++ side prints both.
-// No physics is modeled, so the dataset record carries only the run metadata.
+// NTN version of the a-plus-b bridge test. The C++ side samples a LEO bent pipe (Walker shell,
+// SGP4, ntn-constellation) between a terminal in Toulouse and a feeder gateway in Madrid and sends
+// the two one-way delays, terminal to satellite (a) and satellite to gateway (b), in microseconds;
+// the Python agent returns a + b, the end-to-end one-way delay. Each exchange is an event of a
+// simulation run as long as the pass, so the serving satellites and ground ends are recorded as a
+// globe scene (ntn-observability). The run checks every answer and writes the delay statistics.
 
 namespace ns3
 {
@@ -95,7 +94,7 @@ ApbEnv::GetActionSpace()
 {
     std::vector<uint32_t> shape = {1};
     std::string dtype = TypeNameGet<uint32_t>();
-    Ptr<OpenGymBoxSpace> box = CreateObject<OpenGymBoxSpace>(0, 20, shape, dtype);
+    Ptr<OpenGymBoxSpace> box = CreateObject<OpenGymBoxSpace>(0, 100000, shape, dtype);
     return box;
 }
 
@@ -104,7 +103,7 @@ ApbEnv::GetObservationSpace()
 {
     std::vector<uint32_t> shape = {2};
     std::string dtype = TypeNameGet<uint32_t>();
-    Ptr<OpenGymBoxSpace> box = CreateObject<OpenGymBoxSpace>(0, 10, shape, dtype);
+    Ptr<OpenGymBoxSpace> box = CreateObject<OpenGymBoxSpace>(0, 50000, shape, dtype);
     return box;
 }
 
@@ -148,35 +147,57 @@ ApbEnv::ExecuteActions(Ptr<OpenGymDataContainer> action)
 
 } // namespace ns3
 
+namespace
+{
+
+/// One Gym step: one sample of the pass as the observation, the agent's action as the answer.
+void
+Step(ns3::Ptr<ns3::ApbEnv> apb, const apbleo::Sample* s, apbleo::PassStats* stats)
+{
+    apb->m_a = s->upUs;
+    apb->m_b = s->downUs;
+    stats->Add(*s, apb->GetAPlusB());
+}
+
+} // namespace
+
 int
 main(int argc, char* argv[])
 {
     using namespace ns3;
 
+    double altKm = 550.0;
+    double inclinationDeg = 53.0;
+    double minElevationDeg = 25.0;
+    uint32_t steps = 10000;
+    double dtS = 0.1;
+    CommandLine cmd(__FILE__);
+    cmd.AddValue("altKm", "Walker shell altitude (km)", altKm);
+    cmd.AddValue("inclinationDeg", "Walker shell inclination (deg)", inclinationDeg);
+    cmd.AddValue("minElevationDeg", "minimum elevation at both ground ends (deg)", minElevationDeg);
+    cmd.AddValue("steps", "number of exchanges with the Python agent", steps);
+    cmd.AddValue("dtS", "time between samples of the pass (s)", dtS);
+    cmd.Parse(argc, argv);
+
     Ptr<ApbEnv> apb = CreateObject<ApbEnv>();
 
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::mt19937 gen(seed);
-    std::uniform_int_distribution<int> distrib(1, 10);
+    apbleo::LeoPath path;
+    path.Build(altKm, inclinationDeg, minElevationDeg);
+    const std::vector<apbleo::Sample> samples = path.Plan(steps, dtS);
+    path.AddSceneNodes();
+    ns3::ntnobs::StartSceneFromNodeList(".");
 
-    uint32_t sum;
-
-    for (int i = 0; i < NUM_ENV; ++i)
+    apbleo::PassStats stats;
+    for (uint32_t i = 0; i < steps; ++i)
     {
-        apb->m_a = distrib(gen);
-        apb->m_b = distrib(gen);
-        std::cout << "set: " << apb->m_a << "," << apb->m_b << ";";
-        std::cout << "\n";
-
-        sum = apb->GetAPlusB();
-
-        std::cout << "get: " << sum << ";";
-        std::cout << "\n";
+        Simulator::Schedule(Seconds(i * dtS), &Step, apb, &samples[i], &stats);
     }
-
+    Simulator::Stop(Seconds(steps * dtS));
+    Simulator::Run();
     apb->NotifySimulationEnd();
-
-    // ntn-dataset@1: standard manifest + sim_health (Gym loop over the simulator)
-    ns3::ntnobs::WriteDatasetRecord(".", "ns3ai_apb_gym", "measured", argc, argv);
-    return 0;
+    stats.Print(path);
+    ns3::ntnobs::WriteDatasetRecord(".", "ns3ai_apb_gym", "analytic", argc, argv,
+                                    stats.Metrics(path, dtS));
+    Simulator::Destroy();
+    return stats.GetWrong() == 0 ? 0 : 1;
 }
