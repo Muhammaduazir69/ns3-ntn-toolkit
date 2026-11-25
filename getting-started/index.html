@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Open-source ns-3.43 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.">
+        <meta name="description" content="Open-source ns-3.49 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.">
       
       
         <meta name="author" content="Muhammad Uzair">
@@ -77,14 +77,14 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="ns3-ntn-toolkit">
   <meta property="og:title" content="Getting started · ns3-ntn-toolkit">
-  <meta property="og:description" content="Open-source ns-3.43 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.">
+  <meta property="og:description" content="Open-source ns-3.49 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.">
   <meta property="og:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/getting-started.png">
   <meta property="og:url" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/getting-started/">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Getting started · ns3-ntn-toolkit">
-  <meta name="twitter:description" content="Open-source ns-3.43 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.">
+  <meta name="twitter:description" content="Open-source ns-3.49 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.">
   <meta name="twitter:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/getting-started.png">
 
   <!-- Keywords / robots -->
@@ -98,7 +98,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "ns3-ntn-toolkit",
-    "description": "Open-source ns-3.43 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
+    "description": "Open-source ns-3.49 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
     "applicationCategory": "Simulation / Research Software",
     "operatingSystem": "Linux, Docker",
     "softwareVersion": "2.2.0",
@@ -1985,18 +1985,18 @@
 <tbody>
 <tr>
 <td>Linux</td>
-<td>Ubuntu 22.04 / Debian 12</td>
+<td>Ubuntu 24.04 / Debian 12 (Ubuntu 22.04 with CMake ≥ 3.25 from pip or Kitware)</td>
 <td>macOS works for most modules; Windows via WSL2</td>
 </tr>
 <tr>
 <td>C++ compiler</td>
-<td>g++ 11+ or clang 14+</td>
-<td>C++20 features</td>
+<td>g++ 11.1+ or clang 17+</td>
+<td>ns-3.49 builds as C++23</td>
 </tr>
 <tr>
 <td>CMake</td>
-<td>≥ 3.20</td>
-<td>required by ns-3.43</td>
+<td>≥ 3.25</td>
+<td>required by ns-3.49</td>
 </tr>
 <tr>
 <td>Python</td>
@@ -2019,7 +2019,7 @@
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>pull<span class="w"> </span>uzairdocker69/ns3-ntn-toolkit:latest
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>-p<span class="w"> </span><span class="m">8090</span>:8090<span class="w"> </span>-p<span class="w"> </span><span class="m">3000</span>:3000<span class="w"> </span>uzairdocker69/ns3-ntn-toolkit:latest
 </span></code></pre></div>
-<p>This gives you a shell inside a pre-built image with ns-3.43, all 14 contrib modules, and Python utilities ready. Port <strong>8090</strong> exposes the digital-twin FastAPI (that is the server's own default, see <code>ntn_digital_twin/api/server.py</code>); port 3000 exposes Grafana.</p>
+<p>This gives you a shell inside a pre-built image with ns-3.49, all 14 contrib modules, and Python utilities ready. Port <strong>8090</strong> exposes the digital-twin FastAPI (that is the server's own default, see <code>ntn_digital_twin/api/server.py</code>); port 3000 exposes Grafana.</p>
 <h2 id="option-2-build-from-source">Option 2 - Build from source<a class="headerlink" href="#option-2-build-from-source" title="Permanent link">&para;</a></h2>
 <h3 id="1-clone">1. Clone<a class="headerlink" href="#1-clone" title="Permanent link">&para;</a></h3>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
@@ -2081,8 +2081,8 @@
 </span></code></pre></div>
 <h2 id="common-issues">Common issues<a class="headerlink" href="#common-issues" title="Permanent link">&para;</a></h2>
 <details class="failure">
-<summary>ns-3 build fails on <code>c++20</code> features</summary>
-<p>Update g++ to ≥11 or clang to ≥14. <code>apt install g++-11</code> if on Ubuntu 22.04.</p>
+<summary>ns-3 build fails on <code>c++23</code> features</summary>
+<p>Update g++ to 11.1 or newer, or clang to 17 or newer (Ubuntu 24.04 ships g++-13).</p>
 </details>
 <details class="failure">
 <summary><code>./ns3 configure</code> reports modules missing</summary>

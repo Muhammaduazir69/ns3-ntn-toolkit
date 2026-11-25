@@ -1,6 +1,6 @@
 # ns3-ntn-toolkit
 
-> ns3-ntn-toolkit is an open-source ns-3.43 simulation platform for 5G and 6G
+> ns3-ntn-toolkit is an open-source ns-3.49 simulation platform for 5G and 6G
 > non-terrestrial networks (NTN). It carries fourteen custom modules and three
 > vendored upstream stacks in one tree, so that a LEO satellite's propagated position
 > drives a real 5G NR spectrum PHY, a handover decision rides a real Xn interface
@@ -9,7 +9,7 @@
 > plane and the measurement plane are the same plane.
 
 Author: Muhammad Uzair, Independent Researcher, ORCID 0009-0002-4104-2680.
-License: GPL-2.0-only. Built on ns-3.43.
+License: GPL-2.0-only. Built on ns-3.49.
 
 ## What it is, in one line
 

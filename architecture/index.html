@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="How the fourteen modules of the ns3-ntn-toolkit compose over vendored SNS3 satellite and 5G NR stacks on an unmodified ns-3.43 core, from orbit state through the radio to the O-RAN control loop and the exported KPIs.">
+        <meta name="description" content="How the fourteen modules of the ns3-ntn-toolkit compose over vendored SNS3 satellite and 5G NR stacks on an ns-3.49 core with documented patches, from orbit state through the radio to the O-RAN control loop and the exported KPIs.">
       
       
         <meta name="author" content="Muhammad Uzair">
@@ -77,14 +77,14 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="ns3-ntn-toolkit">
   <meta property="og:title" content="Architecture · ns3-ntn-toolkit">
-  <meta property="og:description" content="How the fourteen modules of the ns3-ntn-toolkit compose over vendored SNS3 satellite and 5G NR stacks on an unmodified ns-3.43 core, from orbit state through the radio to the O-RAN control loop and the exported KPIs.">
+  <meta property="og:description" content="How the fourteen modules of the ns3-ntn-toolkit compose over vendored SNS3 satellite and 5G NR stacks on an ns-3.49 core with documented patches, from orbit state through the radio to the O-RAN control loop and the exported KPIs.">
   <meta property="og:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/architecture.png">
   <meta property="og:url" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/architecture/">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Architecture · ns3-ntn-toolkit">
-  <meta name="twitter:description" content="How the fourteen modules of the ns3-ntn-toolkit compose over vendored SNS3 satellite and 5G NR stacks on an unmodified ns-3.43 core, from orbit state through the radio to the O-RAN control loop and the exported KPIs.">
+  <meta name="twitter:description" content="How the fourteen modules of the ns3-ntn-toolkit compose over vendored SNS3 satellite and 5G NR stacks on an ns-3.49 core with documented patches, from orbit state through the radio to the O-RAN control loop and the exported KPIs.">
   <meta name="twitter:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/architecture.png">
 
   <!-- Keywords / robots -->
@@ -98,7 +98,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "ns3-ntn-toolkit",
-    "description": "Open-source ns-3.43 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
+    "description": "Open-source ns-3.49 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
     "applicationCategory": "Simulation / Research Software",
     "operatingSystem": "Linux, Docker",
     "softwareVersion": "2.2.0",
@@ -1939,14 +1939,16 @@
 
 <h1 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h1>
 <figure>
-  <img alt="ns3-ntn-toolkit architecture: orbital and mobility, protocol L1 to L3, physical layer, control and learning, and operations layers, over vendored SNS3 satellite and mmWave NR stacks, on an unmodified ns-3.43 simulation core" loading="lazy" src="../media/toolkit_architecture.png" />
+  <img alt="ns3-ntn-toolkit architecture: orbital and mobility, protocol L1 to L3, physical layer, control and learning, and operations layers, over vendored 5G-LENA NR, SNS3 satellite and mmWave NR stacks, on an ns-3.49 simulation core with four documented patches and the mmWave LTE fork" loading="lazy" src="../media/toolkit_architecture.png" />
 <br />
 <figcaption>The architecture as published in the accompanying manuscript. Amber arrows follow one run left to right: orbit state, beam trigger, THz xApps, KPI export. Tone darkens with depth; a rounded outline marks a user-facing tool.</figcaption>
 </figure>
 <h2 id="the-organising-idea">The organising idea<a class="headerlink" href="#the-organising-idea" title="Permanent link">&para;</a></h2>
-<p>Five layers sit on two vendored upstream stacks, which sit on an unmodified
-ns-3.43 core. Nothing in the core is patched, which is what makes the toolkit
-trackable against upstream ns-3 releases rather than a permanent fork.</p>
+<p>Five layers sit on the vendored upstream stacks (5G-LENA NR v5.2 with the toolkit's NTN patches,
+SNS3 satellite and mmWave NR), which sit on an ns-3.49 core. The core carries four small, documented
+patches (elevation convention, TCP timestamps, the 3GPP HTTP model and the 3GPP channel update rule)
+plus the LTE fork that mmWave requires; each patch is a reproducible diff against ns-3.49 in
+<code>contrib/ntn-traffic/patches/ns3</code>, which keeps the toolkit trackable against upstream ns-3 releases.</p>
 <p>The layering is not decorative. Each layer only knows about the one below it, so
 a scenario can replace a layer without the ones above noticing. The orbital layer
 does not know a radio exists. The radio does not know a RIC exists. The RIC gets
@@ -2060,7 +2062,7 @@ effect is measurable.</p>
 </tr>
 <tr>
 <td>Simulation core</td>
-<td>ns-3.43, unmodified</td>
+<td>ns-3.49, four documented patches and the mmWave LTE fork</td>
 <td>Events, channels, helpers, the attribute system</td>
 </tr>
 </tbody>
@@ -2093,7 +2095,7 @@ learning and operations layers show how the loops above are built.</p>
 <h2 id="where-the-boundaries-are">Where the boundaries are<a class="headerlink" href="#where-the-boundaries-are" title="Permanent link">&para;</a></h2>
 <p>An architecture page that only lists what is present is half a document. The
 toolkit's boundaries are stated in
-<a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/SCOPE_AND_LIMITATIONS.md">SCOPE_AND_LIMITATIONS.md</a>,
+<a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/SCOPE_AND_LIMITATIONS.md">SCOPE_AND_LIMITATIONS.md</a>,
 and the ones most likely to affect an experiment design are:</p>
 <ul>
 <li>The air interface carries no propagation delay in the shipped runs; the NTN

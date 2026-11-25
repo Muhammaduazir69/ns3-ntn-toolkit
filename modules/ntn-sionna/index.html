@@ -98,7 +98,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "ns3-ntn-toolkit",
-    "description": "Open-source ns-3.43 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
+    "description": "Open-source ns-3.49 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
     "applicationCategory": "Simulation / Research Software",
     "operatingSystem": "Linux, Docker",
     "softwareVersion": "2.2.0",
@@ -1948,11 +1948,11 @@
 
 <h1 id="ntn-sionna">ntn-sionna<a class="headerlink" href="#ntn-sionna" title="Permanent link">&para;</a></h1>
 <p align="center"><strong>GPU ray tracing for the last kilometer of an NTN link: NVIDIA Sionna RT bridged into ns-3, with provenance on every query</strong></p>
-<div class="admonition tip module-project-page"><p class="admonition-title">Project page, release and live runs</p><p><a href="https://muhammaduazir69.github.io/ntn-sionna/"><img src="https://muhammaduazir69.github.io/ntn-sionna/banner.jpg" alt="ntn-sionna project page banner" style="width:100%;border-radius:8px"/></a></p><p><a href="https://muhammaduazir69.github.io/ntn-sionna/">Project page</a> · <a href="https://github.com/Muhammaduazir69/ntn-sionna/releases/tag/v2.7.1">Release v2.7.1</a> · <a href="https://6g-ntn.live/module/ntn-sionna">Run the examples at 6g-ntn.live</a> · <a href="https://youtu.be/JNStiBst68I">YouTube demo</a> · <a href="https://www.linkedin.com/in/muhammad-uzair-285331185/">LinkedIn</a></p></div>
+<div class="admonition tip module-project-page"><p class="admonition-title">Project page, release and live runs</p><p><a href="https://muhammaduazir69.github.io/ntn-sionna/"><img src="https://muhammaduazir69.github.io/ntn-sionna/banner.jpg" alt="ntn-sionna project page banner" style="width:100%;border-radius:8px"/></a></p><p><a href="https://muhammaduazir69.github.io/ntn-sionna/">Project page</a> · <a href="https://github.com/Muhammaduazir69/ntn-sionna/releases/tag/v3.0.0">Release v3.0.0</a> · <a href="https://6g-ntn.live/module/ntn-sionna">Run the examples at 6g-ntn.live</a> · <a href="https://youtu.be/JNStiBst68I">YouTube demo</a> · <a href="https://www.linkedin.com/in/muhammad-uzair-285331185/">LinkedIn</a></p></div>
 
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/Sionna%20RT-GPU%20ray%20tracing-red.svg" alt="Sionna RT GPU ray tracing"/>
   <img src="https://img.shields.io/badge/3GPP-TR%2038.811-orange.svg" alt="3GPP TR 38.811"/>
@@ -2144,8 +2144,8 @@
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>./ns3<span class="w"> </span>run<span class="w"> </span><span class="s2">&quot;leo-pass-sionna-vs-tr38811 --sionnaServer=127.0.0.1:8765&quot;</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>./ns3<span class="w"> </span>run<span class="w"> </span><span class="s2">&quot;ntn-sionna-leo-downlink-traffic --simSeconds=60 --rainMmH=10&quot;</span>
 </span></code></pre></div>
-<p>Standalone, into an existing ns-3.43 tree:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>clone<span class="w"> </span>-b<span class="w"> </span>ntn-sionna-v2<span class="w"> </span>https://github.com/Muhammaduazir69/ntn-sionna.git<span class="w"> </span>contrib/ntn-sionna
+<p>Standalone, into an existing ns-3.49 tree:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>clone<span class="w"> </span>-b<span class="w"> </span>ntn-sionna-v4<span class="w"> </span>https://github.com/Muhammaduazir69/ntn-sionna.git<span class="w"> </span>contrib/ntn-sionna
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>./ns3<span class="w"> </span>configure<span class="w"> </span>--enable-examples<span class="w"> </span>--enable-tests
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>./ns3<span class="w"> </span>build
 </span></code></pre></div>
@@ -2242,7 +2242,7 @@
 </span></code></pre></div>
 <p>The <code>ntn-sionna</code> C++ suite (<code>Type::UNIT</code>, 44 test cases) runs against the stub server and covers the FSPL fallback and its counting, a mid-run server kill, the UDP wire format with MIMO and RIS fields and <code>los_only</code>, the atmospheric chain and cascade, cache keys, quantization, time buckets and LRU eviction, the batch client, replay, CIR Doppler against v·k/lambda and the calibrator detecting a 3 dB offset.</p>
 <h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
-<p>ns-3.43 core, network, mobility and propagation; <code>ntn-traffic</code>, <code>ntn-constellation</code>, <code>ntn-cho</code>, <code>mmwave</code> or <code>nr</code> for the measured-radio examples. For live tracing: Python 3, CUDA and Sionna RT on the server machine.</p>
+<p>ns-3.49 core, network, mobility and propagation; <code>ntn-traffic</code>, <code>ntn-constellation</code>, <code>ntn-cho</code>, <code>mmwave</code> or <code>nr</code> for the measured-radio examples. For live tracing: Python 3, CUDA and Sionna RT on the server machine.</p>
 <h2 id="scope-and-limitations">Scope and limitations<a class="headerlink" href="#scope-and-limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li>The server returns a scalar path loss and a path count, not taps. The CIR taps used by <code>SionnaCirPropagationLossModel</code> in the examples are a hand-authored Rician profile, not ray traced.</li>

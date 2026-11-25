@@ -98,7 +98,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "ns3-ntn-toolkit",
-    "description": "Open-source ns-3.43 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
+    "description": "Open-source ns-3.49 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
     "applicationCategory": "Simulation / Research Software",
     "operatingSystem": "Linux, Docker",
     "softwareVersion": "2.2.0",
@@ -1680,7 +1680,7 @@
 
 
 <h1 id="modules">Modules<a class="headerlink" href="#modules" title="Permanent link">&para;</a></h1>
-<p><strong>ns3-ntn-toolkit ships fourteen integrated <a href="https://www.nsnam.org">ns-3</a> contrib modules</strong> plus the vendored SNS3 <code>satellite</code> stack. Together they simulate a 5G/6G non-terrestrial network from orbit to application. Every module builds from one <code>./ns3 build</code>, ships its own examples and tests, and twelve of them are also published as standalone repositories that drop into an existing ns-3.43 tree. <code>ntn-traffic</code> and <code>ntn-fapi</code> live only in the toolkit repository.</p>
+<p><strong>ns3-ntn-toolkit ships fourteen integrated <a href="https://www.nsnam.org">ns-3</a> contrib modules</strong> plus the vendored SNS3 <code>satellite</code> stack. Together they simulate a 5G/6G non-terrestrial network from orbit to application. Every module builds from one <code>./ns3 build</code>, ships its own examples and tests, and twelve of them are also published as standalone repositories that drop into an existing ns-3.49 tree. <code>ntn-traffic</code> and <code>ntn-fapi</code> live only in the toolkit repository.</p>
 <div class="ntn-purpose">
 <p><strong>How to read this page.</strong> Modules are grouped by the layer of the stack they model, following the <a href="../architecture/">architecture</a>. Each module page has a system design figure, measured results with their data source, the classes, examples, tests and an honest scope section.</p>
 </div>
@@ -1724,7 +1724,7 @@
 <tr>
 <td><a href="ntn-traffic/"><strong>ntn-traffic</strong></a></td>
 <td><code>NtnRealStackHelper</code>, the measured NR NTN data plane (SpectrumPhy, HARQ, RLC, PDCP, RRC, EPC) the other modules build on</td>
-<td><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-traffic">toolkit only</a></td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v4/contrib/ntn-traffic">toolkit only</a></td>
 </tr>
 <tr>
 <td><a href="ntn-cho/"><strong>ntn-cho</strong></a></td>
@@ -1739,7 +1739,7 @@
 <tr>
 <td><a href="ntn-fapi/"><strong>ntn-fapi</strong></a></td>
 <td>SCF-222 FAPI MAC-PHY adapter on a live NR SAP, per-UE HARQ state, latency gate</td>
-<td><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-fapi">toolkit only</a></td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v4/contrib/ntn-fapi">toolkit only</a></td>
 </tr>
 <tr>
 <td><a href="ntn-slice/"><strong>ntn-slice</strong></a></td>
@@ -1787,7 +1787,7 @@
 </tr>
 <tr>
 <td><a href="ns3-ai-ntn/"><strong>ns3-ai-ntn</strong></a></td>
-<td>ns3-ai fork for ns-3.43: Gymnasium 1.0 over versioned shared memory, an AI-RAN inference contract, NTN RL tooling</td>
+<td>ns3-ai fork for ns-3.49: Gymnasium 1.0 over versioned shared memory, an AI-RAN inference contract, NTN RL tooling</td>
 <td><a href="https://github.com/Muhammaduazir69/ns3-ai">ns3-ai</a></td>
 </tr>
 </tbody>

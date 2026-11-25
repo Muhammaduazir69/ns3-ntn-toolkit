@@ -98,7 +98,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "ns3-ntn-toolkit",
-    "description": "Open-source ns-3.43 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
+    "description": "Open-source ns-3.49 simulation platform for 6G non-terrestrial networks. Fourteen integrated modules covering SGP4 LEO satellite constellations, 3GPP NR-NTN protocol stacks, conditional handover with time-to-exit, Space O-RAN with E2 and A1 control loops, sub-terahertz and terahertz links on the ITU-R recommendations, Sionna RT GPU ray tracing, space-air-ground integrated networking, network slicing, satellite V2X, a network digital twin, and Gymnasium environments for reinforcement learning.",
     "applicationCategory": "Simulation / Research Software",
     "operatingSystem": "Linux, Docker",
     "softwareVersion": "2.2.0",
@@ -1950,7 +1950,7 @@
 <p align="center"><strong>A Small Cell Forum FAPI MAC-PHY adapter on a live NR service access point, with a latency figure that says what it does not contain</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.49-blue.svg" alt="ns-3.49"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/SCF-FAPI%20222.10.02%20%2F%20.04-orange.svg" alt="Small Cell Forum FAPI 222.10.02 and 222.10.04"/>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.211%20%C2%B7%20TS%2038.213-orange.svg" alt="3GPP TS 38.211 and TS 38.213"/>
@@ -2115,7 +2115,7 @@
 </span></code></pre></div>
 <p>The <code>ntn-fapi</code> suite (<code>Type::UNIT</code>, 9 test cases) checks SCF 222.10.02/.04 message IDs and names, numerology to SCS against TS 38.211 Table 4.2-1, DMRS bitmap round trips, DL_TTI PDU ordering, UL indication shapes, the SAP bridge on real mmwave slot timing with a finite gate-15 latency, UL_TTI.request built from real uplink grants, the RACH.indication timing-advance residual in T_c units, and per-UE HARQ process IDs in CRC.indication. The audit run of 6 October 2026 passed all 9 (<code>t-ntn-fapi/run.log</code>).</p>
 <h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
-<p>ns-3.43 core and network; the in-tree <code>mmwave</code> module (the decorated SAP); <code>ntn-traffic</code>, <code>ntn-constellation</code> and <code>ntn-cho</code> for the examples.</p>
+<p>ns-3.49 core and network; the in-tree <code>mmwave</code> module (the decorated SAP); <code>ntn-traffic</code>, <code>ntn-constellation</code> and <code>ntn-cho</code> for the examples.</p>
 <h2 id="scope-and-limitations">Scope and limitations<a class="headerlink" href="#scope-and-limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li>The structs are a source-level C++ model with SCF field names. They use <code>std::vector</code> and <code>std::variant</code>, have no fixed byte layout and are not serialized, so they are not a drop-in ABI for NVIDIA Aerial cuPHY or OAI nFAPI.</li>
