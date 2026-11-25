@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="ns3-ntn-toolkit">
+  <title>ns3-ntn-toolkit</title>
+  <!-- Square icon master. White background — used everywhere a flat
+       contained logo is needed (Docker Hub avatar, GitHub social card,
+       MkDocs logo on a white-themed nav).  See logo_icon_transparent.svg
+       for a no-bg variant. -->
+  <rect width="1024" height="1024" fill="#ffffff"/>
+
+  <g transform="translate(512 512)">
+    <!-- outer ring (filled disk) -->
+    <circle r="430" fill="#003049"/>
+
+    <!-- inner dashed orbit -->
+    <circle r="358" fill="none" stroke="#f77f00"
+            stroke-width="6" stroke-dasharray="3 22"
+            stroke-linecap="round"/>
+
+    <!-- big "n3" mark -->
+    <text x="0" y="95" text-anchor="middle"
+          font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif"
+          font-weight="800" font-size="430" fill="#ffffff"
+          letter-spacing="-19">n3</text>
+
+    <!-- ".NTN" superscript pinned to the upper-right -->
+    <text x="183" y="-103" text-anchor="start"
+          font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif"
+          font-weight="700" font-size="70" fill="#f77f00"
+          letter-spacing="3">·NTN</text>
+
+    <!-- satellite orbiting upper-left of the ring -->
+    <g transform="rotate(-50) translate(0 -358) rotate(50)">
+      <rect x="-35" y="-35" width="70" height="70" rx="11" fill="#f77f00"/>
+      <rect x="-92" y="-14" width="48" height="28" rx="5" fill="#ffffff"/>
+      <rect x="44"  y="-14" width="48" height="28" rx="5" fill="#ffffff"/>
+      <circle cx="0" cy="0" r="9" fill="#003049"/>
+    </g>
+  </g>
+</svg>

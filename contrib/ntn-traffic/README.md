@@ -152,7 +152,7 @@ ns-3.49 `core`, `network`, `internet`, `applications`, `point-to-point`, `propag
 
 - **mmwave backend numerology.** On the mmwave path the S-band carrier runs with FR2 numerology (60 kHz SCS) on a terrestrial 8 x 8 array gNB, with the satellite EIRP applied as a conducted transmit power; it is not a reflector beam with a 3 dB footprint. Use `SetRadioBackend` for 5G-LENA at FR1.
 - **HARQ off, RLC UM by default.** Turn them on deliberately; the defaults reflect what the terrestrial timers tolerate over the slant.
-- **Multi-UE uplink.** K_offset consumption enables single-UE or downlink-heavy uplink under a real air-interface delay; full multi-UE uplink also needs per-UE timing advance and NTN-aware SRS and PUCCH timing, which the vendored nr v3.3 lacks.
+- **Multi-UE uplink.** K_offset consumption enables single-UE or downlink-heavy uplink under a real air-interface delay; full multi-UE uplink also needs per-UE timing advance and NTN-aware SRS and PUCCH timing, which the vendored nr v5.2 still lacks.
 - **TDL tap table.** `NtnTdlSpectrumPropagationLossModel` uses a documented stand-in, not TR 38.811 Table 6.9.2, so "NTN-TDL" is not claimable.
 - **Multi-UE NR handover.** `ntn-nr-handover-pass` with more than one UE hits a limitation of the vendored 5G-LENA X2 data-forwarding path; the A3 and X2 decision itself fires.
 - Half-duplex collisions are dropped and counted (`halfduplex_*_drops` in `sim_health.csv`) rather than fatal; read them next to `phy_rx_tb`.

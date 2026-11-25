@@ -116,7 +116,7 @@ Standalone, into an existing ns-3.49 tree (the examples need `ntn-traffic` and
 `ntn-rrc`, so the toolkit tree is the easier path):
 
 ```bash
-git clone -b ntn-observability-v2 https://github.com/Muhammaduazir69/ntn-observability.git contrib/ntn-observability
+git clone -b ntn-observability-v4 https://github.com/Muhammaduazir69/ntn-observability.git contrib/ntn-observability
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build ntn-observability
 ```

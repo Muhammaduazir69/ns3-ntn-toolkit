@@ -130,7 +130,7 @@ curl -X POST http://localhost:8090/predict/handover \
 Standalone:
 
 ```bash
-git clone -b ntn-digital-twin-v2 https://github.com/Muhammaduazir69/ntn-digital-twin.git contrib/ntn-digital-twin
+git clone -b ntn-digital-twin-v4 https://github.com/Muhammaduazir69/ntn-digital-twin.git contrib/ntn-digital-twin
 cd contrib/ntn-digital-twin && pip install -e .[test]
 ```
 

@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/INSTALL.md">Toolkit install guide</a>
   &nbsp;·&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
 </p>
@@ -21,7 +21,7 @@
 SIB19 ephemeris broadcast, timing advance, pass-aware DRX, UE location
 reporting). The recommended way to run it is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree (branch
-`ntn-integration-v2`), where every dependency below is already present. It also
+`ntn-integration-v4`), where every dependency below is already present. It also
 builds on a vanilla ns-3.49 tree once the sibling toolkit modules in section 2
 are added.
 
@@ -31,11 +31,11 @@ are added.
 
 | Component | Version |
 |---|---|
-| OS | Linux (Ubuntu 22.04+ / Fedora 39+ recommended) |
-| C++ compiler | gcc ≥ 11 or clang ≥ 14 |
-| CMake | ≥ 3.24 |
+| OS | Linux (Ubuntu 24.04+ / Fedora 39+ recommended; Ubuntu 22.04 needs CMake ≥ 3.25 from pip or Kitware) |
+| C++ compiler | gcc ≥ 11.1 or clang ≥ 17 |
+| CMake | ≥ 3.25 |
 | Python | ≥ 3.10 |
-| ns-3 | **3.43** |
+| ns-3 | **3.49**, with 5G-LENA v5.2 (`contrib/nr`) in the toolkit tree |
 | Disk | ~6 GB after build (incl. SNS3 TLE data) |
 
 ---
@@ -85,10 +85,10 @@ cd ..
 ### Inside the toolkit (recommended)
 
 Already present in `ns3-ntn-toolkit/contrib/ntn-rrc`. Clone the toolkit (branch
-`ntn-integration-v2`):
+`ntn-integration-v4`):
 
 ```bash
-git clone -b ntn-integration-v2 \
+git clone -b ntn-integration-v4 \
   https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 # GitLab mirror: https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit
 ```
@@ -102,7 +102,7 @@ Clone the standalone module into `contrib/ntn-rrc`, pinning its current branch:
 
 ```bash
 cd contrib/
-git clone -b ntn-rrc-v2 \
+git clone -b ntn-rrc-v4 \
   https://github.com/Muhammaduazir69/ntn-rrc.git ntn-rrc
 cd ..
 ```

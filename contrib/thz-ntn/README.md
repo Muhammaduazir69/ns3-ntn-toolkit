@@ -123,7 +123,7 @@ Inside the toolkit, where the module is already present and built:
 Standalone, into an existing ns-3.49 tree (the GitHub repository of this module is `ns3-thz-ntn`):
 
 ```bash
-git clone -b thz-ntn-v2 https://github.com/Muhammaduazir69/ns3-thz-ntn.git contrib/thz-ntn
+git clone -b thz-ntn-v4 https://github.com/Muhammaduazir69/ns3-thz-ntn.git contrib/thz-ntn
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```

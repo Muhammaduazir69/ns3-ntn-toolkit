@@ -105,7 +105,7 @@ Inside the toolkit, where the module is already present and built:
 Standalone, into an existing ns-3.49 tree:
 
 ```bash
-git clone -b ntn-v2x-v2 https://github.com/Muhammaduazir69/ntn-v2x.git contrib/ntn-v2x
+git clone -b ntn-v2x-v4 https://github.com/Muhammaduazir69/ntn-v2x.git contrib/ntn-v2x
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```

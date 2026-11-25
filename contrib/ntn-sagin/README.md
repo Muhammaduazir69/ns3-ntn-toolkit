@@ -108,7 +108,7 @@ Inside the toolkit, where the module is already present and built:
 Standalone, into an existing ns-3.49 tree:
 
 ```bash
-git clone -b ntn-sagin-v2 https://github.com/Muhammaduazir69/ntn-sagin.git contrib/ntn-sagin
+git clone -b ntn-sagin-v4 https://github.com/Muhammaduazir69/ntn-sagin.git contrib/ntn-sagin
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```

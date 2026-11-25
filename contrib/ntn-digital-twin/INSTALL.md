@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/INSTALL.md">Toolkit install guide</a>
   &nbsp;·&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
 </p>
@@ -20,7 +20,7 @@
 `ntn-digital-twin` is a Python package: a refresher loop plus a FastAPI
 prediction service for live LEO constellations. It is one module of the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) (ns-3.49,
-branch `ntn-integration-v2`). Being a pure-Python service package, it has no
+branch `ntn-integration-v4`). Being a pure-Python service package, it has no
 ns-3 C++ build step of its own.
 
 ## Requirements
@@ -36,7 +36,7 @@ It already ships in `contrib/ntn-digital-twin` inside the toolkit tree. To clone
 it standalone:
 
 ```bash
-git clone -b ntn-digital-twin-v2 \
+git clone -b ntn-digital-twin-v4 \
   https://github.com/Muhammaduazir69/ntn-digital-twin.git ntn-digital-twin
 cd ntn-digital-twin
 ```

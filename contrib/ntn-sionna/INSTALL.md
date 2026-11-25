@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/INSTALL.md">Toolkit install guide</a>
   &nbsp;·&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
 </p>
@@ -21,7 +21,7 @@
 into ns-3 as an opt-in propagation loss model. It can be built on a vanilla
 ns-3.49 tree or as part of the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
-(branch `ntn-integration-v2`).
+(branch `ntn-integration-v4`).
 
 The module builds and runs without a GPU or a Sionna install. A live Sionna
 GPU server is optional; the tests use a stub server instead.
@@ -32,11 +32,11 @@ GPU server is optional; the tests use a stub server instead.
 
 | Component | Version |
 |---|---|
-| OS | Linux (Ubuntu 22.04+ / Fedora 39+) |
-| C++ compiler | gcc ≥ 11 or clang ≥ 14 |
-| CMake | ≥ 3.24 |
+| OS | Linux (Ubuntu 24.04+ / Fedora 39+; Ubuntu 22.04 needs CMake ≥ 3.25 from pip or Kitware) |
+| C++ compiler | gcc ≥ 11.1 or clang ≥ 17 |
+| CMake | ≥ 3.25 |
 | Python | ≥ 3.10 |
-| ns-3 | **3.43** |
+| ns-3 | **3.49**, with 5G-LENA v5.2 (`contrib/nr`) in the toolkit tree |
 
 ---
 
@@ -94,7 +94,7 @@ RT installed.
 
 ```bash
 cd contrib/
-git clone -b ntn-sionna-v2 https://github.com/Muhammaduazir69/ntn-sionna.git ntn-sionna
+git clone -b ntn-sionna-v4 https://github.com/Muhammaduazir69/ntn-sionna.git ntn-sionna
 cd ..
 ```
 

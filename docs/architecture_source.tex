@@ -1,0 +1,122 @@
+%% Figure 2: software view of the platform.
+%%
+%% Rebuilt against cst_icons.tex so it shares Figure 1's materials. A software
+%% stack is not a physical scene, so the realism here is structural rather than
+%% pictorial: tone and a cast edge carry depth, each plane is tagged with the
+%% object it actually manipulates, and the unmodified core is the bedrock the
+%% whole thing rests on. Nothing is rescaled; the type is set at final size.
+%%
+%% Compile:  pdflatex fig2_arch.tex
+\documentclass[tikz,border=3pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz}
+\setlength{\textwidth}{18cm}
+\input{cst_icons.tex}
+\newcommand{\mtt}[1]{{\ttfamily\fontsize{6.0}{7.1}\selectfont #1}}
+
+\begin{document}
+\begin{tikzpicture}[x=\cstUnit, y=\cstUnit,
+  font=\sffamily\fontsize{6.6}{7.9}\selectfont,
+  % Depth comes from a cast edge one point down and right, not a blur: blurs
+  % rasterise inside a vector figure and print grey.
+  cast/.style={preaction={fill=cstInk, opacity=0.26,
+               transform canvas={xshift=1.0pt, yshift=-1.0pt}}},
+  plane/.style={cast, draw=cstSteelD, line width=0.6pt,
+                top color=white, bottom color=cstShell,
+                rounded corners=2pt, align=center, inner sep=3.4pt},
+  tool/.style={draw=cstBlue, line width=0.85pt, fill=white,
+               rounded corners=3.5pt, align=center, inner sep=3.4pt},
+  vend/.style={cast, draw=cstSteelD, line width=0.6pt,
+               top color=cstShellD, bottom color=cstSteelL,
+               rounded corners=2pt, align=center, inner sep=3.2pt},
+  core/.style={cast, draw=cstInk, line width=0.7pt,
+               top color=cstNavy, bottom color=cstSpace,
+               rounded corners=2pt, align=center, inner sep=3.4pt,
+               text=white},
+  keytxt/.style={text=cstSteelD, font=\sffamily\fontsize{6.0}{6.8}\selectfont},
+  down/.style={draw=cstSteelD, line width=0.65pt,
+               -{Stealth[length=3.2pt,width=2.8pt]}},
+  cross/.style={draw=cstMliD, line width=0.7pt,
+                -{Stealth[length=3.0pt,width=2.6pt]}}]
+
+\path[use as bounding box] (0.00,-0.62) rectangle (18.00,7.10);
+
+% ---------------------------------------------------- user-facing surface ----
+\node[tool, minimum width={16.7*\cstUnit}, minimum height={0.86*\cstUnit}]
+  (tools) at (9.0,6.52)
+  {\textbf{Bundled tools}\quad 3D globe viewer \ $\cdot$ \ reference scenarios \
+   $\cdot$ \ analysis and figure pipeline \ $\cdot$ \ Gymnasium 1.0 agents \
+   $\cdot$ \ telemetry dashboards};
+
+% -------------------------------------------------------- the five planes ----
+% Each plane carries the object it manipulates, drawn from the same icon set as
+% Figure 1, so a reader can match software to hardware without the caption.
+\def\pw{3.16}
+% Written out rather than looped: \foreach mangles the \\ that separates module
+% names inside its item list.
+\newcommand{\planecard}[3]{%
+  \node[plane, minimum width={\pw*\cstUnit}, minimum height={1.86*\cstUnit},
+        anchor=north] (#1) at ({1.10+#2*3.45+\pw/2},4.86) {#3};}
+\planecard{p0}{0}{\textbf{Orbital and mobility}\\[1.6pt]
+  \mtt{ntn-constellation}\\\mtt{ntn-sagin} \ \ \mtt{ntn-v2x}}
+\planecard{p1}{1}{\textbf{Protocol, L1 to L3}\\[1.6pt]
+  \mtt{ntn-rrc} \ \ \mtt{ntn-cho}\\\mtt{ntn-fapi} \ \ \mtt{ntn-slice}\\\mtt{ntn-traffic}}
+\planecard{p2}{2}{\textbf{Physical layer}\\[1.6pt]
+  \mtt{thz-ntn}\\\mtt{ntn-sionna}}
+\planecard{p3}{3}{\textbf{Control and learning}\\[1.6pt]
+  \mtt{oran-ntn}\\\mtt{ai} (ns3-ai fork)}
+\planecard{p4}{4}{\textbf{Operations}\\[1.6pt]
+  \mtt{ntn-observability}\\\mtt{ntn-digital-twin}}
+
+% icon badge sitting on the head of each plane card
+\cstSat{ip0}{2.68}{5.12}{0.52}
+\begin{scope}[shift={(6.13,5.02)}, scale=0.52]
+  \draw[cstSteelD, line width=0.5pt] (0,-0.30) -- (0,0.34);
+  \foreach \r in {0.16,0.26,0.36}
+    \draw[cstNavy, line width=0.5pt] (-\r,0.10) arc (200:340:{\r*1.05});
+  \fill[cstSteelD] (-0.10,-0.34) rectangle (0.10,-0.28);
+\end{scope}
+\begin{scope}[shift={(9.58,5.02)}, scale=0.52]
+  \draw[cstViolet, line width=0.6pt]
+    (-0.42,0) sin (-0.21,0.26) cos (0,0) sin (0.21,-0.26) cos (0.42,0);
+  \draw[cstMliD, line width=0.5pt, opacity=0.8]
+    (-0.42,-0.20) sin (-0.14,-0.02) cos (0.14,-0.20) sin (0.42,-0.02);
+\end{scope}
+\cstRack{ip3}{13.03}{4.80}{0.50}
+\begin{scope}[shift={(16.48,5.02)}, scale=0.52]
+  \shade[top color=cstShellL, bottom color=cstShellD] (-0.30,-0.26) rectangle (0.30,0.26);
+  \draw[cstSteelD, line width=0.45pt] (-0.30,-0.26) rectangle (0.30,0.26);
+  \foreach \yy in {-0.13,0.02,0.17}
+    \draw[cstBlue, line width=0.45pt] (-0.22,\yy) -- (0.22,\yy);
+\end{scope}
+
+\foreach \i in {0,...,4}
+  \draw[down] ({1.10+\i*3.45+\pw/2},6.09) -- ({1.10+\i*3.45+\pw/2},5.52);
+
+% cross-plane coupling, in the service-beam amber of Figure 1
+\foreach \i in {0,1,2,3}
+  \draw[cross] ({1.10+\i*3.45+\pw},3.95) -- ({1.10+(\i+1)*3.45},3.95);
+
+% ------------------------------------------------------- vendored upstream ---
+\node[vend, minimum width={16.7*\cstUnit}, minimum height={0.80*\cstUnit}]
+  (vend) at (9.0,2.36)
+  {\textbf{Vendored upstream}\quad \mtt{nr} (5G-LENA v5.2, NTN patches): NR NTN stack
+   \ \ $\vert$ \ \ \mtt{satellite} (SNS3): SGP4, TR 38.811 \ \ $\vert$ \ \ \mtt{mmwave}: NR PHY and MAC};
+\foreach \i in {0,...,4}
+  \draw[down] ({1.10+\i*3.45+\pw/2},3.00) -- ({1.10+\i*3.45+\pw/2},2.78);
+
+% ---------------------------------------------------------- simulation core --
+\node[core, minimum width={16.7*\cstUnit}, minimum height={0.80*\cstUnit}]
+  (core) at (9.0,1.10)
+  {\textbf{Simulation core}\quad ns-3.49, four documented patches and the mmWave LTE fork \ \ $\vert$ \ \ events,
+   channels, helpers, attribute system};
+\draw[down] (9.0,1.94) -- (9.0,1.52);
+
+% ------------------------------------------------------------------- key -----
+\node[keytxt, anchor=west, align=left] at (0.66,0.20)
+  {amber arrows, left to right: orbit state $\rightarrow$ beam trigger
+   $\rightarrow$ THz xApps $\rightarrow$ KPI export \ \ $\vert$ \ \
+   rounded outline: user-facing tool \ \ $\vert$ \ \ tone darkens with depth};
+
+\end{tikzpicture}
+\end{document}

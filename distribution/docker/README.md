@@ -9,7 +9,7 @@ Release images are built from committed source only, never from the working
 tree, so run outputs, virtualenvs and untracked files can not reach the image:
 
 ```bash
-distribution/docker/build-release.sh 2.7.0     # tags 2.7.0 and latest
+distribution/docker/build-release.sh 3.0.1     # tags 3.0.1 and latest
 ```
 
 The script stages a context next to the clone (`git archive HEAD` of
@@ -64,7 +64,7 @@ docker compose -f distribution/docker/docker-compose.yml up -d
 
 ```bash
 docker login
-docker push uzairdocker69/ns3-ntn-toolkit:2.7.0
+docker push uzairdocker69/ns3-ntn-toolkit:3.0.1
 docker push uzairdocker69/ns3-ntn-toolkit:latest
 ```
 

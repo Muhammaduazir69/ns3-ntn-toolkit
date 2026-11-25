@@ -132,7 +132,7 @@ python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
 Standalone, into an existing ns-3.49 tree:
 
 ```bash
-git clone -b ntn-sionna-v2 https://github.com/Muhammaduazir69/ntn-sionna.git contrib/ntn-sionna
+git clone -b ntn-sionna-v4 https://github.com/Muhammaduazir69/ntn-sionna.git contrib/ntn-sionna
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```

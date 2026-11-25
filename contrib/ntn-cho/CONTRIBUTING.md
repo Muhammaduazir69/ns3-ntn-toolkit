@@ -7,7 +7,7 @@ modules in the `ns3-ntn-toolkit` family follow the same workflow.
 
 1. Check the existing issues on the repo.
 2. Open a new issue with:
-   - ns-3 release you are on (e.g., `release ns-3.43`)
+   - ns-3 release you are on (e.g., `release ns-3.49`)
    - Minimal `.cc` file or command line that reproduces the problem
    - Full stack trace / `NS_LOG` output
 

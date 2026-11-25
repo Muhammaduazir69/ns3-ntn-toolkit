@@ -10,8 +10,8 @@ upload them manually once, then they persist.
 2. **Repository logo** → *Choose file* → `dockerhub_avatar_512.png` (Hub re-encodes to 256×256).
 3. **Short description** → paste:
 
-   > Pre-integrated ns-3.43 distribution for 6G non-terrestrial network research.
-   > 13 modules: LEO/SGP4, 3GPP NR-NTN, O-RAN+FlexRIC, sub-THz, Sionna RT, SAGIN, V2X, slicing, RL, digital twin.
+   > Pre-integrated ns-3.49 + 5G-LENA v5.2 distribution for 6G non-terrestrial network research.
+   > 14 modules: LEO/SGP4, 3GPP NR-NTN, O-RAN+FlexRIC, sub-THz, Sionna RT, SAGIN, V2X, slicing, RL, digital twin.
 
 4. **Full description** → import the contents of
    `/home/uzair/6g_ntn_ns3/ns-3-dev/README.md`

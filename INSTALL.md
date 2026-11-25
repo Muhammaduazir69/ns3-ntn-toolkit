@@ -43,9 +43,9 @@ artifact statement rather than citing `latest`, which moves.
 
 | Component | Version |
 |---|---|
-| OS | Linux. Ubuntu 22.04 or later, Fedora 39 or later |
-| C++ compiler | gcc 11 or newer, or clang 14 or newer |
-| CMake | 3.24 or newer |
+| OS | Linux. Ubuntu 24.04 or later, Fedora 39 or later (Ubuntu 22.04 works with CMake 3.25 or newer from pip or Kitware) |
+| C++ compiler | gcc 11.1 or newer, or clang 17 or newer |
+| CMake | 3.25 or newer |
 | Python | 3.10 or newer, tested through 3.13 |
 | Boost | 1.74 or newer, for interprocess |
 | Disk | 20 GB after a build, including the SNS3 TLE corpus and outputs |
@@ -82,12 +82,12 @@ pip install "numpy>=2.0" "gymnasium>=1.0" "torch>=2.0" \
 ### 2.3 Clone
 
 ```bash
-git clone --branch ntn-integration-v2 \
+git clone --branch ntn-integration-v4 \
   https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 cd ns3-ntn-toolkit
 ```
 
-`ntn-integration-v2` is the current release line. The GitLab mirror carries the
+`ntn-integration-v4` is the current release line. The GitLab mirror carries the
 same branch: <https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit>.
 
 ### 2.4 Add the SNS3 `satellite` module, which is required
@@ -162,17 +162,17 @@ listing what else it needs.
 | Module | Standalone repository | Branch |
 |---|---|---|
 | `ntn-cho` | `Muhammaduazir69/ntn-cho-framework` | `main` |
-| `oran-ntn` | `Muhammaduazir69/oran-ntn` | `oran-ntn-v2` |
-| `thz-ntn` | `Muhammaduazir69/ns3-thz-ntn` | `thz-ntn-v2` |
-| `ntn-constellation` | `Muhammaduazir69/ntn-constellation` | `ntn-constellation-v2` |
-| `ntn-rrc` | `Muhammaduazir69/ntn-rrc` | `ntn-rrc-v2` |
-| `ntn-sagin` | `Muhammaduazir69/ntn-sagin` | `ntn-sagin-v2` |
-| `ntn-sionna` | `Muhammaduazir69/ntn-sionna` | `ntn-sionna-v2` |
-| `ntn-slice` | `Muhammaduazir69/ntn-slice` | `ntn-slice-v2` |
-| `ntn-v2x` | `Muhammaduazir69/ntn-v2x` | `ntn-v2x-v2` |
-| `ntn-observability` | `Muhammaduazir69/ntn-observability` | `ntn-observability-v2` |
-| `ntn-digital-twin` | `Muhammaduazir69/ntn-digital-twin` | `ntn-digital-twin-v2` |
-| `ns3-ai-ntn` | `Muhammaduazir69/ns3-ai` | `fix/ns3-43-compatibility-and-critical-bugs` |
+| `oran-ntn` | `Muhammaduazir69/oran-ntn` | `oran-ntn-v4` |
+| `thz-ntn` | `Muhammaduazir69/ns3-thz-ntn` | `thz-ntn-v4` |
+| `ntn-constellation` | `Muhammaduazir69/ntn-constellation` | `ntn-constellation-v4` |
+| `ntn-rrc` | `Muhammaduazir69/ntn-rrc` | `ntn-rrc-v4` |
+| `ntn-sagin` | `Muhammaduazir69/ntn-sagin` | `ntn-sagin-v4` |
+| `ntn-sionna` | `Muhammaduazir69/ntn-sionna` | `ntn-sionna-v4` |
+| `ntn-slice` | `Muhammaduazir69/ntn-slice` | `ntn-slice-v4` |
+| `ntn-v2x` | `Muhammaduazir69/ntn-v2x` | `ntn-v2x-v4` |
+| `ntn-observability` | `Muhammaduazir69/ntn-observability` | `ntn-observability-v4` |
+| `ntn-digital-twin` | `Muhammaduazir69/ntn-digital-twin` | `ntn-digital-twin-v4` |
+| `ns3-ai-ntn` | `Muhammaduazir69/ns3-ai` | `ns3-ai-ntn-v4` |
 | `ntn-fapi` | bundled only | |
 | `ntn-traffic` | bundled only | |
 
@@ -180,7 +180,7 @@ Each repository is mirrored on GitLab under
 <https://gitlab.com/ns3-ntn-toolkit>.
 
 ```bash
-git clone -b oran-ntn-v2 \
+git clone -b oran-ntn-v4 \
   https://github.com/Muhammaduazir69/oran-ntn.git contrib/oran-ntn
 ./ns3 configure --enable-modules='' --enable-examples --enable-tests
 ./ns3 build

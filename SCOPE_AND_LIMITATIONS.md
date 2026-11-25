@@ -1,4 +1,10 @@
 # Scope & Limitations — ns3-ntn-toolkit
+
+> **Base versions.** The current toolkit is ns-3.49 with 5G-LENA v5.2 (release v3.0.1, November
+> 2026). Entries below that carry a date before November 2026 describe the state on the earlier
+> bases (ns-3.43 with nr v3.3, then ns-3.48 with nr v5.1) and are kept as a dated record; the nr
+> deltas carried into v5.2 are listed in `contrib/nr/ntn-patches/README.md`.
+
 **Date:** 2026-06-27  **Author:** Muhammad Uzair, Independent Researcher
 
 This is the authoritative statement of what the toolkit **does** and **does not**

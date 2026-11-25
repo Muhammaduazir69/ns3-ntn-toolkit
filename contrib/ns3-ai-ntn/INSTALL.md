@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/INSTALL.md">Toolkit install guide</a>
   &nbsp;·&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
 </p>
@@ -20,7 +20,7 @@
 This guide installs the **fork** of `ns3-ai` that is patched for
 ns-3.49, Python 3.13, NumPy 2.0, and Gymnasium 1.0.
 
-> **Branch:** `fix/ns3-43-compatibility-and-critical-bugs`
+> **Branch:** `ns3-ai-ntn-v4`
 > **Upstream:** https://github.com/hust-diangroup/ns3-ai
 
 ---
@@ -29,14 +29,14 @@ ns-3.49, Python 3.13, NumPy 2.0, and Gymnasium 1.0.
 
 | Component | Version |
 |---|---|
-| OS | Linux (Ubuntu 22.04+ / Fedora 39+) |
-| C++ compiler | gcc ≥ 11 or clang ≥ 14 |
-| CMake | ≥ 3.24 |
+| OS | Linux (Ubuntu 24.04+ / Fedora 39+; Ubuntu 22.04 needs CMake ≥ 3.25 from pip or Kitware) |
+| C++ compiler | gcc ≥ 11.1 or clang ≥ 17 |
+| CMake | ≥ 3.25 |
 | Python | **3.10–3.13** (3.13 explicitly tested) |
 | NumPy | **≥ 2.0** |
 | Boost | ≥ 1.74 (interprocess) |
 | pybind11 | **≥ 2.13** (bundled in `vendor/`) |
-| ns-3 | **3.43** |
+| ns-3 | **3.49**, with 5G-LENA v5.2 (`contrib/nr`) in the toolkit tree |
 
 ### Python deps
 
@@ -51,11 +51,11 @@ pip install "numpy>=2.0" "gymnasium>=1.0" "torch>=2.0"
 ### 2a. ns-3.49
 
 ```bash
-git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
+git clone -b ntn-integration-v4 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 cd ns3-ntn-toolkit
 ```
 
-> GitLab mirror: `git clone -b ntn-integration-v2 https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit.git`
+> GitLab mirror: `git clone -b ntn-integration-v4 https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit.git`
 > Or skip the build entirely with the Docker image (this fork preinstalled):
 > `docker pull uzairdocker69/ns3-ntn-toolkit:latest` (or `:latest`), then
 > `docker run -it uzairdocker69/ns3-ntn-toolkit:latest`.
@@ -80,7 +80,7 @@ The module's CMake `LIBNAME` is `ns3-ai-ntn`, so it must be cloned into
 
 ```bash
 cd contrib/
-git clone -b fix/ns3-43-compatibility-and-critical-bugs \
+git clone -b ns3-ai-ntn-v4 \
   https://github.com/Muhammaduazir69/ns3-ai.git ns3-ai-ntn
 cd ..
 ```

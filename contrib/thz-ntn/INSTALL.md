@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/INSTALL.md">Toolkit install guide</a>
   &nbsp;·&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
 </p>
@@ -22,7 +22,7 @@ D-band (100 GHz – 1 THz) PHY for non-terrestrial links — molecular-absorptio
 gated LEO-ground and inter-satellite links, RIS relays, ultra-massive MIMO,
 EKF beam tracking, and ISAC. The recommended way to run it is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree
-(branch `ntn-integration-v2`), where every dependency below is already
+(branch `ntn-integration-v4`), where every dependency below is already
 present. It also builds on a vanilla ns-3.49 tree once you add the sibling
 modules in section 2 — the library links `satellite` and `mmwave`; the
 examples additionally pull in `ntn-cho`, `ntn-constellation`, `ntn-traffic`,
@@ -34,11 +34,11 @@ examples additionally pull in `ntn-cho`, `ntn-constellation`, `ntn-traffic`,
 
 | Component | Version |
 |---|---|
-| OS | Linux (Ubuntu 22.04+ / Fedora 39+) |
-| C++ compiler | gcc ≥ 11 or clang ≥ 14 |
-| CMake | ≥ 3.24 |
+| OS | Linux (Ubuntu 24.04+ / Fedora 39+; Ubuntu 22.04 needs CMake ≥ 3.25 from pip or Kitware) |
+| C++ compiler | gcc ≥ 11.1 or clang ≥ 17 |
+| CMake | ≥ 3.25 |
 | Python | ≥ 3.10 (for figure-regen scripts only) |
-| ns-3 | **3.43** |
+| ns-3 | **3.49**, with 5G-LENA v5.2 (`contrib/nr`) in the toolkit tree |
 | Disk | ~6 GB after build (incl. SNS3 TLE data) |
 
 No additional Python or spectroscopic-database installation is required — the
@@ -88,7 +88,7 @@ builds without them — the examples do not.
 
 ```bash
 cd contrib/
-git clone -b thz-ntn-v2 https://github.com/Muhammaduazir69/ns3-thz-ntn.git thz-ntn
+git clone -b thz-ntn-v4 https://github.com/Muhammaduazir69/ns3-thz-ntn.git thz-ntn
 cd ..
 ```
 

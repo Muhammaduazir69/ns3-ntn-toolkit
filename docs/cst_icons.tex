@@ -1,0 +1,572 @@
+% ============================================================================
+%  cst_icons.tex — hand-specified vector icon library for the CST NTN 2026
+%  competition paper.
+%
+%  Design rules, and the reasons for them:
+%
+%  1. Materials, not a house colour. Each object is drawn in the colour its
+%     real hardware is: amber Kapton multi-layer insulation on the satellite
+%     bus, indigo triple-junction solar cells, white radome and grey shadow on
+%     the gateway dish, galvanised grey lattice on the mast, terracotta roofs
+%     and sand render on the village, charcoal chassis and green status LEDs on
+%     the server racks. A reader should be able to name each node without
+%     reading its label.
+%  2. One light source, upper left. Every gradient runs light-to-dark away from
+%     it, every ground object gets a soft contact shadow, and specular
+%     highlights sit on the upper-left face. This is what makes a flat drawing
+%     read as a physical object.
+%  3. Line weights are absolute, not scaled. Icons scale by geometry; strokes
+%     stay at print-legible widths so a 0.6 scale icon does not vanish.
+%  4. Luminance carries the meaning. Every pair of adjacent fills is separated
+%     in lightness as well as hue, so the figures survive greyscale printing.
+%
+%  Signature of every icon:  \cstThing{node name}{x}{y}{scale}
+%  Each places a named, zero-ink node at its own centre so arrows can anchor
+%  to it without the author guessing coordinates.
+% ============================================================================
+
+\usetikzlibrary{arrows.meta,calc,positioning,fit,backgrounds,shadings,fadings}
+
+% Drawing unit. Every schematic is laid out on an 18-unit-wide grid and the unit
+% is tied to the text width, so the figure arrives at exactly its final printed
+% size and no \resizebox ever touches the type. This is the difference between a
+% figure whose 7 pt labels are 7 pt and one whose labels are whatever survived
+% the rescale.
+\newlength{\cstUnit}
+\setlength{\cstUnit}{\dimexpr\textwidth/18\relax}
+
+% ---------------------------------------------------------------- palette ----
+% structural / ink
+\definecolor{cstInk}    {HTML}{15181C}
+\definecolor{cstNavy}   {HTML}{0E3A6B}
+\definecolor{cstBlue}   {HTML}{2E78B5}
+\definecolor{cstSteel}  {HTML}{7A8894}
+\definecolor{cstSteelL} {HTML}{B9C3CC}
+\definecolor{cstSteelD} {HTML}{4E5A66}
+% spacecraft white / aluminium
+\definecolor{cstShellL} {HTML}{FAFBFD}
+\definecolor{cstShell}  {HTML}{E3E8EF}
+\definecolor{cstShellD} {HTML}{B4BEC9}
+% amber Kapton MLI
+\definecolor{cstMliL}   {HTML}{F2CB63}
+\definecolor{cstMli}    {HTML}{D9A21B}
+\definecolor{cstMliD}   {HTML}{946A0C}
+% triple-junction solar cell
+\definecolor{cstCellL}  {HTML}{3A4E8C}
+\definecolor{cstCell}   {HTML}{1E2A57}
+\definecolor{cstCellD}  {HTML}{101733}
+\definecolor{cstCellGrid}{HTML}{6E82BC}
+% earth / sky
+\definecolor{cstOcean}  {HTML}{1B5A96}
+\definecolor{cstOceanD} {HTML}{0A2A52}
+\definecolor{cstLand}   {HTML}{5E8C4F}
+\definecolor{cstLandD}  {HTML}{3D6135}
+\definecolor{cstAtmo}   {HTML}{8FC9F0}
+\definecolor{cstSpace}  {HTML}{0B1834}
+% terrain / built environment
+\definecolor{cstRoof}   {HTML}{C0563A}
+\definecolor{cstRoofD}  {HTML}{8B3823}
+\definecolor{cstRender} {HTML}{EDDCBB}
+\definecolor{cstRenderD}{HTML}{C6AE85}
+\definecolor{cstTimber} {HTML}{7B5836}
+\definecolor{cstLeaf}   {HTML}{4A8342}
+\definecolor{cstLeafD}  {HTML}{2F5C2C}
+\definecolor{cstConcL}  {HTML}{DCD7CE}
+\definecolor{cstConc}   {HTML}{A9A29A}
+% equipment
+\definecolor{cstChassis}{HTML}{2B3138}
+\definecolor{cstChassD} {HTML}{15191E}
+\definecolor{cstLed}    {HTML}{4CD97B}
+\definecolor{cstLedAmb} {HTML}{F2B23A}
+\definecolor{cstScreen} {HTML}{4FA3E3}
+\definecolor{cstTeal}   {HTML}{1F7A8C}
+\definecolor{cstTealD}  {HTML}{124A56}
+% semantics: links, alarms, beams
+\definecolor{cstRed}    {HTML}{C13B30}
+\definecolor{cstAmber}  {HTML}{E08A1E}
+\definecolor{cstViolet} {HTML}{6A4C93}
+\definecolor{cstBeam}   {HTML}{F6D06B}
+\definecolor{cstGreen}  {HTML}{4A8342}
+
+% ------------------------------------------------------- shared primitives ---
+% Soft contact shadow: what tells the eye an object rests on ground.
+% \cstShadow{x}{y}{rx}{ry}
+\newcommand{\cstShadow}[4]{%
+  \fill[cstInk, opacity=0.13] (#1,#2) ellipse (#3 and #4);
+  \fill[cstInk, opacity=0.10] (#1,#2) ellipse ({#3*0.55} and {#4*0.6});}
+
+% Specular highlight on an upper-left face.
+% \cstGloss{x}{y}{rx}{ry}{rotation}
+\newcommand{\cstGloss}[5]{%
+  \fill[white, opacity=0.42, rotate around={#5:(#1,#2)}] (#1,#2) ellipse (#3 and #4);}
+
+% ================================================================ SATELLITE ==
+% LEO satellite: amber-MLI bus, two indigo solar wings with cell grid and a
+% sheen band, white Ka-band reflector, nadir horn, S-band monopole.
+% \cstSat{name}{x}{y}{scale}
+\newcommand{\cstSat}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  % --- solar wings: three hinged panels a side, each a real cell matrix.
+  % A single flat rectangle with four grid lines read as a blue box at print
+  % size; segmenting the wing and drawing the cells is what makes it a solar
+  % array rather than a placeholder.
+  \foreach \sx in {-1,1}{%
+    \begin{scope}[xscale=\sx]
+      % yoke: two struts, not one line
+      \draw[cstSteelD, line width=0.34pt] (0.34,0.055) -- (0.55,0.045);
+      \draw[cstSteelD, line width=0.34pt] (0.34,-0.055) -- (0.55,-0.045);
+      \foreach \px in {0.56,0.865,1.17}{%
+        \shade[left color=cstCellL, right color=cstCell]
+          (\px,-0.205) rectangle ({\px+0.275},0.205);
+        % cell matrix: 4 columns x 3 rows per panel
+        \foreach \k in {1,2,3}
+          \draw[cstCellGrid, line width=0.16pt, opacity=0.75]
+            ({\px+\k*0.0688},-0.205) -- ({\px+\k*0.0688},0.205);
+        \foreach \r in {-0.068,0.068}
+          \draw[cstCellGrid, line width=0.16pt, opacity=0.75]
+            (\px,\r) -- ({\px+0.275},\r);
+        \draw[cstCellD, line width=0.4pt] (\px,-0.205) rectangle ({\px+0.275},0.205);}
+      % specular band: the sun catches the array along one diagonal
+      \fill[white, opacity=0.17]
+        (0.57,0.07) -- (1.44,0.155) -- (1.44,0.205) -- (0.57,0.205) -- cycle;
+      \fill[white, opacity=0.07]
+        (0.57,-0.205) -- (1.44,-0.205) -- (1.44,-0.16) -- (0.57,-0.09) -- cycle;
+    \end{scope}}
+  % --- bus: front face plus a right-hand facet, so it reads as a solid
+  \shade[top color=cstShellL, bottom color=cstShell]
+    (-0.34,-0.02) rectangle (0.26,0.27);
+  \shade[top color=cstMliL, bottom color=cstMli]
+    (-0.34,-0.27) rectangle (0.26,-0.02);
+  \shade[left color=cstShellD, right color=cstSteelD]
+    (0.26,-0.02) rectangle (0.34,0.27);
+  \shade[left color=cstMliD, right color=cstSteelD]
+    (0.26,-0.27) rectangle (0.34,-0.02);
+  % MLI reads as quilted fabric: vertical seams plus slack horizontal folds
+  \foreach \qx in {-0.26,-0.14,-0.02,0.10,0.22}
+    \draw[cstMliD, line width=0.2pt, opacity=0.55] (\qx,-0.265) -- (\qx,-0.025);
+  \foreach \qy in {-0.20,-0.13,-0.07}
+    \draw[cstMliD, line width=0.16pt, opacity=0.34] (-0.335,\qy) -- (0.255,\qy);
+  \draw[cstSteelD, line width=0.5pt] (-0.34,-0.27) rectangle (0.34,0.27);
+  \draw[cstSteelD, line width=0.34pt] (-0.34,-0.02) -- (0.34,-0.02);
+  \draw[cstSteelD, line width=0.3pt] (0.26,-0.27) -- (0.26,0.27);
+  \cstGloss{-0.21}{0.20}{0.095}{0.030}{-12}
+  % --- Ka reflector, seen obliquely. Radial shading made it a convex dome; a
+  % dish is concave, so the bowl is shaded dark at the bottom of the cup and
+  % bright along the upper rim, with the rim ellipse drawn over the top.
+  \begin{scope}[shift={(0.01,0.375)}, rotate=-15]
+    \shade[upper left=white, upper right=cstShellL,
+           lower left=cstShell, lower right=cstShellD]
+      (0,0) ellipse (0.155 and 0.090);
+    \fill[cstSteel, opacity=0.16] (0,-0.016) ellipse (0.122 and 0.060);
+    \fill[white, opacity=0.45] (-0.038,0.040) ellipse (0.078 and 0.025);
+    \draw[cstSteelD, line width=0.36pt] (0,0) ellipse (0.155 and 0.090);
+    \foreach \fx in {-0.088,0.088}
+      \draw[cstSteelD, line width=0.19pt] (\fx,0.010) -- (0.008,0.118);
+    \fill[cstMli, draw=cstMliD, line width=0.16pt] (0.008,0.124) circle (0.024);
+  \end{scope}
+  % deck detail: a short radiator louvre stack on the right of the deck only,
+  % plus a sun sensor. Ruling the whole deck read as a form, not a spacecraft.
+  \foreach \ly in {0.075,0.115,0.155}
+    \draw[cstSteelD, line width=0.15pt, opacity=0.38] (0.02,\ly) -- (0.225,\ly);
+  \fill[cstBlue, draw=cstSteelD, line width=0.16pt, opacity=0.70]
+    (-0.30,0.185) rectangle (-0.235,0.245);
+  % --- nadir horn, star tracker, monopole
+  \shade[left color=cstShellL, right color=cstShellD]
+    (-0.10,-0.27) -- (0.10,-0.27) -- (0.062,-0.405) -- (-0.062,-0.405) -- cycle;
+  \draw[cstSteelD, line width=0.36pt]
+    (-0.10,-0.27) -- (0.10,-0.27) -- (0.062,-0.405) -- (-0.062,-0.405) -- cycle;
+  \fill[cstSteelD] (-0.255,-0.30) rectangle (-0.175,-0.345);
+  \draw[cstSteelD, line width=0.4pt] (0.28,0.27) -- (0.28,0.44);
+  \node[inner sep=0pt, minimum width={2.9cm*#4}, minimum height={1.1cm*#4}] (#1) at (0,0) {};
+\end{scope}}
+
+% ====================================================== SATELLITE, DISTRESSED =
+% Same bus with a red beacon: used where the figure needs to show a satellite
+% that has lost its feeder link and is running on its own.
+\newcommand{\cstSatAlert}[4]{%
+  \cstSat{#1}{#2}{#3}{#4}
+  \begin{scope}[shift={(#2,#3)}, scale=#4]
+    \fill[cstRed, opacity=0.22] (0.26,0.50) circle (0.13);
+    \fill[cstRed] (0.26,0.50) circle (0.055);
+  \end{scope}}
+
+% ===================================================================== HAPS ==
+% Stratospheric airship: silver envelope, dark solar strip along the spine,
+% grey gondola, twin tail fins.
+\newcommand{\cstHaps}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  % envelope: silver fabric, lit from upper left
+  \shade[top color=white, bottom color=cstShellD] (0,0) ellipse (0.98 and 0.30);
+  \draw[cstSteelD, line width=0.5pt] (0,0) ellipse (0.98 and 0.30);
+  % hull seams: what makes an airship read as fabric over frame
+  \foreach \sx in {-0.55,-0.20,0.15,0.50}
+    \draw[cstSteelD, opacity=0.30, line width=0.3pt]
+      (\sx,{0.30*sqrt(1-(\sx/0.98)^2)}) .. controls ({\sx+0.05},0) ..
+      (\sx,{-0.30*sqrt(1-(\sx/0.98)^2)});
+  % solar array along the spine, wide enough to read as an array
+  \shade[left color=cstCellL, right color=cstCellD]
+    (-0.60,0.155) .. controls (-0.30,0.30) and (0.30,0.30) .. (0.60,0.155)
+    .. controls (0.30,0.20) and (-0.30,0.20) .. cycle;
+  \foreach \gx in {-0.36,-0.12,0.12,0.36}
+    \draw[cstCellGrid, opacity=0.7, line width=0.25pt] (\gx,0.195) -- (\gx,0.275);
+  % tail fins
+  \fill[cstShellD, draw=cstSteelD, line width=0.45pt]
+    (-0.94,0.04) -- (-1.24,0.30) -- (-0.80,0.16) -- cycle;
+  \fill[cstShell, draw=cstSteelD, line width=0.45pt]
+    (-0.94,-0.04) -- (-1.24,-0.30) -- (-0.80,-0.16) -- cycle;
+  % gondola: payload bay with a downward-looking sensor
+  \fill[cstChassis, draw=cstInk, line width=0.35pt, rounded corners=0.8pt]
+    (-0.22,-0.29) rectangle (0.22,-0.47);
+  \fill[cstScreen, opacity=0.9] (-0.15,-0.43) rectangle (-0.01,-0.34);
+  \fill[cstSteelL] (0.10,-0.38) circle (0.045);
+  \fill[cstNavy] (0.10,-0.38) circle (0.022);
+  \cstGloss{-0.34}{0.11}{0.30}{0.065}{-8}
+  \node[inner sep=0pt, minimum width={2.3cm*#4}, minimum height={1.0cm*#4}] (#1) at (0,0) {};
+\end{scope}}
+
+% ====================================================================== UAV ==
+% Fixed-wing UAV, plan view: grey fuselage, pale wings, amber prop disc.
+\newcommand{\cstUav}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  % fuselage: tapered, nose up
+  \shade[left color=white, right color=cstShellD]
+    (-0.085,-0.30) -- (0.085,-0.30) -- (0.075,0.16)
+    .. controls (0.06,0.30) and (-0.06,0.30) .. (-0.075,0.16) -- cycle;
+  \draw[cstSteelD, line width=0.4pt]
+    (-0.085,-0.30) -- (0.085,-0.30) -- (0.075,0.16)
+    .. controls (0.06,0.30) and (-0.06,0.30) .. (-0.075,0.16) -- cycle;
+  % main wing, swept and tapered
+  \foreach \sx in {-1,1}{%
+    \begin{scope}[xscale=\sx]
+      \shade[top color=white, bottom color=cstShellD]
+        (0.07,0.10) -- (0.56,-0.02) -- (0.56,-0.12) -- (0.07,-0.06) -- cycle;
+      \draw[cstSteelD, line width=0.4pt]
+        (0.07,0.10) -- (0.56,-0.02) -- (0.56,-0.12) -- (0.07,-0.06) -- cycle;
+      % winglet
+      \fill[cstShellD, draw=cstSteelD, line width=0.3pt]
+        (0.56,-0.02) -- (0.63,0.06) -- (0.63,-0.05) -- (0.56,-0.12) -- cycle;
+    \end{scope}}
+  % tailplane + fin
+  \fill[cstShell, draw=cstSteelD, line width=0.35pt]
+    (-0.23,-0.29) -- (0.23,-0.29) -- (0.20,-0.21) -- (-0.20,-0.21) -- cycle;
+  \fill[cstShellD, draw=cstSteelD, line width=0.3pt]
+    (-0.02,-0.28) -- (0.02,-0.28) -- (0.02,-0.42) -- (-0.02,-0.42) -- cycle;
+  % sensor turret under the nose
+  \shade[ball color=cstChassis] (0,0.03) circle (0.055);
+  % nose spinner + blurred prop disc
+  \fill[cstChassis] (0,0.28) circle (0.045);
+  \fill[cstSteelL, opacity=0.40] (0,0.30) ellipse (0.23 and 0.05);
+  \draw[cstSteelD, opacity=0.55, line width=0.3pt] (0,0.30) ellipse (0.23 and 0.05);
+  \node[inner sep=0pt, minimum width={1.3cm*#4}, minimum height={0.8cm*#4}] (#1) at (0,0) {};
+\end{scope}}
+
+% ================================================== GATEWAY EARTH STATION ====
+% Large white reflector on a concrete pedestal, feed on a tripod, equipment
+% shelter alongside, contact shadow on the ground.
+\newcommand{\cstGateway}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  \cstShadow{0.05}{0.0}{0.72}{0.09}
+  % equipment shelter
+  \shade[top color=cstConcL, bottom color=cstConc] (-0.78,0) rectangle (-0.20,0.40);
+  \draw[cstSteelD, line width=0.45pt] (-0.78,0) rectangle (-0.20,0.40);
+  \fill[cstShellD, draw=cstSteelD, line width=0.35pt] (-0.78,0.40) rectangle (-0.20,0.46);
+  \fill[cstChassis] (-0.62,0) rectangle (-0.48,0.24);
+  \fill[cstScreen, opacity=0.8] (-0.40,0.22) rectangle (-0.28,0.32);
+  % pedestal with an azimuth turret and a counterweight, not a plain post
+  \shade[left color=cstConcL, right color=cstConc] (0.235,0) rectangle (0.445,0.30);
+  \draw[cstSteelD, line width=0.42pt] (0.235,0) rectangle (0.445,0.30);
+  \shade[left color=cstShellL, right color=cstShellD] (0.265,0.30) rectangle (0.415,0.40);
+  \draw[cstSteelD, line width=0.36pt] (0.265,0.30) rectangle (0.415,0.40);
+  \fill[cstSteelD] (0.30,0.40) rectangle (0.38,0.455);
+  % reflector: a concave paraboloid tipped skyward. The bowl is shaded dark at
+  % its lower lip and bright along the upper rim, which is what separates a
+  % dish from a disc.
+  \begin{scope}[rotate around={34:(0.34,0.60)}]
+    \shade[upper left=white, upper right=cstShellL,
+           lower left=cstShell, lower right=cstShellD]
+      (0.34,0.60) ellipse (0.44 and 0.155);
+    \fill[cstSteel, opacity=0.20] (0.34,0.578) ellipse (0.355 and 0.105);
+    \fill[white, opacity=0.42] (0.24,0.665) ellipse (0.20 and 0.045);
+    \draw[cstSteelD, line width=0.48pt] (0.34,0.60) ellipse (0.44 and 0.155);
+    % radial rib shadows read as a panelled reflector
+    \foreach \rr in {-0.30,-0.15,0,0.15,0.30}
+      \draw[cstSteelD, line width=0.14pt, opacity=0.28]
+        ({0.34+\rr},{0.60+0.155*sqrt(max(0,1-(\rr/0.44)^2))})
+        -- ({0.34+\rr},{0.60-0.155*sqrt(max(0,1-(\rr/0.44)^2))});
+    % feed on a tripod, above the bowl
+    \foreach \fx in {-0.30,0,0.30}
+      \draw[cstSteelD, line width=0.34pt] ({0.34+\fx},0.60) -- (0.36,0.95);
+    \fill[cstMli, draw=cstMliD, line width=0.24pt] (0.36,0.965) circle (0.045);
+  \end{scope}
+  \node[inner sep=0pt, minimum width={1.7cm*#4}, minimum height={1.1cm*#4}] (#1) at (0.05,0.5) {};
+\end{scope}}
+
+% ======================================================= SERVER RACK (RIC) ===
+% Charcoal chassis, silver bezels, live status LEDs. Two sizes of the same
+% object distinguish the near-real-time tier from the SMO tier by height only,
+% because they are the same kind of hardware.
+% \cstRack{name}{x}{y}{scale}
+\newcommand{\cstRack}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  \cstShadow{0}{-0.42}{0.36}{0.055}
+  \shade[top color=cstChassis, bottom color=cstChassD, rounded corners=1pt]
+    (-0.30,-0.40) rectangle (0.30,0.40);
+  \draw[cstInk, line width=0.5pt, rounded corners=1pt] (-0.30,-0.40) rectangle (0.30,0.40);
+  \foreach \yy in {0.24,0.06,-0.12,-0.30}{%
+    \shade[top color=cstSteelL, bottom color=cstSteel, rounded corners=0.4pt]
+      (-0.25,\yy-0.055) rectangle (0.25,\yy+0.075);
+    \draw[cstInk, line width=0.25pt, opacity=0.5, rounded corners=0.4pt]
+      (-0.25,\yy-0.055) rectangle (0.25,\yy+0.075);
+    \fill[cstLed] (0.19,\yy+0.01) circle (0.022);
+    \fill[cstLedAmb] (0.13,\yy+0.01) circle (0.022);
+    \foreach \vx in {-0.20,-0.16,-0.12,-0.08}
+      \draw[cstSteelD, line width=0.25pt] (\vx,\yy-0.03) -- (\vx,\yy+0.05);}
+  \cstGloss{-0.16}{0.34}{0.09}{0.025}{0}
+  \node[inner sep=0pt, minimum width={0.8cm*#4}, minimum height={1.0cm*#4}] (#1) at (0,0) {};
+\end{scope}}
+
+% ==================================================================== CLOUD ==
+% Ground cloud / SMO. Soft, cool, deliberately less solid than the racks: it is
+% somewhere else, and the drawing should say so.
+\newcommand{\cstCloud}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  % the cloud is a data centre somewhere else: cool tint, crisp edge, and three
+  % rack slivers inside so it reads as compute rather than weather
+  \shade[top color=white, bottom color=cstSteelL]
+    (-0.52,0) arc (180:60:0.24) arc (200:20:0.19) arc (140:-20:0.22)
+    arc (60:-180:0.19) -- cycle;
+  \draw[cstBlue, opacity=0.75, line width=0.5pt]
+    (-0.52,0) arc (180:60:0.24) arc (200:20:0.19) arc (140:-20:0.22)
+    arc (60:-180:0.19) -- cycle;
+  \foreach \rx in {-0.17,0.02,0.21}{%
+    \fill[cstChassis, opacity=0.85, rounded corners=0.3pt]
+      (\rx-0.045,0.06) rectangle (\rx+0.045,0.28);
+    \fill[cstLed] (\rx+0.022,0.24) circle (0.015);
+    \fill[cstLed] (\rx+0.022,0.18) circle (0.015);
+    \fill[cstLedAmb] (\rx+0.022,0.12) circle (0.015);}
+  \node[inner sep=0pt, minimum width={1.3cm*#4}, minimum height={0.7cm*#4}] (#1) at (0.02,0.16) {};
+\end{scope}}
+
+% ================================================================== VILLAGE ==
+% Four households: terracotta roofs, sand render, timber doors, one tree, all
+% sitting on a tan ground band. \cstVillage{name}{x}{y}{scale}
+\newcommand{\cstVillage}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  % Four dwellings that are not the same dwelling four times: ridge height,
+  % roof pitch and window count vary, which is what stops a row of houses
+  % reading as a repeated stamp.
+  \foreach \hx/\hh/\pk/\wn in {0.0/0.36/0.27/2, 0.80/0.32/0.23/1,
+                               1.60/0.39/0.30/2, 2.40/0.34/0.25/1}{%
+    \begin{scope}[shift={(\hx,0)}]
+      \cstShadow{0.04}{0}{0.34}{0.048}
+      % wall, with a render texture and a darker plinth
+      \shade[left color=cstRender, right color=cstRenderD] (-0.27,0) rectangle (0.27,\hh);
+      \fill[cstRenderD, opacity=0.55] (-0.27,0) rectangle (0.27,0.035);
+      \foreach \wy in {0.10,0.18,0.26}
+        \draw[cstRenderD, line width=0.12pt, opacity=0.30] (-0.27,\wy) -- (0.27,\wy);
+      \draw[cstTimber, line width=0.36pt] (-0.27,0) rectangle (0.27,\hh);
+      % Chimney drawn BEFORE the roof: the roof triangle then occludes its base,
+      % so the stack emerges from the slope instead of hovering above it.
+      \fill[cstRenderD, draw=cstTimber, line width=0.22pt]
+        (0.078,{\hh-0.02}) rectangle (0.162,{\hh+\pk*0.93});
+      \fill[cstTimber, opacity=0.60]
+        (0.070,{\hh+\pk*0.93-0.016}) rectangle (0.170,{\hh+\pk*0.93});
+      % roof with eaves overhang and tile courses
+      \shade[top color=cstRoof, bottom color=cstRoofD]
+        (-0.345,\hh) -- (0,{\hh+\pk}) -- (0.345,\hh) -- cycle;
+      \foreach \t in {0.30,0.55,0.80}
+        \draw[cstRoofD, line width=0.13pt, opacity=0.45]
+          ({-0.345*(1-\t)},{\hh+\pk*\t}) -- ({0.345*(1-\t)},{\hh+\pk*\t});
+      \draw[cstRoofD, line width=0.38pt]
+        (-0.345,\hh) -- (0,{\hh+\pk}) -- (0.345,\hh) -- cycle;
+      \fill[cstRoofD] (-0.345,\hh) rectangle (0.345,{\hh-0.022});
+      % chimney
+      % door with a step
+      \shade[left color=cstTimber, right color=cstInk]
+        (-0.085,0) rectangle (0.055,0.20);
+      \draw[cstTimber, line width=0.24pt] (-0.085,0) rectangle (0.055,0.20);
+      \fill[cstMli] (0.036,0.10) circle (0.011);
+      % windows, mullioned
+      \ifnum\wn=2
+        \foreach \wx in {0.115,-0.215}{%
+          \fill[cstScreen, opacity=0.80, draw=cstTimber, line width=0.22pt]
+            (\wx,0.16) rectangle ({\wx+0.10},0.26);
+          \draw[cstTimber, line width=0.16pt] ({\wx+0.05},0.16) -- ({\wx+0.05},0.26);
+          \draw[cstTimber, line width=0.16pt] (\wx,0.21) -- ({\wx+0.10},0.21);}
+      \else
+        \fill[cstScreen, opacity=0.80, draw=cstTimber, line width=0.22pt]
+          (0.115,0.15) rectangle (0.225,0.26);
+        \draw[cstTimber, line width=0.16pt] (0.17,0.15) -- (0.17,0.26);
+        \draw[cstTimber, line width=0.16pt] (0.115,0.205) -- (0.225,0.205);
+      \fi
+    \end{scope}}
+  % tree: trunk with taper, canopy in two lobes so it is not a lollipop
+  \cstShadow{2.94}{0}{0.21}{0.042}
+  \fill[cstTimber] (2.925,0) -- (2.955,0) -- (2.949,0.26) -- (2.931,0.26) -- cycle;
+  \shade[ball color=cstLeafD] (2.99,0.40) circle (0.155);
+  \shade[ball color=cstLeafD] (2.90,0.47) circle (0.135);
+  \shade[ball color=cstLeaf] (2.885,0.395) circle (0.135);
+  \node[inner sep=0pt, minimum width={3.6cm*#4}, minimum height={0.7cm*#4}] (#1) at (1.42,0.3) {};
+\end{scope}}
+
+% =============================================================== gNB MAST ====
+% Galvanised lattice mast, three white panel antennas, microwave drum, red
+% aviation light. \cstMast{name}{x}{y}{scale}
+\newcommand{\cstMast}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  \cstShadow{0}{0}{0.32}{0.048}
+  % three legs: two front, one behind, so the tower has depth rather than
+  % being a flat ladder
+  \draw[cstSteelD, line width=0.55pt, opacity=0.55] (0.02,0) -- (0.005,1.02);
+  \draw[cstSteel, line width=0.85pt] (-0.18,0) -- (-0.052,1.02);
+  \draw[cstSteel, line width=0.85pt] ( 0.18,0) -- ( 0.052,1.02);
+  % horizontal belts
+  \foreach \yy/\hw in {0.00/0.180, 0.17/0.158, 0.34/0.136, 0.51/0.114,
+                       0.68/0.092, 0.85/0.070, 1.02/0.052}
+    \draw[cstSteel, line width=0.4pt] (-\hw,\yy) -- (\hw,\yy);
+  % K-bracing between every belt, both diagonals
+  \foreach \ya/\ha/\yb/\hb in {0.00/0.180/0.17/0.158, 0.17/0.158/0.34/0.136,
+                               0.34/0.136/0.51/0.114, 0.51/0.114/0.68/0.092,
+                               0.68/0.092/0.85/0.070, 0.85/0.070/1.02/0.052}{%
+    \draw[cstSteelD, line width=0.3pt, opacity=0.85] (-\ha,\ya) -- (\hb,\yb);
+    \draw[cstSteelD, line width=0.3pt, opacity=0.85] (\ha,\ya) -- (-\hb,\yb);}
+  % head frame carrying three sector panels
+  \draw[cstSteel, line width=0.5pt] (-0.155,1.05) -- (0.155,1.05);
+  \foreach \a/\tl in {-1/6, 0/0, 1/-6}{%
+    \begin{scope}[shift={(\a*0.145,1.05)}, rotate=\tl]
+      \shade[left color=cstShellL, right color=cstShellD, rounded corners=0.5pt]
+        (-0.046,0) rectangle (0.046,0.28);
+      \draw[cstSteelD, line width=0.32pt, rounded corners=0.5pt]
+        (-0.046,0) rectangle (0.046,0.28);
+      \draw[cstSteelD, line width=0.16pt, opacity=0.4] (0,0.02) -- (0,0.26);
+      \draw[cstSteelD, line width=0.3pt] (0,0) -- (0,-0.05);
+    \end{scope}}
+  % microwave drum on a stand-off arm
+  \draw[cstSteelD, line width=0.34pt] (0.075,0.56) -- (0.135,0.56);
+  \shade[ball color=cstShellD] (0.175,0.56) circle (0.072);
+  \draw[cstSteelD, line width=0.32pt] (0.175,0.56) circle (0.072);
+  \fill[white, opacity=0.35] (0.152,0.585) ellipse (0.032 and 0.018);
+  % aviation obstruction light
+  \fill[cstRed, opacity=0.22] (0,1.40) circle (0.095);
+  \fill[cstRed, draw=cstRoofD, line width=0.2pt] (0,1.40) circle (0.040);
+  \node[inner sep=0pt, minimum width={0.7cm*#4}, minimum height={1.5cm*#4}] (#1) at (0,0.75) {};
+\end{scope}}
+
+% ==================================================== gNB MAST, OFF THE AIR ===
+% The same mast, snapped above the third brace, leaning, with a smoke plume.
+% This is the disaster in the scenario figure, and it has to be legible at
+% thumbnail size, so the break is large and the lean is exaggerated.
+\newcommand{\cstMastDown}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  \cstShadow{0}{0}{0.32}{0.045}
+  % rubble
+  \fill[cstConc, opacity=0.8] (-0.26,0) -- (-0.14,0.07) -- (-0.02,0) -- cycle;
+  \fill[cstConc, opacity=0.6] (0.06,0) -- (0.17,0.05) -- (0.28,0) -- cycle;
+  % smoke first, so the steel reads in front of it
+  \fill[cstSteel, opacity=0.20] (0.06,0.80) circle (0.15);
+  \fill[cstSteel, opacity=0.15] (0.20,1.00) circle (0.19);
+  \fill[cstSteel, opacity=0.09] (0.08,1.22) circle (0.23);
+  % standing stump, ending in a ragged shear
+  \draw[cstSteel, line width=0.9pt] (-0.17,0) -- (-0.10,0.56);
+  \draw[cstSteel, line width=0.9pt] ( 0.17,0) -- ( 0.10,0.56);
+  \foreach \yy/\hw in {0.16/0.152, 0.36/0.128, 0.52/0.108}
+    \draw[cstSteel, line width=0.45pt] (-\hw,\yy) -- (\hw,\yy);
+  \draw[cstSteelD, line width=0.35pt, opacity=0.9]
+    (-0.152,0.16) -- (0.128,0.36) (0.152,0.16) -- (-0.128,0.36);
+  \draw[cstSteel, line width=0.9pt] (-0.10,0.56) -- (-0.05,0.64) -- (0.0,0.57)
+                                    -- (0.05,0.66) -- (0.10,0.56);
+  % severed head, dropped over the right-hand side and hanging by one leg
+  \begin{scope}[rotate around={-74:(0.10,0.58)}]
+    \draw[cstSteel, line width=0.85pt] (0.02,0.58) -- (0.08,1.06);
+    \draw[cstSteel, line width=0.85pt] (0.20,0.58) -- (0.14,1.06);
+    \draw[cstSteel, line width=0.4pt] (0.05,0.74) -- (0.18,0.74) (0.07,0.92) -- (0.16,0.92);
+    \foreach \a in {0,1}{%
+      \fill[cstShellD, draw=cstSteelD, line width=0.3pt, rounded corners=0.3pt]
+        (\a*0.105+0.045,1.04) rectangle (\a*0.105+0.105,1.24);}
+  \end{scope}
+  % fracture flash at the shear line
+  \fill[cstAmber] (-0.14,0.50) -- (0.01,0.61) -- (-0.07,0.62) -- (0.13,0.74)
+                  -- (-0.11,0.63) -- (-0.01,0.61) -- cycle;
+  \fill[cstRed, opacity=0.55] (-0.06,0.57) -- (0.05,0.65) -- (-0.02,0.66)
+                  -- (0.09,0.73) -- (-0.05,0.66) -- (0.01,0.65) -- cycle;
+  \node[inner sep=0pt, minimum width={1.0cm*#4}, minimum height={1.1cm*#4}] (#1) at (0.05,0.5) {};
+\end{scope}}
+
+% ==================================================================== PHONE ==
+\newcommand{\cstPhone}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  \shade[top color=cstChassis, bottom color=cstChassD, rounded corners=1.4pt]
+    (-0.12,-0.22) rectangle (0.12,0.22);
+  \shade[top color=cstScreen, bottom color=cstNavy, rounded corners=0.9pt]
+    (-0.093,-0.145) rectangle (0.093,0.172);
+  \fill[white, opacity=0.30] (-0.085,0.09) -- (0.02,0.168) -- (-0.085,0.168) -- cycle;
+  \fill[cstSteelL] (0,-0.185) circle (0.017);
+  \node[inner sep=0pt, minimum width={0.32cm*#4}, minimum height={0.5cm*#4}] (#1) at (0,0) {};
+\end{scope}}
+
+% ====================================================================== CAR ==
+\newcommand{\cstCar}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  \cstShadow{0}{0.02}{0.36}{0.045}
+  \shade[top color=cstTeal, bottom color=cstTealD, rounded corners=1.5pt]
+    (-0.36,0.06) rectangle (0.36,0.20);
+  \shade[top color=cstTeal, bottom color=cstTealD]
+    (-0.18,0.20) .. controls (-0.13,0.34) and (0.13,0.34) .. (0.18,0.20) -- cycle;
+  \fill[cstNavy, opacity=0.85]
+    (-0.13,0.21) .. controls (-0.10,0.30) and (0.10,0.30) .. (0.13,0.21) -- cycle;
+  \fill[white, opacity=0.28] (-0.30,0.16) rectangle (0.02,0.19);
+  \fill[cstLedAmb] (0.345,0.13) circle (0.028);
+  \foreach \wx in {-0.20,0.20}{%
+    \fill[cstInk] (\wx,0.06) circle (0.062);
+    \shade[ball color=cstSteelL] (\wx,0.06) circle (0.028);}
+  \node[inner sep=0pt, minimum width={0.8cm*#4}, minimum height={0.36cm*#4}] (#1) at (0,0.16) {};
+\end{scope}}
+
+% ================================================================== DESKTOP ==
+% The six-core desktop the whole argument rests on, so it is drawn as a real
+% machine rather than a generic box.
+\newcommand{\cstDesktop}[4]{%
+\begin{scope}[shift={(#2,#3)}, scale=#4]
+  \cstShadow{0}{-0.10}{0.34}{0.045}
+  \shade[top color=cstChassis, bottom color=cstChassD, rounded corners=1pt]
+    (-0.36,0.04) rectangle (0.36,0.50);
+  \shade[top color=cstScreen, bottom color=cstNavy] (-0.32,0.08) rectangle (0.32,0.46);
+  \fill[white, opacity=0.22] (-0.30,0.30) -- (-0.02,0.44) -- (-0.30,0.44) -- cycle;
+  % a plot on the screen: this machine is running the experiment
+  \draw[white, opacity=0.85, line width=0.4pt]
+    (-0.24,0.15) -- (-0.10,0.26) -- (0.02,0.22) -- (0.16,0.36);
+  \draw[white, opacity=0.45, line width=0.3pt] (-0.26,0.12) -- (0.26,0.12);
+  \fill[cstChassis] (-0.09,-0.06) rectangle (0.09,0.04);
+  \shade[top color=cstSteel, bottom color=cstSteelD, rounded corners=0.5pt]
+    (-0.22,-0.10) rectangle (0.22,-0.06);
+  \node[inner sep=0pt, minimum width={0.85cm*#4}, minimum height={0.66cm*#4}] (#1) at (0,0.24) {};
+\end{scope}}
+
+% ============================================================== EARTH LIMB ====
+% Curved horizon with an atmospheric halo. \cstLimb{xc}{yc}{radius}
+% Drawn as a full disc, so callers clip to the band of horizon they want. The
+% halo is built from eight thin rings rather than three, because three read as
+% visible banding at print resolution and eight do not.
+\newcommand{\cstLimb}[3]{%
+  \foreach \i in {1,...,8}
+    \fill[cstAtmo, opacity=0.055] (#1,#2) circle ({#3*(1.0+0.010*(9-\i))});
+  \shade[inner color=cstOcean, outer color=cstOceanD] (#1,#2) circle (#3);
+  \draw[cstAtmo, opacity=0.55, line width=0.7pt] (#1,#2) circle (#3);}
+
+% ============================================================== SERVICE BEAM ==
+% Translucent spot beam from a satellite down to a footprint. Built from plain
+% fills at graded opacity rather than a gradient, because a gradient blended
+% against a dark sky turns muddy olive instead of staying amber.
+% \cstBeamCone{xa}{ya}{xb}{yb}{halfwidth at the ground}
+\newcommand{\cstBeamCone}[5]{%
+  \begin{scope}
+    \fill[cstBeam, opacity=0.13] (#1,#2) -- ({#3-#5},#4) -- ({#3+#5},#4) -- cycle;
+    \fill[cstBeam, opacity=0.17] (#1,#2) -- ({#3-#5*0.66},#4) -- ({#3+#5*0.66},#4) -- cycle;
+    \fill[cstBeam, opacity=0.22] (#1,#2) -- ({#3-#5*0.30},#4) -- ({#3+#5*0.30},#4) -- cycle;
+    \draw[cstBeam, opacity=0.55, line width=0.4pt] (#1,#2) -- ({#3-#5},#4);
+    \draw[cstBeam, opacity=0.55, line width=0.4pt] (#1,#2) -- ({#3+#5},#4);
+    % illuminated footprint
+    \fill[cstBeam, opacity=0.22] (#3,#4) ellipse ({#5*1.06} and {#5*0.17});
+    \fill[cstBeam, opacity=0.34] (#3,#4) ellipse ({#5*0.62} and {#5*0.10});
+    \draw[cstBeam, opacity=0.65, line width=0.4pt] (#3,#4) ellipse ({#5*1.06} and {#5*0.17});
+  \end{scope}}

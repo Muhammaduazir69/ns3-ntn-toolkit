@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Muhammaduazir69/ns3-ntn-toolkit/main/branding/out/lockup_1600x480.png" alt="ns3-ntn-toolkit" width="780"/>
+  <img src="https://raw.githubusercontent.com/Muhammaduazir69/ns3-ntn-toolkit/ntn-integration-v4/docs/logo_lockup.png" alt="ns3-ntn-toolkit" width="780"/>
 </p>
 
 # ns3-ntn-toolkit
@@ -27,15 +27,16 @@ docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
   ./ns3 run "ntn-constellation-walker-traffic --simSeconds=10"
 
 # Pin to a specific release
-docker pull uzairdocker69/ns3-ntn-toolkit:2.7.1
+docker pull uzairdocker69/ns3-ntn-toolkit:3.0.1
 ```
 
 ## Tags
 
 | Tag      | Notes |
 |----------|-------|
-| `latest` | Tracks the current release, `3.0.0` |
-| `3.0.0`  | **Current stable**: ns3-ntn-toolkit v3.0.0 on ns-3.49 + 5G-LENA v5.2 (same image as `ns3.49`) |
+| `latest` | Tracks the current release, `3.0.1` |
+| `3.0.1`  | **Current stable** (same image as `ns3.49`): 3.0.0 plus the ns3-ai a-plus-b examples on an SGP4 LEO bent pipe, and the ns3-ai Gym bridge importable out of the box (protobuf runtime, PYTHONPATH) |
+| `3.0.0`  | ns3-ntn-toolkit v3.0.0, the move to ns-3.49 + 5G-LENA v5.2 |
 | `ns3.49` | The toolkit on ns-3.49 and 5G-LENA v5.2: upstream channel speed-ups and fixes, a corrected UE receive beam (a multi-element UE no longer loses array gain as the satellite moves), the mmWave SVD precoder fix, v5.2's link filter where exact, inter-UE spatial consistency, an opt-in Flent benchmark (`--NtnRealStackFlentTest=rrul`), Ubuntu 24.04 base |
 | `2.7.1`  | Last release on ns-3.43: 2.7.0 plus the in-depth test campaign (690 test cases in 41 suites, every module) and the fixes it found: TCP timestamps on data segments (RFC 7323), TR 36.814 HTTP page model, CBR/HTTP robustness, slice-quota validation, NR PRB accounting, O-RAN gym and KPM dataset fields |
 | `2.7.0`  | 3GPP Rel-17 NTN radio procedures in 5G-LENA (paired FDD, UL power control, PHR, BSR triggers, HARQ for long RTT), TR 38.821 Set-1 default link budget, exact SGP4 propagation delay, ITU-R P.676/P.840/P.834 atmosphere, BPv7 + SABR delay-tolerant routing, E2AP over TCP. Portable build (no `-march=native`) |
@@ -43,7 +44,14 @@ docker pull uzairdocker69/ns3-ntn-toolkit:2.7.1
 | `2.1.0`  | AI-Native ORAN-NTN release: real measured NR NTN data plane, NTN/O-RAN application layer, E2SM-KPM flow monitor, multi-tier RIC, TR 38.821 calibration |
 | `2.0.x`  | Previous release line (May 2026 realism audit) |
 
-The `2.7.1` image (`linux/amd64`, compressed size on the Tags page) is compiled with the `release` profile (-O3, no host-specific CPU flags), so it runs on any x86-64 machine.
+The `3.0.1` image (`linux/amd64`, compressed size on the Tags page) is compiled with the `release` profile (-O3, no host-specific CPU flags), so it runs on any x86-64 machine.
+
+## What's new in 3.0
+
+- **ns-3.49 and 5G-LENA v5.2.** The toolkit's NTN changes to 5G-LENA were rebased onto v5.2 (`contrib/nr/ntn-patches`), including a corrected UE receive beam: since ns-3.48 the receive side combines with the conjugate of its weights, and without the fix a multi-element UE lost array gain as the satellite moved.
+- **Every example records its run.** All 112 runnable examples write the `ntn-dataset@1` record (`repro-manifest.json`, `sim_health.csv`) and a globe scene, and each one's outputs change when its parameters change (checked on every default and changed-parameter pair).
+- **Fixes found in the port**: BSR/SR on new uplink data only, LTE PDCP keeps FlowMonitor byte tags, a noise-aware TR 38.821 array-gain gate, and the mmWave SVD precoder.
+- **ns3-ai**: the a-plus-b examples exchange the delays of an SGP4 LEO bent pipe with the Python agent; the Gym bridge works in the image without extra setup (3.0.1).
 
 ## What's new in 2.7.1
 
@@ -123,7 +131,7 @@ A few of the reproducible numbers shipped with the image:
 
 ## Image provenance
 
-- Built from <https://github.com/Muhammaduazir69/ns3-ntn-toolkit> (release line `2.7.0`, branch `ntn-integration-v2`) with `distribution/docker/build-release.sh`, which stages committed source only
+- Built from <https://github.com/Muhammaduazir69/ns3-ntn-toolkit> (release line `3.0.1`, branch `ntn-integration-v4`) with `distribution/docker/build-release.sh`, which stages committed source only
 - The image contains the published source tree plus the SNS3 satellite dependency: no papers, run outputs, or private documents
 
 ## Links
@@ -141,7 +149,7 @@ Muhammad Uzair, Independent Researcher · ORCID [0009-0002-4104-2680](https://or
 ```bibtex
 @software{ns3_ntn_toolkit_2026,
   author = {Uzair, Muhammad},
-  title  = {{ns3-ntn-toolkit}: An Integrated ns-3.43 Platform for 6G Non-Terrestrial Network Simulation},
+  title  = {{ns3-ntn-toolkit}: An Integrated ns-3 Platform for 6G Non-Terrestrial Networks},
   year   = {2026},
   url    = {https://github.com/Muhammaduazir69/ns3-ntn-toolkit}
 }

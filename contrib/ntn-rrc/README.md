@@ -120,7 +120,7 @@ Inside the toolkit, where the module is already present and built:
 Standalone, into an existing ns-3.49 tree:
 
 ```bash
-git clone -b ntn-rrc-v2 https://github.com/Muhammaduazir69/ntn-rrc.git contrib/ntn-rrc
+git clone -b ntn-rrc-v4 https://github.com/Muhammaduazir69/ntn-rrc.git contrib/ntn-rrc
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```

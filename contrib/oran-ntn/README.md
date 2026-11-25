@@ -175,7 +175,7 @@ Standalone, into an existing ns-3.49 tree (most examples also need `ntn-traffic`
 so the toolkit tree is the easier path):
 
 ```bash
-git clone -b oran-ntn-v2 https://github.com/Muhammaduazir69/oran-ntn.git contrib/oran-ntn
+git clone -b oran-ntn-v4 https://github.com/Muhammaduazir69/oran-ntn.git contrib/oran-ntn
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build oran-ntn
 ```

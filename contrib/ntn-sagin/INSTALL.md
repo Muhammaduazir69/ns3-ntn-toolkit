@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/INSTALL.md">Toolkit install guide</a>
   &nbsp;·&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
 </p>
@@ -19,7 +19,7 @@
 
 `ntn-sagin` is an ns-3.49 contributed module. The recommended way to run it is
 inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
-tree (branch `ntn-integration-v2`), where every dependency below is already
+tree (branch `ntn-integration-v4`), where every dependency below is already
 present. It also builds on a vanilla ns-3.49 tree, provided you add the sibling
 toolkit modules listed in section 2 (the library itself needs `ntn-slice`; the
 real-stack examples additionally need `ntn-traffic`, `ntn-cho`,
@@ -31,11 +31,11 @@ real-stack examples additionally need `ntn-traffic`, `ntn-cho`,
 
 | Component | Version |
 |---|---|
-| OS | Linux (Ubuntu 22.04+ / Fedora 39+ recommended) |
-| C++ compiler | gcc ≥ 11 or clang ≥ 14 |
-| CMake | ≥ 3.24 |
+| OS | Linux (Ubuntu 24.04+ / Fedora 39+ recommended; Ubuntu 22.04 needs CMake ≥ 3.25 from pip or Kitware) |
+| C++ compiler | gcc ≥ 11.1 or clang ≥ 17 |
+| CMake | ≥ 3.25 |
 | Python | ≥ 3.10 |
-| ns-3 | **3.43** |
+| ns-3 | **3.49**, with 5G-LENA v5.2 (`contrib/nr`) in the toolkit tree |
 | Disk | ~6 GB after build (incl. SNS3 TLE data, if the mmwave examples pull `satellite`) |
 
 ---
@@ -88,7 +88,7 @@ core module builds with just `ntn-slice` present.
 ### As part of the toolkit (recommended)
 
 ```bash
-git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
+git clone -b ntn-integration-v4 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 # ntn-sagin is already in contrib/, alongside its sibling modules
 ```
 
@@ -99,7 +99,7 @@ Docker: `uzairdocker69/ns3-ntn-toolkit:latest`.
 
 ```bash
 cd contrib/
-git clone -b ntn-sagin-v2 https://github.com/Muhammaduazir69/ntn-sagin.git
+git clone -b ntn-sagin-v4 https://github.com/Muhammaduazir69/ntn-sagin.git
 cd ..
 ```
 

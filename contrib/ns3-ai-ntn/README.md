@@ -1,5 +1,5 @@
 <!-- hero-banner -->
-<p align="center"><a href="https://muhammaduazir69.github.io/ns3-ai/"><img src="doc/figures/ns3-ai-banner.jpg" alt="ns3-ai: Gymnasium RL bridge for ns-3.43 (ns3-ai fork). The banner shows the toolkit architecture (IEEE OJ-COMS 2026, Fig. 2); click to open the project page." width="100%"/></a></p>
+<p align="center"><a href="https://muhammaduazir69.github.io/ns3-ai/"><img src="doc/figures/ns3-ai-banner.jpg" alt="ns3-ai: Gymnasium RL bridge for ns-3.49 (ns3-ai fork). The banner shows the toolkit architecture (IEEE OJ-COMS 2026, Fig. 2); click to open the project page." width="100%"/></a></p>
 
 <h1 align="center">ns3-ai-ntn</h1>
 
@@ -118,7 +118,7 @@ cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/ && python3 apb.py
 Standalone, into an existing ns-3.49 tree:
 
 ```bash
-git clone -b fix/ns3-43-compatibility-and-critical-bugs \
+git clone -b ns3-ai-ntn-v4 \
   https://github.com/Muhammaduazir69/ns3-ai.git contrib/ns3-ai-ntn
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build

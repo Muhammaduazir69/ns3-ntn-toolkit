@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/INSTALL.md">Toolkit install guide</a>
   &nbsp;·&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
 </p>
@@ -19,7 +19,7 @@
 
 `ntn-slice` is an ns-3.49 contributed module. The recommended way to run it is
 inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
-tree (branch `ntn-integration-v2`), where every dependency below is already
+tree (branch `ntn-integration-v4`), where every dependency below is already
 present. It also builds on a vanilla ns-3.49 tree, the library links only the
 ns-3 core; the examples additionally need the sibling toolkit modules listed in
 section 2.
@@ -30,11 +30,11 @@ section 2.
 
 | Component | Version |
 |---|---|
-| OS | Linux (Ubuntu 22.04+ / Fedora 39+ recommended) |
-| C++ compiler | gcc ≥ 11 or clang ≥ 14 |
-| CMake | ≥ 3.24 |
+| OS | Linux (Ubuntu 24.04+ / Fedora 39+ recommended; Ubuntu 22.04 needs CMake ≥ 3.25 from pip or Kitware) |
+| C++ compiler | gcc ≥ 11.1 or clang ≥ 17 |
+| CMake | ≥ 3.25 |
 | Python | ≥ 3.10 |
-| ns-3 | **3.43** |
+| ns-3 | **3.49**, with 5G-LENA v5.2 (`contrib/nr`) in the toolkit tree |
 
 ---
 
@@ -77,7 +77,7 @@ run **without** `ns3-ai`.
 ### As part of the toolkit (recommended)
 
 ```bash
-git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
+git clone -b ntn-integration-v4 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 # ntn-slice is already in contrib/, alongside its sibling modules
 ```
 
@@ -88,7 +88,7 @@ Docker: `uzairdocker69/ns3-ntn-toolkit:latest`.
 
 ```bash
 cd contrib/
-git clone -b ntn-slice-v2 https://github.com/Muhammaduazir69/ntn-slice.git
+git clone -b ntn-slice-v4 https://github.com/Muhammaduazir69/ntn-slice.git
 cd ..
 ```
 

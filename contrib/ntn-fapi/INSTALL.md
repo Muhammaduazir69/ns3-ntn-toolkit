@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v4/INSTALL.md">Toolkit install guide</a>
   &nbsp;·&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
 </p>
@@ -22,7 +22,7 @@ L1↔L2 message ABI** (DL_TTI / TX_DATA / RX_DATA / CRC.indication) for NR-NTN �
 a header-only set of structs in `namespace ns3::fapi`, plus the
 `fapi-helpers` conversions. The recommended way to use it is inside the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) tree
-(branch `ntn-integration-v2`), where every dependency below is already
+(branch `ntn-integration-v4`), where every dependency below is already
 present. `ntn-fapi` ships **bundled inside that tree** — there is no
 standalone repository to clone.
 
@@ -38,11 +38,11 @@ they ride a real mmwave NR NTN cell, so they additionally require
 
 | Component | Version |
 |---|---|
-| OS | Linux (Ubuntu 22.04+ / Fedora 39+ recommended) |
-| C++ compiler | gcc ≥ 11 or clang ≥ 14 (C++17: `std::variant`) |
-| CMake | ≥ 3.24 |
+| OS | Linux (Ubuntu 24.04+ / Fedora 39+ recommended; Ubuntu 22.04 needs CMake ≥ 3.25 from pip or Kitware) |
+| C++ compiler | gcc ≥ 11.1 or clang ≥ 17 (C++17: `std::variant`) |
+| CMake | ≥ 3.25 |
 | Python | ≥ 3.10 |
-| ns-3 | **3.43** |
+| ns-3 | **3.49**, with 5G-LENA v5.2 (`contrib/nr`) in the toolkit tree |
 | Disk | ~6 GB after build (the examples pull in SNS3 TLE data) |
 
 ---
@@ -99,7 +99,7 @@ cd ..
 the toolkit and it is already in `contrib/ntn-fapi`:
 
 ```bash
-git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
+git clone -b ntn-integration-v4 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 cd ns3-ntn-toolkit
 # contrib/ntn-fapi is already present
 ```
