@@ -1,0 +1,67 @@
+diff --git a/src/mobility/model/geocentric-constant-position-mobility-model.cc b/src/mobility/model/geocentric-constant-position-mobility-model.cc
+index 8158317d2..733e96db2 100644
+--- a/src/mobility/model/geocentric-constant-position-mobility-model.cc
++++ b/src/mobility/model/geocentric-constant-position-mobility-model.cc
+@@ -8,6 +8,8 @@
+ #include "geocentric-constant-position-mobility-model.h"
+ 
+ #include "ns3/angles.h"
++#include "ns3/global-value.h"
++#include "ns3/string.h"
+ 
+ #include <cmath>
+ 
+@@ -22,6 +24,22 @@ namespace ns3
+ 
+ NS_OBJECT_ENSURE_REGISTERED(GeocentricConstantPositionMobilityModel);
+ 
++// ns3-ntn-toolkit src patch 0001 (contrib/ntn-traffic/patches/ns3): opt-in
++// elevation convention. "Legacy" keeps the ns-3.43 behaviour bit for bit.
++// "Wgs84LowerEnd" picks the lower end by geographic altitude (not by the ECEF
++// z coordinate, which swaps the ends whenever the satellite is equatorward of
++// the terminal) and returns the signed elevation about the local normal of the
++// lower end's own geographic latitude/longitude (TR 38.811 clause 6.6.1 uses
++// the elevation at the terminal), floored at 0.01 deg so the 1/sin(elevation)
++// gas term of the TR 38.811 path loss stays finite; below 0 deg the link is
++// blocked by the Earth anyway (NtnEarthBlockageLossModel).
++static GlobalValue g_geocentricElevationModel(
++    "GeocentricElevationModel",
++    "Elevation convention of GeocentricConstantPositionMobilityModel::GetElevationAngle: "
++    "Legacy (ns-3.43) or Wgs84LowerEnd (lower end by altitude, signed, local normal)",
++    StringValue("Legacy"),
++    MakeStringChecker());
++
+ TypeId
+ GeocentricConstantPositionMobilityModel::GetTypeId()
+ {
+@@ -195,6 +213,30 @@ GeocentricConstantPositionMobilityModel::DoGetElevationAngle(
+     Vector me = this->DoGetGeocentricPosition();
+     Vector them = other->DoGetGeocentricPosition();
+ 
++    StringValue mode;
++    g_geocentricElevationModel.GetValue(mode);
++    if (mode.Get() == "Wgs84LowerEnd")
++    {
++        const Vector meGeo = this->DoGetGeographicPosition();
++        const Vector themGeo = other->DoGetGeographicPosition();
++        const bool meLower = meGeo.z <= themGeo.z;
++        const Vector& lowGeo = meLower ? meGeo : themGeo;
++        const Vector& low = meLower ? me : them;
++        const Vector& high = meLower ? them : me;
++        const double lat = lowGeo.x * M_PI / 180.0;
++        const double lon = lowGeo.y * M_PI / 180.0;
++        const Vector n(std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat));
++        Vector d = high - low;
++        const double dl = d.GetLength();
++        if (dl <= 0.0)
++        {
++            return 90.0;
++        }
++        double sx = (n.x * d.x + n.y * d.y + n.z * d.z) / dl;
++        sx = std::min(1.0, std::max(-1.0, sx));
++        return std::max(0.01, (180.0 * M_1_PI) * std::asin(sx));
++    }
++
+     // a is the terminal with the lowest altitude, used as the vertex whose local
+     // vertical (the radial direction a/|a|) defines the horizon. The altitude is
+     // approximated by the distance from the Earth's centre, not by the ECEF

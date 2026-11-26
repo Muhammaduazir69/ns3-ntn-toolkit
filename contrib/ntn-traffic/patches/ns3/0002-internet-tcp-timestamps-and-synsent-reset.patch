@@ -1,0 +1,177 @@
+diff --git a/src/internet/model/tcp-socket-base.cc b/src/internet/model/tcp-socket-base.cc
+index c1e0e19fc..07544fbc8 100644
+--- a/src/internet/model/tcp-socket-base.cc
++++ b/src/internet/model/tcp-socket-base.cc
+@@ -103,6 +103,15 @@ TcpSocketBase::GetTypeId()
+             //                   EnumValue (CLOSED),
+             //                   MakeEnumAccessor (&TcpSocketBase::m_state),
+             //                   MakeEnumChecker (CLOSED, "Closed"))
++            .AddAttribute("Rfc9293SynSentReset",
++                          "Honor an acceptable RST received in SYN-SENT (RFC 9293 3.10.7.3: "
++                          "\"connection reset\", enter CLOSED and report the failure). Off by "
++                          "default, which keeps the earlier ns-3 behavior: an RST+ACK is taken "
++                          "for a bare ACK and ignored, and the SYN is retried until ConnCount "
++                          "runs out.",
++                          BooleanValue(false),
++                          MakeBooleanAccessor(&TcpSocketBase::m_rfc9293SynSentReset),
++                          MakeBooleanChecker())
+             .AddAttribute("MaxSegLifetime",
+                           "Maximum segment lifetime in seconds, use for TIME_WAIT state transition "
+                           "to CLOSED state",
+@@ -1488,7 +1497,13 @@ TcpSocketBase::DoForwardUp(Ptr<Packet> packet, const Address& fromAddress, const
+     else if (tcpHeader.GetFlags() & TcpHeader::ACK)
+     {
+         NS_ASSERT(!(tcpHeader.GetFlags() & TcpHeader::SYN));
+-        if (m_timestampEnabled)
++        // RFC 7323 3.2 recommends that an RST be accepted whatever its timestamp, and the
++        // stack's own refusal of a closed port carries none. Under Rfc9293SynSentReset the
++        // SYN-SENT reset is let through to ProcessSynSent (other states keep the earlier
++        // behavior, which drops a TS-less segment).
++        const bool synSentRst = m_rfc9293SynSentReset && m_state == SYN_SENT &&
++                                (tcpHeader.GetFlags() & TcpHeader::RST);
++        if (m_timestampEnabled && !synSentRst)
+         {
+             if (!tcpHeader.HasOption(TcpOption::TS))
+             {
+@@ -2449,6 +2464,19 @@ TcpSocketBase::ProcessSynSent(Ptr<Packet> packet, const TcpHeader& tcpHeader)
+         ReceivedData(packet, tcpHeader);
+         Simulator::ScheduleNow(&TcpSocketBase::ConnectionSucceeded, this);
+     }
++    else if (m_rfc9293SynSentReset && (tcpflags & TcpHeader::RST) &&
++             (!(tcpflags & TcpHeader::ACK) ||
++              tcpHeader.GetAckNumber() == m_tcb->m_nextTxSequence + SequenceNumber32(1)))
++    { // RFC 9293 3.10.7.3, SYN-SENT: an RST whose ACK (if any) acknowledges our SYN means
++      // "connection reset" (e.g. no listener on the port). Close and report the failure
++      // instead of retrying the SYN.
++        NS_LOG_DEBUG("SYN_SENT -> CLOSED (connection refused)");
++        m_retxEvent.Cancel();
++        m_rtt->Reset();
++        m_state = CLOSED;
++        NotifyConnectionFailed();
++        DeallocateEndPoint();
++    }
+     else if (tcpflags & TcpHeader::ACK && !(tcpflags & TcpHeader::SYN))
+     { // Ignore ACK in SYN_SENT
+     }
+@@ -3381,6 +3409,16 @@ TcpSocketBase::SendDataPacket(SequenceNumber32 seq, uint32_t maxSize, bool withA
+     header.SetFlags(flags);
+     header.SetSequenceNumber(seq);
+     header.SetAckNumber(m_tcb->m_rxBuffer->NextRxSequence());
++    // RFC 7323 section 4.3: Last.ACK.sent is the ACK field of the last segment
++    // sent, data segments included. Only SendEmptyPacket() advanced it, so a
++    // peer that piggybacks every ACK on data (an HTTP server answering
++    // requests) never refreshed TS.Recent: it kept echoing the first
++    // request's timestamp, the other side's RTT samples grew by the whole
++    // page time, and its RTO climbed to about 15 s on a 26 ms path.
++    if (withAck && m_highTxAck < header.GetAckNumber())
++    {
++        m_highTxAck = header.GetAckNumber();
++    }
+     if (m_endPoint)
+     {
+         header.SetSourcePort(m_endPoint->GetLocalPort());
+diff --git a/src/internet/model/tcp-socket-base.h b/src/internet/model/tcp-socket-base.h
+index d91421479..2f0c02fa5 100644
+--- a/src/internet/model/tcp-socket-base.h
++++ b/src/internet/model/tcp-socket-base.h
+@@ -1399,6 +1399,7 @@ class TcpSocketBase : public TcpSocket
+     // Retries
+     uint32_t m_synCount{0};      //!< Count of remaining connection retries
+     uint32_t m_synRetries{0};    //!< Number of connection attempts
++    bool m_rfc9293SynSentReset{false}; //!< Honor an acceptable RST in SYN-SENT (RFC 9293)
+     uint32_t m_dataRetrCount{0}; //!< Count of remaining data retransmission attempts
+     uint32_t m_dataRetries{0};   //!< Number of data retransmission attempts
+ 
+diff --git a/src/internet/test/tcp-syn-connection-failed-test.cc b/src/internet/test/tcp-syn-connection-failed-test.cc
+index e4d65297b..5fba9769e 100644
+--- a/src/internet/test/tcp-syn-connection-failed-test.cc
++++ b/src/internet/test/tcp-syn-connection-failed-test.cc
+@@ -88,6 +88,79 @@ TcpSynConnectionFailedTest::DoRun()
+     NS_TEST_ASSERT_MSG_EQ(m_connectionFailed, true, "Connection failed callback was not called");
+ }
+ 
++/**
++ * @ingroup internet-test
++ *
++ * \brief A connection to a port with no listener is refused with RST+ACK
++ * (RFC 9293 3.10.7.1). With Rfc9293SynSentReset the client takes the reset
++ * (3.10.7.3, SYN-SENT: "connection reset") and fails after one SYN; by default
++ * it keeps the earlier behavior and fails only when its SYN retries run out.
++ */
++class TcpSynSentResetTest : public TestCase
++{
++  public:
++    /**
++     * Constructor.
++     * \param honorRst Value of the Rfc9293SynSentReset attribute.
++     */
++    TcpSynSentResetTest(bool honorRst)
++        : TestCase(honorRst ? "RST in SYN-SENT refuses the connection after one SYN (RFC 9293)"
++                            : "Default: RST in SYN-SENT ignored, SYN retried until ConnCount"),
++          m_honorRst(honorRst)
++    {
++    }
++
++  private:
++    void DoRun() override
++    {
++        m_failedAt = Seconds(-1);
++        m_syns = 0;
++        Ptr<Node> node = CreateObject<Node>();
++        InternetStackHelper internet;
++        internet.Install(node);
++        Ptr<Socket> socket = Socket::CreateSocket(node, TcpSocketFactory::GetTypeId());
++        socket->SetAttribute("Rfc9293SynSentReset", BooleanValue(m_honorRst));
++        socket->SetAttribute("ConnCount", UintegerValue(3));
++        socket->TraceConnectWithoutContext("Tx", MakeCallback(&TcpSynSentResetTest::Tx, this));
++        socket->Bind();
++        socket->SetConnectCallback(MakeNullCallback<void, Ptr<Socket>>(),
++                                   MakeCallback(&TcpSynSentResetTest::Failed, this));
++        socket->Connect(InetSocketAddress(Ipv4Address::GetLoopback(), 9));
++        Simulator::Stop(Seconds(60));
++        Simulator::Run();
++        Simulator::Destroy();
++
++        NS_TEST_ASSERT_MSG_EQ((m_failedAt >= Seconds(0)), true, "ConnectionFailed reported");
++        if (m_honorRst)
++        {
++            NS_TEST_ASSERT_MSG_EQ(m_syns, 1u, "one SYN, then the reset closes the socket");
++            NS_TEST_ASSERT_MSG_LT(m_failedAt, MilliSeconds(1), "refused at once over loopback");
++        }
++        else
++        {
++            NS_TEST_ASSERT_MSG_EQ(m_syns, 3u, "ConnCount = 3 connection attempts");
++            NS_TEST_ASSERT_MSG_GT(m_failedAt, Seconds(1), "fails only after the retries time out");
++        }
++    }
++
++    void Tx(Ptr<const Packet>, const TcpHeader& h, Ptr<const TcpSocketBase>)
++    {
++        if (h.GetFlags() & TcpHeader::SYN)
++        {
++            ++m_syns;
++        }
++    }
++
++    void Failed(Ptr<Socket>)
++    {
++        m_failedAt = Simulator::Now();
++    }
++
++    bool m_honorRst;          //!< Rfc9293SynSentReset value under test
++    Time m_failedAt;          //!< When ConnectionFailed was reported
++    uint32_t m_syns{0};       //!< SYN segments the client sent
++};
++
+ /**
+  * @ingroup internet-test
+  *
+@@ -103,6 +176,8 @@ class TcpSynConnectionFailedTestSuite : public TestSuite
+                     TestCase::Duration::QUICK);
+         AddTestCase(new TcpSynConnectionFailedTest("TCP SYN connection failed test with ECN", true),
+                     TestCase::Duration::QUICK);
++        AddTestCase(new TcpSynSentResetTest(true), TestCase::Duration::QUICK);
++        AddTestCase(new TcpSynSentResetTest(false), TestCase::Duration::QUICK);
+     }
+ };
+ 

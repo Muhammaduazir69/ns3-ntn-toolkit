@@ -1,0 +1,67 @@
+diff --git a/src/spectrum/model/three-gpp-channel-model.cc b/src/spectrum/model/three-gpp-channel-model.cc
+index fb0a313b1..b488a0fd2 100644
+--- a/src/spectrum/model/three-gpp-channel-model.cc
++++ b/src/spectrum/model/three-gpp-channel-model.cc
+@@ -2466,7 +2466,15 @@ ThreeGppChannelModel::NewChannelParamsNeeded(uint64_t channelParamsKey,
+     }
+     else
+     {
+-        if (!m_updatePeriod.IsZero())
++        // ntn: the displacement rule is evaluated once per UpdatePeriod, not on every query. At
++        // LEO speed (~7.5 km/s, ~3.75 m per 0.5 ms slot) checking it on every call regenerated
++        // the parameters - a fresh i.i.d. small-scale draw - about once per link per slot
++        // (measured on ns-3.48: ~2,700 regenerations/s with 3 UEs), destroying the channel's time
++        // correlation. Within a period the matrix keeps its draw and the spectrum model applies
++        // the Doppler of the endpoint velocities; after it, a mover gets a new draw (> 1 m) or a
++        // consistency update (< 1 m), and a static link stays as it is.
++        if (!m_updatePeriod.IsZero() &&
++            Simulator::Now() - it->second->m_generatedTime >= m_updatePeriod)
+         {
+             const double endpointDisplacement =
+                 ComputeEndpointDisplacement2d(aMob,
+@@ -2565,6 +2573,13 @@ ThreeGppChannelModel::ChannelUpdateNeeded(Ptr<const ThreeGppChannelParams> chann
+         return false;
+     }
+ 
++    // ntn: nothing to do until the update period has elapsed; the displacement may exceed 1 m
++    // meanwhile (NewChannelParamsNeeded only regenerates once per period, see there).
++    if (Simulator::Now() - channelParams->m_generatedTime <= m_updatePeriod)
++    {
++        return false;
++    }
++
+     NS_ABORT_MSG_IF(endpointDisplacement > kMaxConsistencyStepMeters,
+                     "Endpoint displacement exceeded 1 m; channel parameters should have been "
+                     "regenerated before attempting a consistency update.");
+@@ -2668,14 +2683,27 @@ ThreeGppChannelModel::GetChannel(Ptr<const MobilityModel> aMob,
+                                aAntenna,
+                                bAntenna))
+     {
++        // ntn: a regenerated matrix keeps the s/u orientation of the matrix it replaces. The
++        // long-term component conjugates the u-side beamforming vector (#1314), so the roles must
++        // not flip with whichever end happens to call first after an update (e.g. a UE uplink
++        // transmission after a channel update in a TDD slot, or every UE transmission on a paired
++        // FDD uplink carrier). The first matrix of a pair takes the call order, as before; callers
++        // that need a given orientation (the gNB on the s side) query the gNB end first.
++        bool swapEnds = false;
++        if (const auto old = m_channelMatrixMap.find(channelMatrixKey);
++            old != m_channelMatrixMap.end())
++        {
++            swapEnds = old->second->m_nodeIds.first == bMob->GetObject<Node>()->GetId() &&
++                       old->second->m_nodeIds.first != aMob->GetObject<Node>()->GetId();
++        }
+         m_channelMatrixMap.insert_or_assign(
+             channelMatrixKey,
+             GetNewChannel(m_channelParamsMap.find(channelParamsKey)->second,
+                           table3gpp,
+-                          aMob,
+-                          bMob,
+-                          aAntenna,
+-                          bAntenna));
++                          swapEnds ? bMob : aMob,
++                          swapEnds ? aMob : bMob,
++                          swapEnds ? bAntenna : aAntenna,
++                          swapEnds ? aAntenna : bAntenna));
+     }
+ 
+     NS_ASSERT(m_channelMatrixMap.contains(channelMatrixKey));
