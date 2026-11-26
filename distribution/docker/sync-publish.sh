@@ -68,7 +68,9 @@ PUSH_TAG="${2:-latest}"
 FORCE_CONFIGURE="${3:-0}"
 BASE="${IMAGE}:${BASE_TAG}"
 TARGET="${IMAGE}:${PUSH_TAG}"
-SRC="/home/uzair/6g_ntn_ns3/ns-3-dev"
+# The ns-3.49 worktree (branch ntn-integration-v4-full); SRC_REF is the commit to publish.
+SRC="${NTN_SRC:-/home/uzair/6g_ntn_ns3/ns-3.49-port}"
+SRC_REF="${NTN_SRC_REF:-HEAD}"
 CONTAINER="ntn-toolkit-live"
 
 say() { printf '\n\033[1;36m>> %s\033[0m\n' "$*"; }
@@ -109,22 +111,33 @@ fi
 # protoc (3.21) emits code incompatible with the container's libprotobuf (3.12).
 # Excluding them lets the container regenerate matching pb sources with its own
 # protoc: otherwise the synced host pb files cause "abstract type DataContainer".
-say "rsync source into builder (build/, cmake-cache/, satellite corpus, generated pb excluded)"
-rsync -a --delete --info=stats1 \
+say "export the committed tree (git archive ${SRC_REF}) and sync changed files into the builder"
+# Only COMMITTED, tracked files go into the image: run outputs and test artifacts in the
+# working tree never leak in. git archive stamps every file with the commit time, so the
+# sync compares CONTENT (-c) and does not copy times (--no-times): a changed file lands with
+# the current time and ninja rebuilds exactly what it touches, nothing else.
+# Excluded (kept from the base image, never deleted): the build tree, the untracked vendored
+# SNS3 module contrib/satellite (5 GB TLE corpus), upstream doc/, generated protobuf sources,
+# pybind .so files and the Python packaging build/ dirs of the pip-installed modules.
+EXPORT="$(mktemp -d)"
+trap 'rm -rf "${EXPORT}"' EXIT
+git -C "${SRC}" archive "${SRC_REF}" | tar -x -C "${EXPORT}"
+rsync -rlpc --no-times --delete --info=stats1 \
   --rsh='docker exec -i' \
-  --exclude 'build/' \
-  --exclude 'cmake-cache/' \
-  --exclude '.lock-ns3_*' \
-  --exclude 'contrib/satellite/data/' \
-  --exclude '.git/' \
-  --exclude '**/.venv/' \
-  --exclude '**/__pycache__/' \
-  --exclude '*.pcap' \
-  --exclude '*_kpm_series.*' \
+  --exclude '/build/' \
+  --exclude '/cmake-cache/' \
+  --exclude '/.lock-ns3_*' \
+  --exclude '/contrib/satellite/' \
+  --exclude '/doc/' \
+  --exclude '/contrib/*/build/' \
   --exclude '*.pb.h' \
   --exclude '*.pb.cc' \
   --exclude '*_pb2.py' \
-  "${SRC}/" "${CONTAINER}:/home/ntn/ns-3-dev/"
+  --exclude '__pycache__/' \
+  --exclude '.venv/' \
+  --exclude '*.so' \
+  --exclude '*.egg-info/' \
+  "${EXPORT}/" "${CONTAINER}:/home/ntn/ns-3-dev/"
 
 # rsync ran as root; hand the SYNCED SOURCE back to the runtime user (uid 1000).
 #
@@ -139,6 +152,7 @@ docker exec -u root "${CONTAINER}" bash -lc \
   'find /home/ntn/ns-3-dev \
       -path /home/ntn/ns-3-dev/build -prune -o \
       -path /home/ntn/ns-3-dev/cmake-cache -prune -o \
+      -path /home/ntn/ns-3-dev/contrib/satellite -prune -o \
       \( -not -uid 1000 -o -not -gid 1000 \) -exec chown 1000:1000 {} +'
 
 # ---------------------------------------------------------------------------
