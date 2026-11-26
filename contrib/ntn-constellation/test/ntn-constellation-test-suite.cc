@@ -3225,8 +3225,14 @@ class Sgp4VsSkyfieldTest : public TestCase
             {86400.0, {-10743773.731962025, -40777354.77396207, 430843.0928049694}}
      }}
         };
+        // UT1 - UTC that Skyfield (builtin IERS table) applied at each element-set epoch.
+        const std::map<std::string, double> dut1 = {{"STARLINK-11072_[DTC]", 0.0934},
+                                                    {"KINEIS-1B", 0.0883},
+                                                    {"ORBCOMM_FM06", 0.0882},
+                                                    {"GOES_16", 0.0852}};
         for (const auto& c : cases)
         {
+            ns3::ntncon::Sgp4MobilityModel::SetUt1MinusUtc(0.0);
             ns3::ntncon::TleRecord rec;
             rec.name = c.name;
             rec.line1 = c.l1;
@@ -3251,6 +3257,26 @@ class Sgp4VsSkyfieldTest : public TestCase
                           << " m (bound " << tol << " m)\n";
                 NS_TEST_ASSERT_MSG_LT(err, tol, c.name << " at t+" << dt << " s differs by " << err << " m");
             }
+            // With the IERS UT1 - UTC applied, the rotation residual goes away: measured 27 Nov
+            // 2026 at 0.02-0.36 m for VLEO, SSO, LEO and GEO alike (was 15-262 m), which also
+            // shows the GMST rotation of TEME agrees with Skyfield's IAU 2000 chain at this level.
+            auto it = dut1.find(c.name);
+            NS_TEST_ASSERT_MSG_EQ((it != dut1.end()), true, "UT1 - UTC for " << c.name);
+            ns3::ntncon::Sgp4MobilityModel::SetUt1MinusUtc(it->second);
+            Ptr<ns3::ntncon::Sgp4MobilityModel> m1 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+            m1->SetUseVallado(true);
+            m1->SetTle(rec);
+            for (const auto& [dt, r] : c.ref)
+            {
+                Vector p, v;
+                m1->GetEcefStateAt(Seconds(dt), p, v);
+                const double err = std::sqrt((p.x - r[0]) * (p.x - r[0]) + (p.y - r[1]) * (p.y - r[1]) +
+                                             (p.z - r[2]) * (p.z - r[2]));
+                std::cout << "[sgp4-vs-skyfield+dut1] " << c.name << " t+" << dt << " s: |d| = " << err
+                          << " m\n";
+                NS_TEST_ASSERT_MSG_LT(err, 1.0, c.name << " with DUT1 at t+" << dt << " s differs by " << err << " m");
+            }
+            ns3::ntncon::Sgp4MobilityModel::SetUt1MinusUtc(0.0);
         }
     }
 };

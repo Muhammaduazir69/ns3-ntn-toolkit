@@ -97,8 +97,8 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     /// Returns false on parse failure.
     bool SetTle(const TleRecord& tle);
 
-    /// Select the full Vallado SGP4 propagator (drag/B* included) instead of the
-    /// default Kepler + J2-secular backend. Vallado mode requires a TLE-sourced
+    /// Select the full Vallado SGP4 propagator (drag/B* included, the default since
+    /// TWIN-01) or, with false, the Kepler + J2-secular backend. Vallado mode requires a TLE-sourced
     /// orbit (raw lines), so call SetTle() with a real TLE; Walker-generated
     /// classical elements (SetElements) keep the fast Kepler+J2 path. The order
     /// of SetUseVallado()/SetTle() does not matter — init is (re)done as needed.
@@ -136,6 +136,18 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     double GetElementEpochUnix() const { return m_elements.epoch_unix_s; }
     uint32_t GetNoradId() const { return m_elements.norad_id; }
     bool GetFromRealTle() const { return m_fromRealTle; }
+
+    /**
+     * UT1 - UTC (s, IERS Bulletin A "DUT1", |value| < 0.9 s) used for the Earth rotation angle of
+     * the TEME -> Earth-fixed rotation, for every Sgp4MobilityModel of the run. Default 0: the
+     * rotation then uses UTC, which leaves an along-rotation error of DUT1 x 7.29e-5 rad/s
+     * (about 0.09 s in late 2026: 40 m at LEO, 260 m at GEO). Set it before the run starts;
+     * positions already cached keep the old value until their cache expires.
+     * @param seconds UT1 - UTC
+     */
+    static void SetUt1MinusUtc(double seconds);
+    /// @return the UT1 - UTC value in use (s)
+    static double GetUt1MinusUtc();
 
     /// Cache granularity for the position lookup. Default 100 ms.
     void SetCacheGranularity(Time grain) { m_cacheGrain = grain; }

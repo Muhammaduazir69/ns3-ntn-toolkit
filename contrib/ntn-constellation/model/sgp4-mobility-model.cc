@@ -8,7 +8,9 @@
 
 #include "ns3/boolean.h"
 #include "ns3/double.h"
+#include "ns3/global-value.h"
 #include "ns3/uinteger.h"
+#include "ns3/abort.h"
 #include "ns3/log.h"
 #include "ns3/satellite-sgp4io.h"   // twoline2rv
 #include "ns3/satellite-sgp4unit.h" // elsetrec, sgp4, gravconsttype
@@ -62,13 +64,6 @@ SolveKepler(double M, double e)
             break;
     }
     return E;
-}
-
-/// Julian Date from Unix seconds.
-double
-UnixToJulian(double unix_s)
-{
-    return 2440587.5 + unix_s / 86400.0;
 }
 
 /// Unix seconds from Julian Date.
@@ -142,7 +137,15 @@ Sgp4MobilityModel::GetTypeId()
     return tid;
 }
 
-Sgp4MobilityModel::Sgp4MobilityModel() = default;
+Sgp4MobilityModel::Sgp4MobilityModel()
+{
+    DoubleValue dut1;
+    GlobalValue::GetValueByName("NtnUt1MinusUtc", dut1);
+    if (dut1.Get() != 0.0)
+    {
+        SetUt1MinusUtc(dut1.Get());
+    }
+}
 
 void
 Sgp4MobilityModel::SetElements(const KeplerianElements& elements)
@@ -362,10 +365,36 @@ Sgp4MobilityModel::Propagate(double unix_s, Vector& pos_eci, Vector& vel_eci)
     (void)r;
 }
 
+namespace
+{
+double g_ut1MinusUtc = 0.0; //!< UT1 - UTC (s), see Sgp4MobilityModel::SetUt1MinusUtc
+
+/// Command-line access: --NtnUt1MinusUtc=0.085 (read when each model is created).
+GlobalValue g_ut1MinusUtcGlobal("NtnUt1MinusUtc",
+                                "UT1 - UTC (s, IERS Bulletin A DUT1) for the Earth rotation of every "
+                                "Sgp4MobilityModel; 0 (default) rotates with UTC",
+                                DoubleValue(0.0),
+                                MakeDoubleChecker<double>(-0.9, 0.9));
+} // namespace
+
+void
+Sgp4MobilityModel::SetUt1MinusUtc(double seconds)
+{
+    NS_ABORT_MSG_IF(!(std::abs(seconds) < 0.9), "UT1 - UTC must lie within +-0.9 s (IERS DUT1)");
+    g_ut1MinusUtc = seconds;
+}
+
+double
+Sgp4MobilityModel::GetUt1MinusUtc()
+{
+    return g_ut1MinusUtc;
+}
+
 Vector
 Sgp4MobilityModel::EciToEcef(const Vector& eci, double unix_s)
 {
-    const double theta = GmstRad(unix_s);
+    // GMST is a function of UT1; the model clock is UTC.
+    const double theta = GmstRad(unix_s + g_ut1MinusUtc);
     const double c = std::cos(theta);
     const double s = std::sin(theta);
     return Vector(c * eci.x + s * eci.y, -s * eci.x + c * eci.y, eci.z);

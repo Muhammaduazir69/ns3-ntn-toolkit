@@ -68,7 +68,9 @@ Everything lives in the `ns3::ntncon` namespace.
 | `ntn-xn-handover.h`, `ntn-xnap-messages.h` | `NtnXnHandover`, `NtnXnapHeader` | The TS 38.300 Section 9.2.3 Xn sequence between two regenerative satellites, carried over the ISL. |
 | `tr38821-corpus.h` | `Tr38821CorpusReader`, `CalibrationHarness` | TR 38.821 Set-1 and Set-2 reference budgets plus a Starlink latency corpus, with residuals against the toolkit's own predictions. |
 
-**Two propagators, two fidelity levels.** In C++, Kepler + J2 is the default and full SGP4 is opt-in for real element sets. The Python companion (`ntn_constellation`, below) always uses the `sgp4` library and Skyfield, so "SGP4" in this README means the Python side or a C++ satellite with `SetUseVallado(true)`.
+**Two propagators, two fidelity levels.** In C++, `Sgp4MobilityModel::SetTle()` runs Vallado SGP4/SDP4 by default (`SetUseVallado(false)` switches to Kepler + J2); `SetElements()` installs generated classical elements (Walker shells) on the faster Kepler + J2 path, and `SetElementsSgp4()` runs generated elements through SGP4. The Python companion (`ntn_constellation`, below) always uses the `sgp4` library and Skyfield.
+
+**Earth-fixed accuracy.** The TEME to Earth-fixed rotation uses GMST. Set UT1 - UTC (IERS Bulletin A DUT1) with `Sgp4MobilityModel::SetUt1MinusUtc()` or `--NtnUt1MinusUtc=` to match Skyfield's ITRS positions to 0.02-0.36 m for VLEO, SSO, LEO and GEO element sets; with the default 0 the rotation uses UTC and the positions are off by DUT1 of Earth rotation (about 0.09 s in late 2026: 15-46 m at LEO, 262 m at GEO). Polar motion is applied by neither side (about 0.3 arcsec, roughly 10 m at LEO radius, against the full ITRF). Test `Sgp4VsSkyfieldTest`.
 
 ## Results
 

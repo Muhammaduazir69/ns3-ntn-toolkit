@@ -18,6 +18,10 @@ v2.7.1 are on the GitHub and GitLab release pages.
 - **ns3-ai lte-cqi:** the LSTM agent now follows the moving UE by the RNTI it receives at RRC
   connection setup. RNTIs follow random-access order, so the old fixed RNTI 1 was a static
   UE with a constant CQI and the agent never trained. The dataset records the CQI range.
+- **Orbit accuracy:** `Sgp4MobilityModel::SetUt1MinusUtc()` / `--NtnUt1MinusUtc=` applies the IERS
+  UT1 - UTC to the Earth rotation; against Skyfield ITRS the residual falls from 15-262 m to
+  0.02-0.36 m for VLEO, SSO, LEO and GEO element sets (default 0 keeps the previous behavior). The
+  ntn-constellation README now states that `SetTle()` runs SGP4 by default.
 - 5G-LENA v5.2: the obsolete `NrHelper::UpdateDeviceConfigs` calls are gone (they only
   printed a deprecation warning per device).
 
