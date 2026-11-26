@@ -35,6 +35,8 @@
 #include "ns3/mobility-module.h"
 #include "ns3/point-to-point-module.h"
 
+#include "my-rr-sched.h"
+
 using namespace ns3;
 using namespace std;
 
@@ -163,6 +165,26 @@ main(int argc, char* argv[])
         // side effect: the default EPS bearer will be activated
     }
 
+    // The agent learns the CQI of the moving UE (ueNodes 0). Its RNTI is assigned in
+    // random-access order, so hand it to the scheduler once its RRC connection is up.
+    Ptr<MyRrMacScheduler> sched =
+        DynamicCast<MyRrMacScheduler>(lteEnbDev->GetCcMap().at(0)->GetFfMacScheduler());
+    NS_ABORT_MSG_IF(!sched, "expected ns3::MyRrMacScheduler on the eNB");
+    const uint64_t movingImsi = ueLteDevs.Get(0)->GetObject<LteUeNetDevice>()->GetImsi();
+    uint16_t movingRnti = 0;
+    ueLteDevs.Get(0)->GetObject<LteUeNetDevice>()->GetRrc()->TraceConnectWithoutContext(
+        "ConnectionEstablished",
+        MakeCallback(
+            +[](Ptr<MyRrMacScheduler> s, uint64_t want, uint16_t* out, uint64_t imsi, uint16_t,
+                uint16_t rnti) {
+                if (imsi == want)
+                {
+                    *out = rnti;
+                    s->SetAttribute("AgentRnti", UintegerValue(rnti));
+                }
+            })
+            .Bind(sched, movingImsi, &movingRnti));
+
     Time udpInterval =
         Time::FromDouble((packetSize * 8) / static_cast<double>(DataRate(datarate).GetBitRate()),
                          Time::S);
@@ -272,6 +294,10 @@ main(int argc, char* argv[])
         sinkRxBytes += DynamicCast<PacketSink>(serverApps.Get(u))->GetTotalRx();
     }
     cout << "PacketSink total Rx: " << sinkRxBytes << " bytes" << endl;
+    cout << "Agent UE: IMSI " << movingImsi << " RNTI " << movingRnti << ", "
+         << sched->GetAgentCqiReports() << " CQI reports, CQI "
+         << unsigned(sched->GetAgentCqiMin()) << " to " << unsigned(sched->GetAgentCqiMax())
+         << endl;
 
     NS_LOG_UNCOND("Done");
 
@@ -285,6 +311,10 @@ main(int argc, char* argv[])
         argc,
         argv,
         {{"flows", std::to_string(stats.size()), "measured"},
+         {"agent_ue_rnti", std::to_string(movingRnti), "measured"},
+         {"agent_cqi_reports", std::to_string(sched->GetAgentCqiReports()), "measured"},
+         {"agent_cqi_min", std::to_string(sched->GetAgentCqiMin()), "measured"},
+         {"agent_cqi_max", std::to_string(sched->GetAgentCqiMax()), "measured"},
          {"tx_packets", std::to_string(txSum), "measured"},
          {"rx_packets", std::to_string(rxSum), "measured"},
          {"delivery_ratio", std::to_string(txSum > 0 ? double(rxSum) / txSum : 0.0), "measured"},

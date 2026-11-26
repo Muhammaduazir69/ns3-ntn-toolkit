@@ -80,6 +80,23 @@ class MyRrMacScheduler : public FfMacScheduler
      */
     void TransmissionModeConfigurationUpdate(uint16_t rnti, uint8_t txMode);
 
+    /// Wideband CQI reports exchanged with the agent so far.
+    uint32_t GetAgentCqiReports() const
+    {
+        return m_agentCqiReports;
+    }
+
+    /// Lowest and highest wideband CQI the agent's UE reported (0 and 0 before any report).
+    uint8_t GetAgentCqiMin() const
+    {
+        return m_agentCqiReports ? m_agentCqiMin : 0;
+    }
+
+    uint8_t GetAgentCqiMax() const
+    {
+        return m_agentCqiMax;
+    }
+
   private:
     //
     // Implementation of the CSCHED API primitives
@@ -347,6 +364,10 @@ class MyRrMacScheduler : public FfMacScheduler
     uint8_t m_ulGrantMcs;                             ///< MCS for UL grant (default 0)
 
     Ptr<CQIDL> m_cqiDl;
+    uint16_t m_agentRnti{0};      ///< RNTI whose CQI goes through the agent (0: none yet)
+    uint32_t m_agentCqiReports{0}; ///< CQI reports exchanged with the agent
+    uint8_t m_agentCqiMin{15};     ///< lowest reported CQI of that UE
+    uint8_t m_agentCqiMax{0};      ///< highest reported CQI of that UE
 };
 
 } // namespace ns3

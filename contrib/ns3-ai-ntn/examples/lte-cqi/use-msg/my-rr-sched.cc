@@ -32,6 +32,8 @@
 #include <ns3/rr-ff-mac-scheduler.h>
 #include <ns3/simulator.h>
 
+#include <algorithm>
+
 #include <cfloat>
 #include <climits>
 #include <set>
@@ -106,7 +108,14 @@ MyRrMacScheduler::GetTypeId(void)
                           "The MCS of the UL grant, must be [0..15] (default 0)",
                           UintegerValue(0),
                           MakeUintegerAccessor(&MyRrMacScheduler::m_ulGrantMcs),
-                          MakeUintegerChecker<uint8_t>());
+                          MakeUintegerChecker<uint8_t>())
+            .AddAttribute("AgentRnti",
+                          "RNTI of the UE whose wideband CQI is exchanged with the Python agent "
+                          "(0: none). RNTIs follow random-access order, not IMSI order, so the "
+                          "example sets it when the tracked UE's RRC connection is established.",
+                          UintegerValue(0),
+                          MakeUintegerAccessor(&MyRrMacScheduler::m_agentRnti),
+                          MakeUintegerChecker<uint16_t>());
     return tid;
 }
 
@@ -1177,8 +1186,11 @@ MyRrMacScheduler::DoSchedDlCqiInfoReq(
             NS_LOG_LOGIC("wideband CQI " << (uint32_t)cqi_val << " reported");
             std::map<uint16_t, uint8_t>::iterator it;
             uint16_t rnti = params.m_cqiList.at(i).m_rnti;
-            if (rnti == 1)
+            if (m_agentRnti != 0 && rnti == m_agentRnti)
             {
+                ++m_agentCqiReports;
+                m_agentCqiMin = std::min(m_agentCqiMin, cqi_val);
+                m_agentCqiMax = std::max(m_agentCqiMax, cqi_val);
                 m_cqiDl->SetWbCQI(cqi_val);
                 cqi_val = m_cqiDl->GetWbCQI();
             }
