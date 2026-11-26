@@ -1,10 +1,42 @@
-# Changelog — ns3-ntn-toolkit
+# Changelog: ns3-ntn-toolkit
 
-All notable changes to the toolkit and its custom modules. The toolkit and each
-standalone module are versioned as release lines; branch `ntn-integration-v2`
-(toolkit) and `<module>-v2` (per module) carry the v2 work below.
+All notable changes to the toolkit and its custom modules. Branch `ntn-integration-v4`
+(toolkit) and `<module>-v4` (per module) carry the v3 line on ns-3.49 and 5G-LENA v5.2; the
+v2 line (ns-3.43) stays on `ntn-integration-v2` and `<module>-v2`. Release notes for v2.0.2, v2.6.1 and
+v2.7.1 are on the GitHub and GitLab release pages.
 
-## [Unreleased] — architecture hardening from the 2026-06-12 deep audit
+## [Unreleased] (26 Nov 2026)
+
+- **Datasets:** examples with their own data plane write `ue_kpi.csv` and `cell_kpi.csv`
+  through the new header-only `ntnobs::StartFlowKpiSeries` (ntn-observability): per-terminal
+  and per-satellite IP throughput, loss, one-way delay and jitter from FlowMonitor every
+  second, with the elevation and slant range of the highest satellite in Earth-fixed scenes.
+  Used by 14 examples in ns3-ai-ntn, ntn-constellation, ntn-sagin and oran-ntn.
+- **mmwave backend:** `NtnRealStackHelper` writes the per-UE and per-cell KPI dataset on
+  mmwave too, and fills the per-UE transport-block counters there (KPM `TB.TotNbrDl` and
+  `TB.ErrTotNbrDl` were zero on mmwave). PRB usage stays nr-only.
+- **ns3-ai lte-cqi:** the LSTM agent now follows the moving UE by the RNTI it receives at RRC
+  connection setup. RNTIs follow random-access order, so the old fixed RNTI 1 was a static
+  UE with a constant CQI and the agent never trained. The dataset records the CQI range.
+- 5G-LENA v5.2: the obsolete `NrHelper::UpdateDeviceConfigs` calls are gone (they only
+  printed a deprecation warning per device).
+
+## [v3.0.1] (25 Nov 2026)
+
+- ns3-ai a-plus-b examples exchange the two one-way delays of an SGP4 LEO bent pipe instead
+  of random integers, and record the pass (globe scene and dataset).
+- Docker: the ns3-ai Gym bridge is importable in the image (protobuf runtime, PYTHONPATH).
+
+## [v3.0.0] (25 Nov 2026)
+
+- Ported to ns-3.49 and 5G-LENA v5.2 (`ntn-integration-v4`, `<module>-v4`). The ns-3 core
+  carries four documented patches (`contrib/ntn-traffic/patches/ns3/`) and the mmWave LTE
+  fork; the nr NTN patch series is in `contrib/nr/ntn-patches/`.
+- New nr patch 23 (conjugated direct-path UE weights after ns-3.48 #1314), 24 (all BWPs
+  connected) and 25 (CSI subband per BWP); mmwave SVD receive vector for conjugate combining.
+- Docker image on Ubuntu 24.04 (CMake >= 3.25, C++23).
+
+## [2026-06] Architecture hardening from the 12 June 2026 deep audit (v2 line)
 
 - **Standards precision:** NTN HO triggers relabeled (Rel-17 CondEvents
   A4/T1/D1, TR 38.821-studied elevation/TA); **Rel-18 CondEventD2**
