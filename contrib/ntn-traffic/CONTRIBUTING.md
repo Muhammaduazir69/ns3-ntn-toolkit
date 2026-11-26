@@ -30,7 +30,7 @@ modules in the `ns3-ntn-toolkit` family follow the same workflow.
 
 ## Coding style essentials
 
-- C++17, 4-space indentation, 100-column soft limit.
+- C++23 (the ns-3.49 standard), 4-space indentation, 100-column soft limit.
 - `CamelCase` for types, `m_camelCase` for members, `camelCase` for
   variables.
 - One public class per header file when practical.
