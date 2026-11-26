@@ -27,6 +27,7 @@
  */
 
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include "ns3/applications-module.h"
 #include "ns3/box.h"
 #include "ns3/core-module.h"
@@ -373,6 +374,8 @@ main(int argc, char* argv[])
     Simulator::Schedule(MilliSeconds(100), &TrackHapsLeoDelay);
     Simulator::Stop(Seconds(duration));
     // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    // ntn-dataset@1 per-terminal and per-satellite KPI series from this FlowMonitor.
+    ns3::ntnobs::StartFlowKpiSeries(outputDir, fmHelper);
     ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
 

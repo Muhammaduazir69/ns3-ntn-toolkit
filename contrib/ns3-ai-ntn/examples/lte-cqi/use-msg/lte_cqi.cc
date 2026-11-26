@@ -22,6 +22,7 @@
  */
 
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include "../../ntn-wifi-site-context.h"
 #include <filesystem>
 #include <algorithm>
@@ -234,6 +235,8 @@ main(int argc, char* argv[])
                   << " deg, slant range " << ctx.slantRangeKm << " km (" << ctx.propagator
                   << ")" << std::endl;
     }
+    // ntn-dataset@1 per-terminal and per-satellite KPI series from this FlowMonitor.
+    ns3::ntnobs::StartFlowKpiSeries(".", flowmon);
     ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 

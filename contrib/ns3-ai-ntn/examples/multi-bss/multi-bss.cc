@@ -23,6 +23,7 @@
 #include "../ntn-wifi-site-context.h"
 
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include <filesystem>
 #include "ns3/ns3-ai-ntn-module.h"
 #include "ns3/ampdu-subframe-header.h"
@@ -798,7 +799,7 @@ PrintPythonPlotCSV(std::string filename)
         outFile << "box," << box.xMax - box.xMin << "," << box.yMax - box.yMin << "," << rowCount
                 << std::endl;
     }
-    double maxDistance;
+    double maxDistance = 0.0; // written only for appType != "setup-done"
     if (appType != "setup-done")
     { // Formula to draw radius of circle
         double max_loss = -(ccaSensitivity - txPower);
@@ -2842,6 +2843,10 @@ main(int argc, char* argv[])
                   << " deg, slant range " << ctx.slantRangeKm << " km (" << ctx.propagator
                   << ")" << std::endl;
     }
+    // ntn-dataset@1 per-terminal and per-satellite KPI series (IPv4 FlowMonitor).
+    FlowMonitorHelper kpiFlowmon;
+    kpiFlowmon.InstallAll();
+    ns3::ntnobs::StartFlowKpiSeries(".", kpiFlowmon);
     ns3::ntnobs::StartSceneFromNodeList(".");
 
     Simulator::Run();

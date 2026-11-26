@@ -92,6 +92,8 @@ a CZML file and a manifest that round-trips (`netsim-scene.log`: mean DL SINR
 | `model/ntn-netsimulyzer-exporter.h` | `NtnNetSimulyzerExporter`: streaming JSON in the NIST NetSimulyzer 1.0 schema |
 | `model/ntn-scene-recorder.h` | `NtnSceneRecorder`: one tap that reads mobility positions (ECEF or local ENU, converted to ECEF), KPIs and events, and fans them out to NetSimulyzer and CZML |
 | `model/ntn-repro-manifest.h` | `NtnReproManifest`: git SHA, ns-3 version, scenario, seed, TLE epoch, service models, argv; `WriteJson()` and `LoadJson()` |
+| `model/ntn-dataset-writer.h` | header-only ntn-dataset@1 record for examples not built on `NtnRealStackHelper`: `WriteDatasetRecord()` (manifest + `sim_health.csv`, measured or analytic), `StartSceneFromNodeList()` (globe scene from the node list), `AddContextSatelliteNodes()` |
+| `model/ntn-flow-kpi-series.h` | header-only `StartFlowKpiSeries(outDir, flowMonitorHelper)`: per-terminal `ue_kpi.csv` and per-satellite `cell_kpi.csv` for custom data planes, from FlowMonitor every second (IP throughput, loss, one-way delay, jitter; elevation and slant range of the highest satellite in Earth-fixed scenes); idle intervals write no row |
 | `helper/ntn-observability-helper.h` | `NtnObservabilityHelper`: one-call setup of the sinks with consistent run-id tagging |
 | `helper/ntn-scene-helper.h` | wiring helpers for the scene recorder |
 | `dashboards/` | four Grafana dashboards: Overview, Handover, Radio, ISL |

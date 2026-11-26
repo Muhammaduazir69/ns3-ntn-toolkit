@@ -42,6 +42,7 @@
  * Quick test:  --simSeconds=60          (a route flip occurs mid-run)
  */
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include "ns3/applications-module.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
@@ -505,6 +506,10 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(1.0), &SaginProbe, simSeconds);
     Simulator::Stop(Seconds(simSeconds + 0.1));
     // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    // ntn-dataset@1 per-terminal and per-satellite KPI series (IPv4 FlowMonitor).
+    FlowMonitorHelper kpiFlowmon;
+    kpiFlowmon.InstallAll();
+    ns3::ntnobs::StartFlowKpiSeries(".", kpiFlowmon);
     ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 

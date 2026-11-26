@@ -57,6 +57,7 @@
 //
 // Quick test:  --simSeconds=360 --dataRateMbps=4
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include "ns3/applications-module.h"
 #include "ns3/boolean.h"
 #include "ns3/command-line.h"
@@ -675,6 +676,10 @@ main(int argc, char* argv[])
     {
         gw.Get(0)->AggregateObject(gwMob);
     }
+    // ntn-dataset@1 per-terminal and per-satellite KPI series (IPv4 FlowMonitor).
+    FlowMonitorHelper kpiFlowmon;
+    kpiFlowmon.InstallAll();
+    ns3::ntnobs::StartFlowKpiSeries(".", kpiFlowmon);
     ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
     sched->Stop();

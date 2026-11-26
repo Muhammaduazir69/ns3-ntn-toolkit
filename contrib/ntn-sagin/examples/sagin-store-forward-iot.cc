@@ -91,6 +91,7 @@
 //   - --czml / --netsim write an ntn-observability scene of satellites, devices and gateways.
 
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 
 #include <filesystem>
 #include "ns3/applications-module.h"
@@ -1689,6 +1690,8 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(0), &Tick);
     Simulator::Stop(Seconds(horizon));
     // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    // ntn-dataset@1 per-terminal and per-satellite KPI series from this FlowMonitor.
+    ns3::ntnobs::StartFlowKpiSeries(std::filesystem::path(out).parent_path().string(), fmh);
     ns3::ntnobs::StartSceneFromNodeList(std::filesystem::path(out).parent_path().string());
     Simulator::Run();
     if (sceneRec)

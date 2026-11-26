@@ -33,6 +33,7 @@
 #include "../leo-bottleneck.h"
 
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include <filesystem>
 #include "ns3/ns3-ai-ntn-module.h"
 #include "ns3/applications-module.h"
@@ -374,6 +375,12 @@ main(int argc, char* argv[])
     }
 
     // Globe scene: the two ground ends and the serving satellites carry ECEF mobility.
+    // ntn-dataset@1 per-terminal and per-satellite KPI series from this FlowMonitor.
+    if (!flow_monitor)
+    {
+        flowHelper.InstallAll();
+    }
+    ns3::ntnobs::StartFlowKpiSeries(".", flowHelper);
     ns3::ntnobs::StartSceneFromNodeList(".");
 
     Simulator::Stop(Seconds(stop_time));

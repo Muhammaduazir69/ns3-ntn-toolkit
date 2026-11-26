@@ -35,6 +35,7 @@
  */
 
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include "ns3/applications-module.h"
 #include "ns3/contact-graph-router.h"
 #include "ns3/contact-graph-scheduler.h"
@@ -1555,6 +1556,10 @@ main(int argc, char* argv[])
         scene = sh.Build(satNodes, gsNodes);
     }
     // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    // ntn-dataset@1 per-terminal and per-satellite KPI series (IPv4 FlowMonitor).
+    FlowMonitorHelper kpiFlowmon;
+    kpiFlowmon.InstallAll();
+    ns3::ntnobs::StartFlowKpiSeries(outputDir, kpiFlowmon);
     ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
     if (scene)

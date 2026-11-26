@@ -22,6 +22,7 @@
  * Quick test:  --simSeconds=60 --dataRateMbps=5
  */
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include "ns3/applications-module.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
@@ -258,6 +259,10 @@ main(int argc, char* argv[])
     Ptr<ConstantPositionMobilityModel> geoCtx = CreateObject<ConstantPositionMobilityModel>();
     geoCtx->SetPosition(Vector(0, 0, geoAltKm * 1000.0));
     ctxNodes.Get(3)->AggregateObject(geoCtx);
+    // ntn-dataset@1 per-terminal and per-satellite KPI series (IPv4 FlowMonitor).
+    FlowMonitorHelper kpiFlowmon;
+    kpiFlowmon.InstallAll();
+    ns3::ntnobs::StartFlowKpiSeries(".", kpiFlowmon);
     ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 

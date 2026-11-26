@@ -51,6 +51,7 @@ set(header_files
     model/ntn-netsimulyzer-exporter.h
     model/ntn-repro-manifest.h
     model/ntn-dataset-writer.h
+    model/ntn-flow-kpi-series.h
     model/ntn-scene-recorder.h
     helper/ntn-observability-helper.h
     helper/ntn-scene-helper.h

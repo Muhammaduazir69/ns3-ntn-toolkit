@@ -28,6 +28,7 @@
 //
 // Quick test:  --simSeconds=120
 #include "ns3/ntn-dataset-writer.h"
+#include "ns3/ntn-flow-kpi-series.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
@@ -316,6 +317,10 @@ main(int argc, char* argv[])
 
     Simulator::Stop(Seconds(simSeconds));
     // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    // ntn-dataset@1 per-terminal and per-satellite KPI series (IPv4 FlowMonitor).
+    FlowMonitorHelper kpiFlowmon;
+    kpiFlowmon.InstallAll();
+    ns3::ntnobs::StartFlowKpiSeries(".", kpiFlowmon);
     ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 
