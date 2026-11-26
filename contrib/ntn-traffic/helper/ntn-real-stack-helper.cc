@@ -258,6 +258,13 @@ static GlobalValue g_ntnRealStackFddUlOfdma(
     BooleanValue(true),
     MakeBooleanChecker());
 
+static GlobalValue g_ntnRealStackPdcpDiscardTimerMs(
+    "NtnRealStackPdcpDiscardTimerMs",
+    "PDCP discardTimer (ms, TS 38.331 PDCP-Config) for the nr backend's RLC UM bearers, applied per "
+    "SDU as TS 38.323 clause 5.2.2.1 specifies; 0 (default) = infinity, an unbounded buffer",
+    UintegerValue(0),
+    MakeUintegerChecker<uint32_t>());
+
 static GlobalValue g_ntnRealStackUeKpiPeriod(
     "NtnRealStackUeKpiPeriod",
     "Sampling period (s) of the per-UE and per-cell KPI dataset NtnRealStackHelper writes to "
@@ -1029,7 +1036,22 @@ NtnRealStackHelper::BuildNrRadio()
     // which is not TS 38.323 5.2.2 (each SDU expires on its own timer). Measured on the overload
     // test: 51 % mid-stream sequence gaps on v5.1 vs none on v3.3. A scenario that wants
     // PDB-based shedding sets ns3::NrRlcUm::EnablePdcpDiscarding (or DiscardTimerMs) itself.
-    Config::SetDefault("ns3::NrRlcUm::EnablePdcpDiscarding", BooleanValue(false));
+    // --NtnRealStackPdcpDiscardTimerMs=<ms> turns on the TS 38.323 5.2.2.1 timer instead: each SDU
+    // expires on its own waiting time (nr ntn-patch 26, NrRlcUm::PerSduDiscardTimer).
+    {
+        UintegerValue discardMs;
+        GlobalValue::GetValueByName("NtnRealStackPdcpDiscardTimerMs", discardMs);
+        if (discardMs.Get() > 0)
+        {
+            Config::SetDefault("ns3::NrRlcUm::EnablePdcpDiscarding", BooleanValue(true));
+            Config::SetDefault("ns3::NrRlcUm::PerSduDiscardTimer", BooleanValue(true));
+            Config::SetDefault("ns3::NrRlcUm::DiscardTimerMs", UintegerValue(discardMs.Get()));
+        }
+        else
+        {
+            Config::SetDefault("ns3::NrRlcUm::EnablePdcpDiscarding", BooleanValue(false));
+        }
+    }
 
     m_nrEpc = CreateObject<NrPointToPointEpcHelper>();
     m_nrBeamforming = CreateObject<IdealBeamformingHelper>();

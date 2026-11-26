@@ -73,6 +73,15 @@ NrRlcUm::GetTypeId()
                           UintegerValue(0),
                           MakeUintegerAccessor(&NrRlcUm::m_discardTimerMs),
                           MakeUintegerChecker<uint32_t>())
+            .AddAttribute("PerSduDiscardTimer",
+                          "With EnablePdcpDiscarding: discard each SDU when its own waiting "
+                          "time exceeds the discard timer (TS 38.323 clause 5.2.2.1), at every "
+                          "arrival and transmission opportunity. False (default) keeps the "
+                          "5G-LENA rule: drop the ARRIVING SDU when the head of the buffer is "
+                          "older than the discard timer.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&NrRlcUm::m_perSduDiscard),
+                          MakeBooleanChecker())
             .AddAttribute("BufferStatusReportTimer",
                           "How much to wait to issue a new Buffer Status Report while the "
                           "transmission buffer is not empty",
@@ -106,9 +115,10 @@ void
 NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << p->GetSize());
+    DiscardExpiredSdus();
     if ((m_txBufferSize + p->GetSize() <= m_maxTxBufferSize) || (m_maxTxBufferSize == 0))
     {
-        if (m_enablePdcpDiscarding)
+        if (m_enablePdcpDiscarding && !m_perSduDiscard)
         {
             // discard the packet
             uint32_t headOfLineDelayInMs = 0;
@@ -166,6 +176,38 @@ NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
     DoTransmitBufferStatusReport();
 }
 
+void
+NrRlcUm::DiscardExpiredSdus()
+{
+    if (!m_enablePdcpDiscarding || !m_perSduDiscard || m_txBuffer.empty())
+    {
+        return;
+    }
+    const uint32_t discardTimerMs =
+        (m_discardTimerMs > 0) ? m_discardTimerMs : m_packetDelayBudgetMs;
+    const Time now = Simulator::Now();
+    for (auto it = m_txBuffer.begin(); it != m_txBuffer.end();)
+    {
+        NrRlcSduStatusTag tag;
+        const bool whole = it->m_pdu->PeekPacketTag(tag) &&
+                           tag.GetStatus() == NrRlcSduStatusTag::FULL_SDU;
+        if (!whole)
+        {
+            ++it; // partly transmitted: its segments are already with the lower layers
+            continue;
+        }
+        if ((now - it->m_waitingSince).GetMilliSeconds() <= discardTimerMs)
+        {
+            break; // arrival order: every SDU behind this one is younger
+        }
+        NS_LOG_INFO("discardTimer (" << discardTimerMs << " ms) expired for an RLC SDU of "
+                                     << it->m_pdu->GetSize() << " bytes: discarded");
+        m_txBufferSize -= it->m_pdu->GetSize();
+        m_txDropTrace(it->m_pdu);
+        it = m_txBuffer.erase(it);
+    }
+}
+
 /**
  * MAC SAP
  */
@@ -185,6 +227,8 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
         NS_LOG_INFO("TX opportunity too small - Only " << txOpParams.bytes << " bytes");
         return;
     }
+
+    DiscardExpiredSdus();
 
     Ptr<Packet> packet = Create<Packet>();
     NrRlcHeader rlcHeader;

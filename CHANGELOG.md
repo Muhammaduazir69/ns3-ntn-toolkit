@@ -18,6 +18,11 @@ v2.7.1 are on the GitHub and GitLab release pages.
 - **ns3-ai lte-cqi:** the LSTM agent now follows the moving UE by the RNTI it receives at RRC
   connection setup. RNTIs follow random-access order, so the old fixed RNTI 1 was a static
   UE with a constant CQI and the agent never trained. The dataset records the CQI range.
+- **PDCP discardTimer per SDU (nr ntn-patch 26):** `--NtnRealStackPdcpDiscardTimerMs=<ms>` drops
+  each SDU when its own waiting time passes the timer (TS 38.323 5.2.2.1), instead of the v5.2
+  rule that drops the arriving SDU while a late head is kept. Default 0 keeps the unbounded
+  buffer. The complete nr patch against upstream v5.2 was regenerated and checked against a fresh
+  clone (the previous copy had fallen behind three files).
 - **Orbit accuracy:** `Sgp4MobilityModel::SetUt1MinusUtc()` / `--NtnUt1MinusUtc=` applies the IERS
   UT1 - UTC to the Earth rotation; against Skyfield ITRS the residual falls from 15-262 m to
   0.02-0.36 m for VLEO, SSO, LEO and GEO element sets (default 0 keeps the previous behavior). The

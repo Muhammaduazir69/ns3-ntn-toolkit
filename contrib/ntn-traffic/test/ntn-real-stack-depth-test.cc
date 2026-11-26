@@ -14,6 +14,8 @@
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/double.h"
 #include "ns3/config.h"
+#include "ns3/boolean.h"
+#include "ns3/global-value.h"
 #include "ns3/uinteger.h"
 #include "ns3/node-container.h"
 #include "ns3/nr-gnb-mac.h"
@@ -454,6 +456,88 @@ class OverloadLossRfc7680Test : public TestCase
     }
 };
 
+/// TS 38.323 clause 5.2.2.1 discardTimer under overload (nr ntn-patch 26). One zenith cell,
+/// 20 MHz, eMBB offered at 200 Mb/s, discardTimer 100 ms. Per SDU (the standard rule) every SDU
+/// that waited longer than the timer is dropped, so what is delivered is fresh: its mean
+/// one-way delay stays near or below the timer, and the cell still runs at its capacity. The
+/// 5G-LENA rule (drop the ARRIVING SDU while the head is late) keeps serving late heads, so the
+/// delivered packets are older. Normal path: 1 Mb/s loses nothing to the timer.
+class PdcpDiscardTimerPerSduTest : public TestCase
+{
+  public:
+    PdcpDiscardTimerPerSduTest()
+        : TestCase("PDCP discardTimer per SDU (TS 38.323 5.2.2.1): delivered packets are fresh under overload")
+    {
+    }
+
+  private:
+    struct Out
+    {
+        double delayMs{0};
+        double thr{0};
+        double shannon{0};
+        double loss{0};
+    };
+
+    Out Run(const std::string& rate, bool perSdu, const std::string& dir)
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        Row(sats, ues, 1, 0.0);
+        NtnRealStackHelper rs;
+        NrSet1(rs, 3.0, CreateTempDirFilename(dir));
+        rs.SetEmbbRate(DataRate(rate));
+        if (perSdu)
+        {
+            GlobalValue::Bind("NtnRealStackPdcpDiscardTimerMs", UintegerValue(100));
+        }
+        rs.Build(sats, ues);
+        if (!perSdu)
+        {
+            // the 5G-LENA rule with the same timer, for comparison
+            Config::SetDefault("ns3::NrRlcUm::EnablePdcpDiscarding", BooleanValue(true));
+            Config::SetDefault("ns3::NrRlcUm::PerSduDiscardTimer", BooleanValue(false));
+            Config::SetDefault("ns3::NrRlcUm::DiscardTimerMs", UintegerValue(100));
+        }
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(0.5), Seconds(2.9));
+        Simulator::Stop(Seconds(3.0));
+        Simulator::Run();
+        rs.Collect();
+        Out o;
+        o.delayMs = rs.GetMeanDelayMs();
+        o.thr = rs.GetRxThroughputMbps();
+        const double sinrDb = rs.GetMeanDlSinrDb();
+        o.shannon = rs.GetBandwidthHz() * std::log2(1.0 + std::pow(10.0, sinrDb / 10.0)) / 1e6;
+        o.loss = 1.0 - static_cast<double>(rs.GetAppRxPackets()) /
+                           static_cast<double>(std::max<uint64_t>(1, rs.GetAppTxPackets()));
+        Simulator::Destroy();
+        GlobalValue::Bind("NtnRealStackPdcpDiscardTimerMs", UintegerValue(0));
+        Config::SetDefault("ns3::NrRlcUm::EnablePdcpDiscarding", BooleanValue(false));
+        Config::SetDefault("ns3::NrRlcUm::PerSduDiscardTimer", BooleanValue(false));
+        Config::SetDefault("ns3::NrRlcUm::DiscardTimerMs", UintegerValue(0));
+        return o;
+    }
+
+    void DoRun() override
+    {
+        const Out per = Run("200Mb/s", true, "discard-per-sdu");
+        const Out lena = Run("200Mb/s", false, "discard-lena");
+        const Out light = Run("1Mb/s", true, "discard-light");
+        std::cout << "[discardTimer] per-SDU: delay " << per.delayMs << " ms, " << per.thr
+                  << " Mb/s (Shannon " << per.shannon << "), loss " << per.loss
+                  << "; 5G-LENA rule: delay " << lena.delayMs << " ms, " << lena.thr
+                  << " Mb/s, loss " << lena.loss << "; 1 Mb/s: delay " << light.delayMs
+                  << " ms, loss " << light.loss << "\n";
+        NS_TEST_ASSERT_MSG_GT(per.thr, per.shannon / 3.0, "the cell still runs at capacity");
+        NS_TEST_ASSERT_MSG_GT(per.loss, 0.5, "most of the 200 Mb/s is discarded");
+        NS_TEST_ASSERT_MSG_LT(per.delayMs, 100.0 + 25.0,
+                              "delivered SDUs are fresh: mean OWD within the 100 ms timer plus air and core");
+        NS_TEST_ASSERT_MSG_GT(lena.delayMs, per.delayMs,
+                              "the arrival-drop rule keeps serving late heads: older deliveries");
+        NS_TEST_ASSERT_MSG_LT(light.loss, 0.01, "normal path: an unloaded bearer loses nothing");
+    }
+};
+
 /// Link outage on the live NR stack (failure path): an 80 dB excess loss from
 /// 1.5 s to 2.5 s. Application packets stop arriving during it and resume
 /// after it; the DL SINR drops by tens of dB while it lasts.
@@ -714,6 +798,7 @@ class NtnRealStackDepthTestSuite : public TestSuite
         AddTestCase(new FrequencyReuseThreeCellsTest, TestCase::Duration::QUICK);
         AddTestCase(new ShannonBoundUnderOverloadTest, TestCase::Duration::QUICK);
         AddTestCase(new OverloadLossRfc7680Test, TestCase::Duration::QUICK);
+        AddTestCase(new PdcpDiscardTimerPerSduTest, TestCase::Duration::QUICK);
         AddTestCase(new LinkOutageRecoveryTest, TestCase::Duration::QUICK);
         AddTestCase(new SsbGridAlongPassTest, TestCase::Duration::QUICK);
         AddTestCase(new RealStackDeterminismTest, TestCase::Duration::QUICK);

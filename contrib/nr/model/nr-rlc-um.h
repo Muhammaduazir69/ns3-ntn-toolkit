@@ -123,6 +123,14 @@ class NR_EXPORT NrRlcUm : public NrRlc
     /// Buffer status report
     void DoTransmitBufferStatusReport();
 
+    /**
+     * NTN patch 26 (TS 38.323 clause 5.2.2.1 discardTimer, per SDU): drop every SDU still whole in
+     * the transmission buffer whose own waiting time exceeds the discard timer. A partly
+     * transmitted SDU is kept (its segments are already with the lower layers). Active only with
+     * EnablePdcpDiscarding and PerSduDiscardTimer.
+     */
+    void DiscardExpiredSdus();
+
   private:
     friend class NrRlcUmTestCase; ///< Grant NrRlcUmTestCase access to private members for
                                   ///<  RLC UM RX verification
@@ -212,6 +220,7 @@ class NR_EXPORT NrRlcUm : public NrRlc
     bool m_enablePdcpDiscarding{false}; //!< whether to use the PDCP discarding (perform discarding
                                         //!< at the moment of passing the PDCP SDU to RLC)
     uint32_t m_discardTimerMs{0};       //!< the discard timer value in milliseconds
+    bool m_perSduDiscard{false}; //!< TS 38.323 5.2.2.1: each SDU expires on its own discardTimer
     bool m_outOfOrderDelivery{false};   //!< whether to deliver RLC SDUs without reordering timer
 
     /**

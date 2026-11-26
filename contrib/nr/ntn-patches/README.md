@@ -5,7 +5,10 @@ toolkit's NTN changes applied.
 
 - `ntn-toolkit-on-5g-lena-v5.2.patch` is the complete, current delta: `git diff v5.2` of
   this directory against an upstream `cttc-lena/nr` checkout of tag `v5.2`. Applying it to
-  a clean v5.2 checkout reproduces the shipped `contrib/nr`.
+  a clean v5.2 checkout reproduces the shipped `contrib/nr` (checked 27 Nov 2026 against a
+  fresh clone of tag v5.2: identical trees). The copy shipped before 27 Nov missed later changes
+  to `nr-rlc-um`, `nr-ue-mac` and `nr-ue-rrc` and no longer applied in reverse; it was
+  regenerated from upstream.
 - The numbered files (`05-...` to `22-...`) are the historical series, one patch per
   change, as each was first written against the earlier bases (v3.3.1 on ns-3.43, then
   v5.1 on ns-3.48). They document what each change does and why; they do not apply
@@ -25,3 +28,10 @@ Changes in the move to v5.2:
   layout, including its STATUS-PDU admission.
 - The UL HARQ fix (every NACK is visited; a process changes state only when its
   retransmission is placed) now sits on v5.2's retransmission spans and reshaping.
+- Patch 26 (new, `26-nr-rlc-um-per-sdu-discard-timer.patch`): `NrRlcUm::PerSduDiscardTimer`
+  applies the PDCP discardTimer per SDU as TS 38.323 clause 5.2.2.1 specifies, at every arrival
+  and transmission opportunity; a partly transmitted SDU is kept. Default false keeps the v5.2
+  rule (drop the arriving SDU while the head of the buffer is late). The toolkit turns it on with
+  `--NtnRealStackPdcpDiscardTimerMs=<ms>`; measured under a 200 Mb/s overload with a 100 ms timer:
+  delivered mean one-way delay 107.6 ms per SDU against 176.4 ms with the v5.2 rule, 63 vs 60
+  Mb/s delivered (test PdcpDiscardTimerPerSduTest).

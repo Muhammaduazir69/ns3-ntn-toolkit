@@ -1,0 +1,3777 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 28ef780..88f1e4c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -172,6 +172,7 @@ set(source_files
+     model/nr-mac-scheduler-ue-info.cc
+     model/nr-mac-scheduler.cc
+     model/nr-mac-short-bsr-ce.cc
++    model/nr-mac-phr-ce.cc
+     model/nr-mcs-tables.cc
+     model/nr-mimo-chunk-processor.cc
+     model/nr-mimo-matrices.cc
+@@ -386,6 +387,7 @@ set(header_files
+     model/nr-mac-scheduler-ue-info.h
+     model/nr-mac-scheduler.h
+     model/nr-mac-short-bsr-ce.h
++    model/nr-mac-phr-ce.h
+     model/nr-mcs-tables.h
+     model/nr-mimo-chunk-processor.h
+     model/nr-mimo-matrices.h
+diff --git a/examples/3gpp-outdoor-calibration/cttc-nr-3gpp-calibration-utils-v1.cc b/examples/3gpp-outdoor-calibration/cttc-nr-3gpp-calibration-utils-v1.cc
+index 6a03205..6b081a1 100644
+--- a/examples/3gpp-outdoor-calibration/cttc-nr-3gpp-calibration-utils-v1.cc
++++ b/examples/3gpp-outdoor-calibration/cttc-nr-3gpp-calibration-utils-v1.cc
+@@ -177,7 +177,8 @@ LenaV1Utils::SetLenaV1SimulatorParameters(const double sector0AngleRad,
+     Config::SetDefault("ns3::LteUePhy::TxPower", DoubleValue(ueTxPower));
+     Config::SetDefault("ns3::LteEnbPhy::NoiseFigure", DoubleValue(gnbNoiseFigure));
+     Config::SetDefault("ns3::LteUePhy::NoiseFigure", DoubleValue(ueNoiseFigure));
+-    Config::SetDefault("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
++    // ntn: the toolkit builds the mmWave LTE fork, which has no RLF detection attribute.
++    Config::SetDefaultFailSafe("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
+     Config::SetDefault("ns3::LteAmc::AmcModel", EnumValue(LteAmc::PiroEW2010));
+     lteHelper->SetAttribute("PathlossModel",
+                             StringValue(pathlossModel)); // for each band the same pathloss model
+diff --git a/examples/lena-lte-comparison/lena-v1-utils.cc b/examples/lena-lte-comparison/lena-v1-utils.cc
+index 4cea16d..83fb2f3 100644
+--- a/examples/lena-lte-comparison/lena-v1-utils.cc
++++ b/examples/lena-lte-comparison/lena-v1-utils.cc
+@@ -168,7 +168,8 @@ LenaV1Utils::SetLenaV1SimulatorParameters(const double sector0AngleRad,
+     Config::SetDefault("ns3::LteEnbPhy::TxPower", DoubleValue(txPower));
+     Config::SetDefault("ns3::LteUePhy::TxPower", DoubleValue(ueTxPower));
+     Config::SetDefault("ns3::LteUePhy::NoiseFigure", DoubleValue(9.0));
+-    Config::SetDefault("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
++    // ntn: the toolkit builds the mmWave LTE fork, which has no RLF detection attribute.
++    Config::SetDefaultFailSafe("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
+     Config::SetDefault("ns3::LteAmc::AmcModel", EnumValue(LteAmc::PiroEW2010));
+     lteHelper->SetAttribute("PathlossModel",
+                             StringValue(pathlossModel)); // for each band the same pathloss model
+diff --git a/helper/nr-helper.cc b/helper/nr-helper.cc
+index 0fdbc91..0f369ec 100644
+--- a/helper/nr-helper.cc
++++ b/helper/nr-helper.cc
+@@ -764,11 +764,22 @@ NrHelper::CreateGnbMac()
+ }
+ 
+ Ptr<NrMacScheduler>
+-NrHelper::CreateGnbSched()
++NrHelper::CreateGnbSched(uint16_t bwpId)
+ {
+     NS_LOG_FUNCTION(this);
+ 
+-    auto sched = m_schedFactory.Create<NrMacSchedulerNs3>();
++    Ptr<NrMacSchedulerNs3> sched;
++    auto perBwp = m_schedTypeIdPerBwp.find(bwpId);
++    if (perBwp != m_schedTypeIdPerBwp.end())
++    {
++        ObjectFactory f = m_schedFactory; // same attributes, another type
++        f.SetTypeId(perBwp->second);
++        sched = f.Create<NrMacSchedulerNs3>();
++    }
++    else
++    {
++        sched = m_schedFactory.Create<NrMacSchedulerNs3>();
++    }
+     auto dlAmc = m_gnbDlAmcFactory.Create<NrAmc>();
+     auto ulAmc = m_gnbUlAmcFactory.Create<NrAmc>();
+ 
+@@ -844,7 +855,7 @@ NrHelper::InstallSingleGnbDevice(
+         cc->SetMac(mac);
+         phy->GetCam()->SetNrGnbMac(mac);
+ 
+-        auto sched = CreateGnbSched();
++        auto sched = CreateGnbSched(bwpId);
+         cc->SetNrMacScheduler(sched);
+ 
+         if (bwpId == 0)
+@@ -1294,6 +1305,23 @@ NrHelper::RegisterUeAtGnb(const Ptr<NrUeNetDevice>& ueNetDev, const Ptr<NrGnbNet
+         {
+             // Initialize parameters for MIMO precoding matrix search (PMI feedback)
+             auto pmSearch = m_pmSearchFactory.Create<NrPmSearch>();
++            // ntn-patch 25: TS 38.214 Table 5.2.1.4-2 ties the CSI subband size to the BWP
++            // width, and one helper-wide SubbandSize cannot fit BWPs of different widths (e.g. a
++            // wide primary BWP next to narrow per-slice BWPs). Keep the configured size where it
++            // is allowed, otherwise take the largest size this BWP allows.
++            {
++                const uint32_t prbs = gnbNetDev->GetPhy(i)->GetRbNum();
++                const size_t sb = pmSearch->GetSubbandSize();
++                const auto allowed = prbs < 24    ? std::vector<size_t>{1}
++                                     : prbs <= 72  ? std::vector<size_t>{4, 8}
++                                     : prbs <= 144 ? std::vector<size_t>{8, 16}
++                                     : prbs <= 275 ? std::vector<size_t>{16, 32}
++                                                   : std::vector<size_t>{32};
++                if (prbs > 0 && std::find(allowed.begin(), allowed.end(), sb) == allowed.end())
++                {
++                    pmSearch->SetAttribute("SubbandSize", UintegerValue(allowed.back()));
++                }
++            }
+             ueNetDev->GetPhy(i)->SetPmSearch(pmSearch);
+             auto gnbAnt =
+                 gnbNetDev->GetPhy(i)->GetSpectrumPhy()->GetAntenna()->GetObject<PhasedArrayModel>();
+@@ -1524,6 +1552,13 @@ NrHelper::SetSchedulerTypeId(const TypeId& typeId)
+     m_schedFactory.SetTypeId(typeId);
+ }
+ 
++void
++NrHelper::SetSchedulerTypeIdForBwp(uint16_t bwpId, const TypeId& typeId)
++{
++    NS_LOG_FUNCTION(this);
++    m_schedTypeIdPerBwp[bwpId] = typeId;
++}
++
+ void
+ NrHelper::SetUeBwpManagerAlgorithmTypeId(const TypeId& typeId)
+ {
+@@ -1778,8 +1813,12 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
+             else if (tgppSpecModel)
+             {
+                 fadingModel = tgppSpecModel->GetChannelModel();
+-                currentStream +=
+-                    StaticCast<ThreeGppChannelModel>(fadingModel)->AssignStreams(currentStream);
++                // ntn-patch 09: another MatrixBasedChannelModel (e.g. a deterministic
++                // LOS model) may be plugged in; it has no random streams to assign.
++                if (auto channel = DynamicCast<ThreeGppChannelModel>(fadingModel))
++                {
++                    currentStream += channel->AssignStreams(currentStream);
++                }
+             }
+             else if (nyuSpecModel)
+             {
+diff --git a/helper/nr-helper.h b/helper/nr-helper.h
+index 5e20a45..6522156 100644
+--- a/helper/nr-helper.h
++++ b/helper/nr-helper.h
+@@ -601,6 +601,18 @@ class NR_EXPORT NrHelper : public Object
+      */
+     void SetSchedulerTypeId(const TypeId& typeId);
+ 
++    /**
++     * @brief Use another scheduler type on one BWP (ntn-patch 17). Under paired
++     * FDD each BWP carries one direction and has its own scheduler, so the UL
++     * BWP can run an OFDMA scheduler (FDM of power-limited UEs in a symbol)
++     * while the DL BWP keeps the default. The attributes set with
++     * SetSchedulerAttribute apply to every BWP. Works only before the devices
++     * are installed.
++     * @param bwpId the BWP index on the gNB device
++     * @param typeId the scheduler type for that BWP
++     */
++    void SetSchedulerTypeIdForBwp(uint16_t bwpId, const TypeId& typeId);
++
+     /**
+      * @brief Set the TypeId of the GNB BWP Manager. Works only before it is created.
+      * @param typeId Type of the object
+@@ -1126,7 +1138,7 @@ class NR_EXPORT NrHelper : public Object
+                                const BandwidthPartInfoPtr& bwp,
+                                const Ptr<NrGnbNetDevice>& dev,
+                                const NrSpectrumPhy::NrPhyRxCtrlEndOkCallback& phyEndCtrlCallback);
+-    Ptr<NrMacScheduler> CreateGnbSched();
++    Ptr<NrMacScheduler> CreateGnbSched(uint16_t bwpId = UINT16_MAX);
+     Ptr<NrGnbMac> CreateGnbMac();
+     Ptr<NrFhControl> CreateNrFhControl();
+ 
+@@ -1204,6 +1216,7 @@ class NR_EXPORT NrHelper : public Object
+     ObjectFactory m_ueChannelAccessManagerFactory;  //!< UE Channel access manager factory
+     ObjectFactory m_gnbChannelAccessManagerFactory; //!< GNB Channel access manager factory
+     ObjectFactory m_schedFactory;                   //!< Scheduler factory
++    std::map<uint16_t, TypeId> m_schedTypeIdPerBwp; //!< per-BWP scheduler type (ntn-patch 17)
+     ObjectFactory m_ueAntennaFactory;               //!< UE antenna factory
+     ObjectFactory m_gnbAntennaFactory;              //!< UE antenna factory
+     ObjectFactory m_gnbBwpManagerAlgoFactory;       //!< BWP manager algorithm factory
+diff --git a/model/beamforming-vector.cc b/model/beamforming-vector.cc
+index 5fc16f8..45c2a68 100644
+--- a/model/beamforming-vector.cc
++++ b/model/beamforming-vector.cc
+@@ -121,7 +121,10 @@ CreateDirectPathBfv(const Ptr<MobilityModel>& a,
+     // retrieve the position of the two devices
+     Vector aPos = a->GetPosition();
+     Vector bPos = b->GetPosition();
+-    auto wraparoundModel = b->GetObject<Node>()->GetObject<HexagonalWraparoundModel>();
++    // ntn: a beam target need not be a node (e.g. a sub-satellite point or an SSB grid direction,
++    // a free-standing MobilityModel); only a node can carry a wraparound model.
++    Ptr<Node> bNode = b->GetObject<Node>();
++    auto wraparoundModel = bNode ? bNode->GetObject<HexagonalWraparoundModel>() : nullptr;
+     if (wraparoundModel)
+     {
+         bPos = wraparoundModel->GetVirtualPosition(aPos, bPos);
+diff --git a/model/ideal-beamforming-algorithm.cc b/model/ideal-beamforming-algorithm.cc
+index 1db6052..7845605 100644
+--- a/model/ideal-beamforming-algorithm.cc
++++ b/model/ideal-beamforming-algorithm.cc
+@@ -17,6 +17,32 @@
+ #include "ns3/uinteger.h"
+ #include "ns3/uniform-planar-array.h"
+ 
++namespace
++{
++/**
++ * ntn-patch 23: since ns-3.48 (#1314) the long-term channel component is w_u^H H w_s, the
++ * receive side of the matrix being combined with the conjugate of its weights. The direct-path
++ * weights are transmit (precoding) weights exp(-j k.r), right as is for the s-side gNB, so the
++ * u-side UE needs their conjugate to combine coherently (the realistic algorithm got the same fix
++ * upstream, 02da6eef). Without it a multi-element UE array loses array gain as the direction to
++ * the gNB moves away from broadside (measured on a LEO pass, 1x2 UE: 21 -> 9 dB over 19 s); a
++ * 1x1 UE is unaffected. The toolkit keeps the gNB on the s side of every gNB-UE matrix
++ * (sticky orientation in ThreeGppChannelModel, beam priming in the helper).
++ *
++ * @param w the direct-path weights toward the gNB
++ * @return the UE combining weights
++ */
++ns3::PhasedArrayModel::ComplexVector
++ConjugateUeWeights(ns3::PhasedArrayModel::ComplexVector w)
++{
++    for (size_t i = 0; i < w.GetSize(); ++i)
++    {
++        w[i] = std::conj(w[i]);
++    }
++    return w;
++}
++} // namespace
++
+ namespace ns3
+ {
+ 
+@@ -388,7 +414,8 @@ DirectPathBeamforming::GetBeamformingVectors(const Ptr<NrSpectrumPhy>& gnbSpectr
+         BeamformingVector(std::make_pair(gNbAntennaWeights, BeamId::GetEmptyBeamId()));
+ 
+     PhasedArrayModel::ComplexVector ueAntennaWeights =
+-        CreateDirectPathBfv(ueSpectrumPhy->GetMobility(), gnbMobility, ueAntenna);
++        ConjugateUeWeights(
++            CreateDirectPathBfv(ueSpectrumPhy->GetMobility(), gnbMobility, ueAntenna));
+     // store the antenna weights
+     BeamformingVector ueBfv =
+         BeamformingVector(std::make_pair(ueAntennaWeights, BeamId::GetEmptyBeamId()));
+@@ -427,7 +454,8 @@ QuasiOmniDirectPathBeamforming::GetBeamformingVectors(const Ptr<NrSpectrumPhy>&
+ 
+     // configure UE beamforming vector to be directed towards gNB
+     PhasedArrayModel::ComplexVector ueAntennaWeights =
+-        CreateDirectPathBfv(ueSpectrumPhy->GetMobility(), gnbMobility, ueAntenna);
++        ConjugateUeWeights(
++            CreateDirectPathBfv(ueSpectrumPhy->GetMobility(), gnbMobility, ueAntenna));
+     // store the antenna weights
+     BeamformingVector ueBfv = BeamformingVector({ueAntennaWeights, BeamId::GetEmptyBeamId()});
+     return BeamformingVectorPair(std::make_pair(gnbBfv, ueBfv));
+diff --git a/model/nr-common.h b/model/nr-common.h
+index 9052848..8b2314e 100644
+--- a/model/nr-common.h
++++ b/model/nr-common.h
+@@ -22,6 +22,20 @@ namespace ns3
+ {
+ namespace nr
+ {
++// ns-3.43's lte module defines MIN_NO_CC / MAX_NO_CC as preprocessor MACROS
++// (src/lte/model/lte-ue-component-carrier-manager.h). When lte-module.h is
++// included before this header (nr's lena-lte-comparison / 3gpp-calibration
++// examples), those macros textually clobber the namespaced constexprs below
++// ("expected unqualified-id before numeric constant"). The lte headers have
++// already finished using their macros by this point, so undef them here and
++// use nr's own ns3::nr-scoped constants. (ns-3.43 compatibility; nr v3.3
++// targets ns-3.42.)
++#ifdef MIN_NO_CC
++#undef MIN_NO_CC
++#endif
++#ifdef MAX_NO_CC
++#undef MAX_NO_CC
++#endif
+ /// Minimum number of carrier components allowed by 3GPP up to R13
+ constexpr uint32_t MIN_NO_CC = 1;
+ 
+diff --git a/model/nr-gnb-mac.cc b/model/nr-gnb-mac.cc
+index 97b06a1..29822f4 100644
+--- a/model/nr-gnb-mac.cc
++++ b/model/nr-gnb-mac.cc
+@@ -18,6 +18,7 @@
+ #include "nr-mac-pdu-info.h"
+ #include "nr-mac-sched-sap.h"
+ #include "nr-mac-scheduler.h"
++#include "nr-mac-phr-ce.h"
+ #include "nr-mac-short-bsr-ce.h"
+ #include "nr-phy-mac-common.h"
+ #include "nr-radio-bearer-tag.h"
+@@ -789,6 +790,10 @@ NrGnbMac::DoSlotUlIndication(const SfnSf& sfnSf, LteNrTddSlotType type)
+ 
+         for (const auto& v : ulMacReq.m_macCeList)
+         {
++            if (v.m_macCeType == MacCeElement::PHR)
++            {
++                continue; // ntn-patch 16: not a BSR, do not trace it as one
++            }
+             Ptr<NrBsrMessage> msg = Create<NrBsrMessage>();
+             msg->SetBsr(v);
+             m_macRxedCtrlMsgsTrace(0, m_currentSlot, GetCellId(), v.m_rnti, GetBwpId(), msg);
+@@ -944,6 +949,26 @@ NrGnbMac::DoReceivePhyPdu(Ptr<Packet> p)
+         return;
+     }
+ 
++    // ntn-patch 16: Single Entry PHR MAC CE (TS 38.321 6.1.3.8). The PH is
++    // that of the PUSCH this CE arrived on, so it goes to this BWP's
++    // scheduler together with that PUSCH's M_RB (which the gNB scheduled).
++    if (header.GetLcId() == NrMacHeaderFsUl::SINGLE_ENTRY_PHR)
++    {
++        NrMacSingleEntryPhrCe phrCe;
++        p->RemoveHeader(phrCe);
++        NrPuschAllocationTag allocTag;
++        const bool haveAlloc = p->PeekPacketTag(allocTag);
++
++        MacCeElement phr;
++        phr.m_macCeType = MacCeElement::PHR;
++        phr.m_rnti = rnti;
++        phr.m_macCeValue.m_phr = phrCe.m_phIndex;
++        phr.m_macCeValue.m_phrPcmax = phrCe.m_pcmaxIndex;
++        phr.m_macCeValue.m_phrNumRb = haveAlloc ? allocTag.GetNumRb() : 0;
++        m_ulCeReceived.push_back(phr);
++        return;
++    }
++
+     // Ok, we know it is data, so let's extract and pass to RLC.
+ 
+     NrMacHeaderVs macHeader;
+@@ -1181,7 +1206,12 @@ NrGnbMac::DoBuildRarList(SlotAllocInfo& slotAllocInfo)
+ 
+     if (!slotAllocInfo.m_buildRarList.empty())
+     {
+-        m_rapIdRntiMap.clear(); // reset RA preamble to RNTI MAP
++        // Forget only the RNTIs answered in this RAR. Clearing the whole map dropped RNTIs whose
++        // Msg3 grant is scheduled in a later slot, and DoBuildRarList then aborted on them.
++        for (const auto& rar : slotAllocInfo.m_buildRarList)
++        {
++            m_rapIdRntiMap.erase(rar.ulMsg3Dci->m_rnti);
++        }
+         NS_LOG_DEBUG("Sending RAR message to UE.");
+     }
+     else
+diff --git a/model/nr-gnb-mac.h b/model/nr-gnb-mac.h
+index 5277802..49cc35a 100644
+--- a/model/nr-gnb-mac.h
++++ b/model/nr-gnb-mac.h
+@@ -331,7 +331,7 @@ class NR_EXPORT NrGnbMac : public Object
+      * PHY through RAR control message
+      * @param rarList list of messages that come from scheduler
+      *
+-     * Clears m_rapIdRntiMap.
++     * Removes the RNTIs answered in this RAR from m_rapIdRntiMap.
+      */
+     void DoBuildRarList(SlotAllocInfo& slotAllocInfo);
+ 
+@@ -413,7 +413,10 @@ class NR_EXPORT NrGnbMac : public Object
+ 
+     std::list<uint16_t> m_srRntiList; //!< List of RNTI that requested a SR
+ 
+-    std::unordered_map<uint8_t, uint32_t> m_rapIdRntiMap; //!< RAPID RNTI map
++    // Keyed by RNTI (16 bit, TS 38.321 7.1). The key used to be uint8_t, which folded every RNTI
++    // above 255 onto a lower one, so RARs carried other UEs' preamble IDs once a cell had
++    // allocated 256 temporary C-RNTIs (a few dozen UEs with RACH retries).
++    std::unordered_map<uint16_t, uint32_t> m_rapIdRntiMap; //!< RNTI to RAPID map
+ 
+     TracedCallback<uint8_t, uint16_t> m_srCallback; //!< Callback invoked when a UE requested a SR
+ 
+diff --git a/model/nr-gnb-phy.cc b/model/nr-gnb-phy.cc
+index 60db29f..0eda9a0 100644
+--- a/model/nr-gnb-phy.cc
++++ b/model/nr-gnb-phy.cc
+@@ -30,6 +30,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <cstdlib>
+ #include <functional>
+ #include <limits>
+ #include <map>
+@@ -38,6 +39,8 @@
+ #include <unordered_set>
+ #include <vector>
+ 
++
++
+ namespace ns3
+ {
+ 
+@@ -148,7 +151,13 @@ NrGnbPhy::GetTypeId()
+                           "Minimum processing delay needed to decode UL DCI and prepare UL data",
+                           UintegerValue(2),
+                           MakeUintegerAccessor(&NrGnbPhy::SetN2Delay, &NrGnbPhy::GetN2Delay),
+-                          MakeUintegerChecker<uint32_t>(0, 4))
++                          // NTN adaptation (NtnRealStackHelper K_offset consumption, TS 38.213
++                          // §4.2): the terrestrial upper bound of 4 slots cannot hold the NTN
++                          // cell-specific K_offset (tens of slots — ~9 for a 600 km LEO round
++                          // trip, more for MEO/GEO). Raised so N2Delay can absorb K_offset and
++                          // push the UL grant past the service-link round trip. See
++                          // contrib/nr/ntn-patches/05-*.patch.
++                          MakeUintegerChecker<uint32_t>(0, 320))
+             .AddAttribute("TbDecodeLatency",
+                           "Transport block decode latency",
+                           TimeValue(MicroSeconds(100)),
+@@ -165,6 +174,16 @@ NrGnbPhy::GetTypeId()
+                 UintegerValue(14),
+                 MakeUintegerAccessor(&NrPhy::SetSymbolsPerSlot, &NrPhy::GetSymbolsPerSlot),
+                 MakeUintegerChecker<uint16_t>())
++            .AddAttribute(
++                "BeamLookupServingUeOnly",
++                "ntn-patch 18: when choosing the beam of a scheduled RNTI (PDSCH, PUSCH, SRS, "
++                "scheduler beam id), match only UE devices whose serving cell is this cell. "
++                "RegisterUe entries are never removed, so after handovers a UE that left keeps "
++                "its entry and can carry the same C-RNTI in its new cell. False (nr default) "
++                "matches the RNTI alone.",
++                BooleanValue(false),
++                MakeBooleanAccessor(&NrGnbPhy::m_beamLookupServingUeOnly),
++                MakeBooleanChecker())
+             .AddAttribute("Pattern",
+                           "The slot pattern",
+                           StringValue("F|F|F|F|F|F|F|F|F|F|"),
+@@ -629,9 +648,9 @@ NrGnbPhy::GetBeamId(uint16_t rnti) const
+     for (const auto& i : m_deviceMap)
+     {
+         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
+-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
+-
+-        if (ueRnti == rnti && DynamicCast<UniformPlanarArray>(m_spectrumPhy->GetAntenna()))
++        // ntn-patch 18: match the RNTI only among UEs this cell serves
++        if (IsScheduledUe(ueDev, rnti, GetBwpId()) &&
++            DynamicCast<UniformPlanarArray>(m_spectrumPhy->GetAntenna()))
+         {
+             NS_ASSERT(m_spectrumPhy->GetBeamManager());
+             return m_spectrumPhy->GetBeamManager()->GetBeamId(i);
+@@ -1580,8 +1599,7 @@ NrGnbPhy::UlData(const std::shared_ptr<DciInfoElementTdma>& dci)
+     for (auto& i : m_deviceMap)
+     {
+         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
+-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
+-        if (dci->m_rnti == ueRnti)
++        if (IsScheduledUe(ueDev, dci->m_rnti, GetBwpId()))
+         {
+             // Even if we change the beamforming vector, we hope that the scheduler
+             // has scheduled UEs within the same beam (and, therefore, have the same
+@@ -1649,8 +1667,8 @@ NrGnbPhy::UlSrs(const std::shared_ptr<DciInfoElementTdma>& dci)
+     for (auto& i : m_deviceMap)
+     {
+         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
+-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
+-        if (dci->m_rnti == ueRnti)
++        // ntn-patch 18: match the RNTI only among UEs this cell serves
++        if (IsScheduledUe(ueDev, dci->m_rnti, GetBwpId()))
+         {
+             // Even if we change the beamforming vector, we hope that the scheduler
+             // has scheduled UEs within the same beam (and, therefore, have the same
+@@ -1688,7 +1706,11 @@ NrGnbPhy::StartVarTti(const std::shared_ptr<DciInfoElementTdma>& dci)
+     NS_LOG_FUNCTION(this);
+     if (DynamicCast<UniformPlanarArray>(m_spectrumPhy->GetAntenna()))
+     {
+-        ChangeToQuasiOmniBeamformingVector(); // assume the control signal is omni
++        // ntn-patch 09: control (incl. the PSS/SSB that UEs measure SS-RSRP on,
++        // TS 38.215 5.1.1) goes on the cell beam when one is configured as the
++        // predefined beam; BeamManager falls back to quasi-omni otherwise, so an
++        // unconfigured gNB behaves exactly as before.
++        ChangeBeamformingVector(nullptr);
+     }
+     m_currSymStart = dci->m_symStart;
+ 
+@@ -1780,8 +1802,7 @@ NrGnbPhy::SendDataChannels(const Ptr<PacketBurst>& pb,
+         for (auto& i : m_deviceMap)
+         {
+             Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
+-            uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
+-            if (dci->m_rnti == ueRnti)
++            if (IsScheduledUe(ueDev, dci->m_rnti, GetBwpId()))
+             {
+                 if (DynamicCast<UniformPlanarArray>(m_spectrumPhy->GetAntenna()))
+                 {
+@@ -1824,6 +1845,30 @@ NrGnbPhy::SendCtrlChannels(const Time& varTtiPeriod)
+     {
+         fullBwRb[i] = static_cast<int>(i);
+     }
++    // ntn-patch 19: a cell of a frequency reuse plan sends its control region
++    // (and so its PSS/SSB) only in its own sub-band (TR 38.821 6.1.1.1).
++    if (m_cellRbCount > 0)
++    {
++        const uint32_t last = std::min<uint32_t>(GetRbNum(), m_cellRbFirst + m_cellRbCount);
++        fullBwRb.clear();
++        for (uint32_t i = m_cellRbFirst; i < last; ++i)
++        {
++            fullBwRb.push_back(static_cast<int>(i));
++        }
++        NS_ASSERT_MSG(!fullBwRb.empty(), "SetCellRbRange outside the BWP");
++    }
++    // ntn-patch 19: SS/PBCH block beam sweep (TS 38.213 4.1). Each DL control
++    // region carries the SSB of the next index on that index's beam; the beam
++    // is reset to the predefined one at the next StartVarTti.
++    if (!m_ssbSweep.empty())
++    {
++        const uint32_t idx = m_ssbSweepNext % m_ssbSweep.size();
++        m_ssbSweepNext = (idx + 1) % m_ssbSweep.size();
++        Ptr<PhasedArrayModel> array = m_spectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>();
++        NS_ASSERT_MSG(array, "SSB beam sweep needs a phased array");
++        array->SetBeamformingVector(m_ssbSweep[idx]);
++        m_spectrumPhy->SetTxSsbIndex(static_cast<uint8_t>(idx));
++    }
+ 
+     // Transmit power for the current signal is distributed over the full bandwidth. This is the
+     // only signal, so the bandwidth occupied by all concurrent transmissions is also the full
+@@ -1885,6 +1930,44 @@ NrGnbPhy::AssignCsiRsOffset(const Ptr<NrUeNetDevice>& ueDevice)
+     m_csiRsOffsetToUes.begin()->second.emplace(ueDevice);
+ }
+ 
++void
++NrGnbPhy::SetCellRbRange(uint32_t first, uint32_t count)
++{
++    NS_LOG_FUNCTION(this << first << count);
++    m_cellRbFirst = first;
++    m_cellRbCount = count;
++}
++
++void
++NrGnbPhy::SetSsbBeamSweep(const std::vector<PhasedArrayModel::ComplexVector>& beams)
++{
++    NS_LOG_FUNCTION(this << beams.size());
++    NS_ABORT_MSG_IF(beams.size() > 255, "at most 255 SSB beams (index 255 means no sweep)");
++    m_ssbSweep = beams;
++    if (m_ssbSweepNext >= m_ssbSweep.size())
++    {
++        m_ssbSweepNext = 0;
++    }
++    if (m_ssbSweep.empty())
++    {
++        m_spectrumPhy->SetTxSsbIndex(NrSpectrumPhy::NO_SSB_INDEX);
++    }
++}
++
++bool
++NrGnbPhy::IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const
++{
++    // ntn-patch 18: the C-RNTI is unique only within a cell (TS 38.321 7.1),
++    // so with BeamLookupServingUeOnly a registered UE matches only while this
++    // cell serves it (NrUeNetDevice::GetCellId follows handovers natively in
++    // 5G-LENA v5.1 via NrDeviceRegistry::SetUeTargetCell; patch 10 is obsolete).
++    if ((DynamicCast<NrUePhy>(ueDev->GetPhy(ueBwp)))->GetRnti() != rnti)
++    {
++        return false;
++    }
++    return !m_beamLookupServingUeOnly || ueDev->GetCellId() == GetCellId();
++}
++
+ bool
+ NrGnbPhy::RegisterUe(uint64_t imsi, const Ptr<NrUeNetDevice>& ueDevice)
+ {
+diff --git a/model/nr-gnb-phy.h b/model/nr-gnb-phy.h
+index be912ca..dce6d78 100644
+--- a/model/nr-gnb-phy.h
++++ b/model/nr-gnb-phy.h
+@@ -252,6 +252,50 @@ class NR_EXPORT NrGnbPhy : public NrPhy
+      */
+     void SetSubChannels(const std::vector<int>& rbIndexVector, size_t nTotalAllocRbs);
+ 
++    /**
++     * @brief Whether a registered UE device is the one a DCI for @p rnti
++     * addresses (ntn-patch 18): its C-RNTI on BWP @p ueBwp equals @p rnti
++     * and, with BeamLookupServingUeOnly, this cell serves it.
++     * @param ueDev the registered UE device
++     * @param rnti the RNTI the DCI addresses
++     * @param ueBwp the UE BWP whose RNTI is compared
++     * @return true if @p ueDev is the addressed UE
++     */
++    bool IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const;
++
++    /**
++     * @brief ntn-patch 19: confine the downlink control region, including the
++     * PSS/SSB, to RBs [first, first + count) of this BWP, the cell's sub-band
++     * under a frequency reuse plan (TR 38.821 clause 6.1.1.1, FRF 3 or 4: each
++     * beam uses its own part of the band). The control power is spread over
++     * those RBs, so with the TxPower scaled to the sub-band the energy per RE
++     * equals that of a full-band cell. count 0 (default) is the full band.
++     */
++    void SetCellRbRange(uint32_t first, uint32_t count);
++    /// The control RB range set by SetCellRbRange (count 0: full band).
++    std::pair<uint32_t, uint32_t> GetCellRbRange() const
++    {
++        return {m_cellRbFirst, m_cellRbCount};
++    }
++
++    /**
++     * @brief ntn-patch 19: SS/PBCH block beam sweep (TS 38.213 clause 4.1).
++     *
++     * With K beams, the downlink control region of successive DL slots, which
++     * carries the PSS/SSB the UE measures, goes out on beam 0, 1, ..., K-1, 0,
++     * ... and is tagged with that SSB index, so the UE can measure SS-RSRP per
++     * SSB beam (TS 38.215 5.1.1) and derive the cell quality from the best
++     * beam (TS 38.331 5.5.3.3). An empty vector (default) keeps the control on
++     * the predefined (cell) beam, as before. The vectors are used as given;
++     * the caller re-steers them as the satellite moves.
++     */
++    void SetSsbBeamSweep(const std::vector<PhasedArrayModel::ComplexVector>& beams);
++    /// Number of SSB beams in the sweep (0: no sweep).
++    uint32_t GetSsbBeamSweepSize() const
++    {
++        return static_cast<uint32_t>(m_ssbSweep.size());
++    }
++
+     /**
+      * @brief Add the UE to the list of this gnb UEs.
+      *
+@@ -873,6 +917,11 @@ class NR_EXPORT NrGnbPhy : public NrPhy
+     int64_t AssignStreams(int64_t stream);
+ 
+   private:
++    bool m_beamLookupServingUeOnly{false}; //!< ntn-patch 18, see BeamLookupServingUeOnly
++    uint32_t m_cellRbFirst{0}; //!< ntn-patch 19: first RB of the cell's control sub-band
++    uint32_t m_cellRbCount{0}; //!< ntn-patch 19: RBs of the control sub-band (0: full band)
++    std::vector<PhasedArrayModel::ComplexVector> m_ssbSweep; //!< ntn-patch 19: SSB beams
++    uint32_t m_ssbSweepNext{0}; //!< ntn-patch 19: SSB index of the next DL control region
+     NrGnbPhySapUser* m_phySapUser{nullptr}; //!< MAC SAP user pointer, MAC is user of services of
+                                             //!< PHY, implements e.g. ReceiveRachPreamble
+     NrGnbCphySapProvider* m_gnbCphySapProvider{
+diff --git a/model/nr-mac-phr-ce.cc b/model/nr-mac-phr-ce.cc
+new file mode 100644
+index 0000000..6e5d75a
+--- /dev/null
++++ b/model/nr-mac-phr-ce.cc
+@@ -0,0 +1,185 @@
++// Copyright (c) 2026 Muhammad Uzair
++//
++// SPDX-License-Identifier: GPL-2.0-only
++
++#include "nr-mac-phr-ce.h"
++
++#include "ns3/log.h"
++
++#include <cmath>
++
++namespace ns3
++{
++
++NS_LOG_COMPONENT_DEFINE("NrMacPhrCe");
++
++NS_OBJECT_ENSURE_REGISTERED(NrMacSingleEntryPhrCe);
++NS_OBJECT_ENSURE_REGISTERED(NrPuschAllocationTag);
++
++TypeId
++NrMacSingleEntryPhrCe::GetTypeId()
++{
++    static TypeId tid = TypeId("ns3::NrMacSingleEntryPhrCe")
++                            .SetParent<Header>()
++                            .SetGroupName("Nr")
++                            .AddConstructor<NrMacSingleEntryPhrCe>();
++    return tid;
++}
++
++TypeId
++NrMacSingleEntryPhrCe::GetInstanceTypeId() const
++{
++    return GetTypeId();
++}
++
++NrMacSingleEntryPhrCe::NrMacSingleEntryPhrCe()
++{
++    m_header.SetLcId(NrMacHeaderFsUl::SINGLE_ENTRY_PHR);
++}
++
++void
++NrMacSingleEntryPhrCe::Serialize(Buffer::Iterator start) const
++{
++    NS_ASSERT(m_phIndex <= 63);
++    NS_ASSERT(m_pcmaxIndex <= 63);
++    m_header.Serialize(start);
++    start.Next(m_header.GetSerializedSize());
++    start.WriteU8(m_phIndex & 0x3F);    // R R PH
++    start.WriteU8(m_pcmaxIndex & 0x3F); // R R P_CMAX,f,c
++}
++
++uint32_t
++NrMacSingleEntryPhrCe::Deserialize(Buffer::Iterator start)
++{
++    auto readBytes = m_header.Deserialize(start);
++    start.Next(readBytes);
++    NS_ASSERT(m_header.GetLcId() == NrMacHeaderFsUl::SINGLE_ENTRY_PHR);
++    m_phIndex = start.ReadU8() & 0x3F;
++    m_pcmaxIndex = start.ReadU8() & 0x3F;
++    return GetSerializedSize();
++}
++
++uint32_t
++NrMacSingleEntryPhrCe::GetSerializedSize() const
++{
++    return m_header.GetSerializedSize() + 2;
++}
++
++void
++NrMacSingleEntryPhrCe::Print(std::ostream& os) const
++{
++    os << "PH index " << +m_phIndex << " (" << PhIndexToDb(m_phIndex) << " dB), PCMAX index "
++       << +m_pcmaxIndex << " (" << PcmaxIndexToDbm(m_pcmaxIndex) << " dBm)";
++}
++
++uint8_t
++NrMacSingleEntryPhrCe::PhDbToIndex(double phDb)
++{
++    // TS 38.133 Table 10.1.17.1-1: 1 dB steps from -32 dB to 22 dB, then
++    // 2 dB steps up to 38 dB.
++    if (!(phDb >= -32.0))
++    {
++        return 0;
++    }
++    if (phDb >= 38.0)
++    {
++        return 63;
++    }
++    if (phDb < 22.0)
++    {
++        return static_cast<uint8_t>(std::floor(phDb) + 33.0);
++    }
++    return static_cast<uint8_t>(55.0 + std::floor((phDb - 22.0) / 2.0));
++}
++
++double
++NrMacSingleEntryPhrCe::PhIndexToDb(uint8_t index)
++{
++    if (index == 0)
++    {
++        return -33.0;
++    }
++    if (index <= 54)
++    {
++        return static_cast<double>(index) - 33.0;
++    }
++    if (index <= 62)
++    {
++        return 22.0 + 2.0 * (index - 55);
++    }
++    return 38.0;
++}
++
++uint8_t
++NrMacSingleEntryPhrCe::PcmaxDbmToIndex(double pcmaxDbm)
++{
++    // TS 38.133 Table 10.1.18.1-1: 1 dB steps from -29 dBm to 33 dBm.
++    if (!(pcmaxDbm >= -29.0))
++    {
++        return 0;
++    }
++    if (pcmaxDbm >= 33.0)
++    {
++        return 63;
++    }
++    return static_cast<uint8_t>(std::floor(pcmaxDbm) + 30.0);
++}
++
++double
++NrMacSingleEntryPhrCe::PcmaxIndexToDbm(uint8_t index)
++{
++    return static_cast<double>(std::min<uint8_t>(index, 63)) - 30.0;
++}
++
++TypeId
++NrPuschAllocationTag::GetTypeId()
++{
++    static TypeId tid = TypeId("ns3::NrPuschAllocationTag")
++                            .SetParent<Tag>()
++                            .SetGroupName("Nr")
++                            .AddConstructor<NrPuschAllocationTag>();
++    return tid;
++}
++
++TypeId
++NrPuschAllocationTag::GetInstanceTypeId() const
++{
++    return GetTypeId();
++}
++
++NrPuschAllocationTag::NrPuschAllocationTag(uint16_t numRb)
++    : m_numRb(numRb)
++{
++}
++
++uint32_t
++NrPuschAllocationTag::GetSerializedSize() const
++{
++    return 2;
++}
++
++void
++NrPuschAllocationTag::Serialize(TagBuffer i) const
++{
++    i.WriteU16(m_numRb);
++}
++
++void
++NrPuschAllocationTag::Deserialize(TagBuffer i)
++{
++    m_numRb = i.ReadU16();
++}
++
++void
++NrPuschAllocationTag::Print(std::ostream& os) const
++{
++    os << "numRb=" << m_numRb;
++}
++
++uint16_t
++NrPuschAllocationTag::GetNumRb() const
++{
++    return m_numRb;
++}
++
++} // namespace ns3
+diff --git a/model/nr-mac-phr-ce.h b/model/nr-mac-phr-ce.h
+new file mode 100644
+index 0000000..a0fd30b
+--- /dev/null
++++ b/model/nr-mac-phr-ce.h
+@@ -0,0 +1,127 @@
++// Copyright (c) 2026 Muhammad Uzair
++//
++// SPDX-License-Identifier: GPL-2.0-only
++
++#ifndef NR_MAC_PHR_CE_H
++#define NR_MAC_PHR_CE_H
++
++#include "nr-mac-header-fs-ul.h"
++
++#include "ns3/header.h"
++#include "ns3/tag.h"
++
++namespace ns3
++{
++
++/**
++ * \ingroup ue-mac
++ * \brief Single Entry PHR MAC CE (TS 38.321 6.1.3.8), with its fixed-size
++ * subheader (LCID 57).
++ *
++ * Two octets after the one-octet subheader:
++\verbatim
++ +-----+-----+-----------------------------------+
++ |  R  |  R  |  PH (type 1, PCell)               |   Oct 1
++ +-----+-----+-----------------------------------+
++ |  R  |  R  |  P_CMAX,f,c                       |   Oct 2
++ +-----+-----+-----------------------------------+
++\endverbatim
++ *
++ * PH is the TS 38.133 Table 10.1.17.1-1 report index (0..63) of the type 1
++ * power headroom of TS 38.213 7.7.1 for the PUSCH carrying the CE; P_CMAX,f,c
++ * is the TS 38.133 Table 10.1.18.1-1 index (0..63) of the configured maximum
++ * output power used for that PH.
++ */
++class NrMacSingleEntryPhrCe : public Header
++{
++  public:
++    /**
++     * \brief GetTypeId
++     * \return the type id of the object
++     */
++    static TypeId GetTypeId();
++    TypeId GetInstanceTypeId() const override;
++
++    NrMacSingleEntryPhrCe();
++
++    void Serialize(Buffer::Iterator start) const override;
++    uint32_t Deserialize(Buffer::Iterator start) override;
++    uint32_t GetSerializedSize() const override;
++    void Print(std::ostream& os) const override;
++
++    /**
++     * \brief TS 38.133 Table 10.1.17.1-1: power headroom (dB) to report index.
++     * \param phDb power headroom in dB
++     * \return POWER_HEADROOM_n index n, 0..63
++     */
++    static uint8_t PhDbToIndex(double phDb);
++    /**
++     * \brief Lower edge (dB) of the PH range a report index stands for
++     * (index 0, PH < -32 dB, is decoded as -33 dB).
++     * \param index report index 0..63
++     * \return the power headroom in dB the network may rely on
++     */
++    static double PhIndexToDb(uint8_t index);
++    /**
++     * \brief TS 38.133 Table 10.1.18.1-1: P_CMAX,f,c (dBm) to report index.
++     * \param pcmaxDbm configured maximum output power in dBm
++     * \return PCMAX_C_n index n, 0..63
++     */
++    static uint8_t PcmaxDbmToIndex(double pcmaxDbm);
++    /**
++     * \brief Lower edge (dBm) of the P_CMAX,f,c range a report index stands for.
++     * \param index report index 0..63
++     * \return P_CMAX,f,c in dBm
++     */
++    static double PcmaxIndexToDbm(uint8_t index);
++
++    uint8_t m_phIndex{0};    //!< PH field (6 bits)
++    uint8_t m_pcmaxIndex{0}; //!< P_CMAX,f,c field (6 bits)
++
++  private:
++    NrMacHeaderFsUl m_header; //!< Fixed-size subheader (LCID 57)
++};
++
++/**
++ * \ingroup gnb-phy
++ * \brief Number of PRBs of the PUSCH a packet was received on.
++ *
++ * Added by the gNB NrSpectrumPhy to a decoded uplink packet that carries a
++ * PHR MAC CE. It stands for knowledge the gNB has in any case: it scheduled
++ * that PUSCH, so it knows the M_RB the UE's type 1 power headroom refers to
++ * (TS 38.213 7.7.1). Not transmitted over the air.
++ */
++class NrPuschAllocationTag : public Tag
++{
++  public:
++    /**
++     * \brief GetTypeId
++     * \return the type id of the object
++     */
++    static TypeId GetTypeId();
++    TypeId GetInstanceTypeId() const override;
++
++    NrPuschAllocationTag() = default;
++    /**
++     * \brief Constructor
++     * \param numRb number of PRBs of the PUSCH
++     */
++    explicit NrPuschAllocationTag(uint16_t numRb);
++
++    uint32_t GetSerializedSize() const override;
++    void Serialize(TagBuffer i) const override;
++    void Deserialize(TagBuffer i) override;
++    void Print(std::ostream& os) const override;
++
++    /**
++     * \return the number of PRBs of the PUSCH
++     */
++    uint16_t GetNumRb() const;
++
++  private:
++    uint16_t m_numRb{0}; //!< PRBs of the PUSCH
++};
++
++} // namespace ns3
++
++#endif /* NR_MAC_PHR_CE_H */
+diff --git a/model/nr-mac-scheduler-cqi-management.cc b/model/nr-mac-scheduler-cqi-management.cc
+index 2476070..aa88d25 100644
+--- a/model/nr-mac-scheduler-cqi-management.cc
++++ b/model/nr-mac-scheduler-cqi-management.cc
+@@ -13,6 +13,10 @@
+ 
+ #include "ns3/log.h"
+ #include "ns3/nr-spectrum-value-helper.h"
++#include "ns3/simulator.h"
++
++#include <algorithm>
++#include <cmath>
+ 
+ namespace ns3
+ {
+@@ -134,9 +138,18 @@ NrMacSchedulerCQIManagement::DlCqiReported(const DlCqiInfo& info,
+     ueInfo->m_dlCqi.m_timer = expirationTime;
+     ueInfo->m_dlCqi.m_cqiType = NrMacSchedulerUeInfo::CqiInfo::WB;
+     ueInfo->m_dlCqi.m_wbCqi = info.m_wbCqi;
+-    ueInfo->m_dlMcs =
+-        std::min(static_cast<uint8_t>(GetAmcDl()->GetMcsFromCqi(ueInfo->m_dlCqi.m_wbCqi)),
+-                 static_cast<uint8_t>(maxDlMcs));
++    ueInfo->m_dlMcsUntilCsi = false; // ntn-patch 20: measured CSI from here on
++    {
++        // CQI-derived MCS, corrected by the outer loop (m_dlOllaOffset stays 0 when OLLA is off).
++        const int mcs = static_cast<int>(GetAmcDl()->GetMcsFromCqi(ueInfo->m_dlCqi.m_wbCqi)) -
++                        static_cast<int>(std::lround(ueInfo->m_dlOllaOffset));
++        // maxDlMcs < 0 means "no cap" (it was cast to uint8_t, 255, by the original code).
++        // The outer loop may also raise the MCS above the CQI mapping (negative offset), but never
++        // above the highest index of the configured MCS table.
++        const int cap = std::min(static_cast<int>(static_cast<uint8_t>(maxDlMcs)),
++                                 static_cast<int>(GetAmcDl()->GetMaxMcs()));
++        ueInfo->m_dlMcs = static_cast<uint8_t>(std::min(std::max(mcs, 0), cap));
++    }
+ 
+     ueInfo->m_dlCqi.m_sbCqi = info.m_sbCqis;
+     ueInfo->m_dlSbMcsInfo.clear();
+@@ -211,7 +224,8 @@ NrMacSchedulerCQIManagement::RefreshDlCqiMaps(
+         {
+             ue->m_dlCqi.m_wbCqi = 1; // lowest value for trying a transmission
+             ue->m_dlCqi.m_cqiType = NrMacSchedulerUeInfo::CqiInfo::WB;
+-            ue->m_dlMcs = GetStartMcsDl();
++            // ntn-patch 20: a per-UE MCS set for the time before the first CQI.
++            ue->m_dlMcs = ue->m_dlMcsUntilCsi ? ue->m_startMcsDlUe : GetStartMcsDl();
+         }
+         else
+         {
+diff --git a/model/nr-mac-scheduler-harq-rr.cc b/model/nr-mac-scheduler-harq-rr.cc
+index 561c40b..e260900 100644
+--- a/model/nr-mac-scheduler-harq-rr.cc
++++ b/model/nr-mac-scheduler-harq-rr.cc
+@@ -510,7 +510,13 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
+     }
+     NS_ASSERT(orderedFeedback.size() == ulHarqFeedback.size());
+ 
+-    for (std::size_t i = 0; i < orderedFeedback.size() && (symAvail > 0 || !spans.empty()); i++)
++    // ntn: every NACK is visited. The loop used to stop as soon as the symbols ran out, and the
++    // feedbacks after that point were neither scheduled nor put back in ulHarqToRetransmit: their
++    // processes stayed RECEIVED_FEEDBACK until ResetExpiredHARQ erased them, so a TB the gNB knew
++    // it had to retransmit was silently dropped (measured on a weak NTN uplink: ~1 in 3 failed
++    // first transmissions, 102 processes per run). The process state now changes only when the
++    // retransmission is actually placed.
++    for (std::size_t i = 0; i < orderedFeedback.size(); i++)
+     {
+         const UlHarqInfo& harqInfo = orderedFeedback.at(i);
+         uint8_t harqId = harqInfo.m_harqProcessId;
+@@ -522,8 +528,6 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
+         HarqProcess& harqProcess = ueMap.find(rnti)->second->m_ulHarq.Find(harqId)->second;
+         NS_ASSERT(harqProcess.m_status == HarqProcess::RECEIVED_FEEDBACK);
+ 
+-        harqProcess.m_status = HarqProcess::WAITING_FEEDBACK;
+-        harqProcess.m_timer = 0;
+         auto& dciInfoReTx = harqProcess.m_dciElement;
+ 
+         NS_LOG_INFO("Feedback is for UE " << rnti << " process " << +harqId
+@@ -585,6 +589,8 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
+                 span->rbgs[rbg] = span->rbgs[rbg] || rbgs[rbg];
+             }
+             span->ues.insert(rnti);
++            harqProcess.m_status = HarqProcess::WAITING_FEEDBACK;
++            harqProcess.m_timer = 0;
+ 
+             NS_ASSERT(dciInfoReTx->m_format == DciInfoElementTdma::UL);
+ 
+diff --git a/model/nr-mac-scheduler-ns3.cc b/model/nr-mac-scheduler-ns3.cc
+index 9de9d2c..746ab68 100644
+--- a/model/nr-mac-scheduler-ns3.cc
++++ b/model/nr-mac-scheduler-ns3.cc
+@@ -14,9 +14,11 @@
+ #include "nr-mac-scheduler-harq-rr.h"
+ #include "nr-mac-scheduler-lc-rr.h"
+ #include "nr-mac-scheduler-srs-default.h"
++#include "nr-mac-phr-ce.h"
+ #include "nr-mac-short-bsr-ce.h"
+ #include "resource-assignment-matrix.h"
+ 
++#include <ns3/double.h>
+ #include "ns3/boolean.h"
+ #include "ns3/enum.h"
+ #include "ns3/integer.h"
+@@ -25,6 +27,7 @@
+ #include "ns3/uinteger.h"
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -202,6 +205,40 @@ NrMacSchedulerNs3::GetTypeId()
+                           UintegerValue(3),
+                           MakeUintegerAccessor(&NrMacSchedulerNs3::m_maxHarqReTx),
+                           MakeUintegerChecker<uint8_t>(0, 10))
++            .AddAttribute("OllaEnabled",
++                          "Outer-loop link adaptation on DL: the CQI-derived MCS is reduced by an "
++                          "offset driven by HARQ feedback on first transmissions, so the initial "
++                          "BLER converges to OllaBlerTarget (TS 38.214 5.2.2.1 defines the CQI for a "
++                          "0.1 BLER; deployed gNBs close this loop). Without it, link adaptation "
++                          "ignores interference the CQI did not see, e.g. a second co-channel "
++                          "satellite cell turning active. Off by default (upstream 5G-LENA "
++                          "behavior); NtnRealStackHelper turns it on.",
++                          BooleanValue(false),
++                          MakeBooleanAccessor(&NrMacSchedulerNs3::m_ollaEnabled),
++                          MakeBooleanChecker())
++            .AddAttribute("OllaBlerTarget",
++                          "Target BLER of first transmissions for the outer loop",
++                          DoubleValue(0.1),
++                          MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaBlerTarget),
++                          MakeDoubleChecker<double>(0.001, 0.5))
++            .AddAttribute("OllaStep",
++                          "MCS-index increase of the OLLA offset on a NACK (an ACK lowers it by "
++                          "OllaStep * target / (1 - target))",
++                          DoubleValue(1.0),
++                          MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaStep),
++                          MakeDoubleChecker<double>(0.01, 5.0))
++            .AddAttribute("DlHarqFeedbackDisabled",
++                          "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.321 5.3.2): "
++                          "bitmap over DL HARQ process IDs, bit i set = feedback disabled for "
++                          "process i. Such a process is released as soon as its transmission is "
++                          "scheduled instead of being held for an ACK/NACK one HARQ round trip "
++                          "later, so it never stalls on the satellite RTT; it is never "
++                          "retransmitted by HARQ (RLC recovers losses), and any feedback that "
++                          "still arrives for it is discarded. 0 (default) keeps every process "
++                          "feedback-enabled, the terrestrial behavior.",
++                          UintegerValue(0),
++                          MakeUintegerAccessor(&NrMacSchedulerNs3::m_dlHarqFeedbackDisabled),
++                          MakeUintegerChecker<uint32_t>())
+             .AddAttribute("EnableHarqReTx",
+                           "If false, the scheduler does not retransmit a NACKed transport block. "
+                           "HARQ processes and HARQ feedback continue to operate. If true, the "
+@@ -216,6 +253,34 @@ NrMacSchedulerNs3::GetTypeId()
+                 MakeTypeIdAccessor(&NrMacSchedulerNs3::SetLcSched),
+                 //&NrMacSchedulerNs3::GetLcSched),
+                 MakeTypeIdChecker())
++            .AddAttribute(
++                "PhrUlRbLimit",
++                "ntn-patch 16: bound each UE's PUSCH to the PRBs its last power headroom "
++                "report (TS 38.321 5.4.6 Single Entry PHR, type 1 PH of TS 38.213 7.7.1) "
++                "says it can power at its open-loop target PSD: M_max = M_RB x 10^(PH/10) for "
++                "the M_RB of the PUSCH that carried the PHR. A power-limited UE otherwise "
++                "spreads P_CMAX over the whole band and its PUSCH SINR falls below the lowest "
++                "MCS. false (default) ignores PHRs, the nr behavior before the patch.",
++                BooleanValue(false),
++                MakeBooleanAccessor(&NrMacSchedulerNs3::m_phrUlRbLimit),
++                MakeBooleanChecker())
++            .AddAttribute(
++                "UlGrantSubheaderBytes",
++                "ntn-patch 17: bytes of each UL grant, per logical channel it is charged to, "
++                "that the scheduler takes off the bytes it removes from the UE's reported "
++                "buffer, for the MAC subheader of the data subPDU (TS 38.321 6.1.2: 2 or 3 "
++                "octets; the buffer size a BSR reports excludes the MAC subheaders, TS 38.321 "
++                "6.1.3.1). nr already takes off 2 bytes of RLC header. With a BSR in every UL "
++                "TB the error is corrected by the next BSR; with BSRs only when triggered "
++                "(NrUeMac::BsrTriggering) it builds up over a segmented SDU and leaves the UE "
++                "with data the gNB believes sent. 0 (default) is the nr behavior.",
++                UintegerValue(0),
++                MakeUintegerAccessor(&NrMacSchedulerNs3::m_ulGrantSubheaderBytes),
++                MakeUintegerChecker<uint32_t>(0, 3))
++            .AddTraceSource("UlPhrPrbLimit",
++                            "A PHR set a UE's UL PRB limit: RNTI, PH (dB), M_RB, limit",
++                            MakeTraceSourceAccessor(&NrMacSchedulerNs3::m_ulPhrLimitTrace),
++                            "ns3::NrMacSchedulerNs3::UlPhrLimitTracedCallback")
+             .AddAttribute("RachUlGrantMcs",
+                           "The MCS of the RACH UL grant, must be [0..15] (default 0)",
+                           UintegerValue(0),
+@@ -907,6 +972,92 @@ NrMacSchedulerNs3::BSRReceivedFromUe(const MacCeElement& bsr)
+     }
+ }
+ 
++void
++NrMacSchedulerNs3::PhrReceivedFromUe(const MacCeElement& phr)
++{
++    NS_LOG_FUNCTION(this);
++    NS_ASSERT(phr.m_macCeType == MacCeElement::PHR);
++    GetSecond UeInfoOf;
++    auto itUe = m_ueMap.find(phr.m_rnti);
++    if (itUe == m_ueMap.end())
++    {
++        return; // the UE left this BWP while the PHR was in flight
++    }
++    ++m_phrReceived;
++    const uint16_t usedRb = phr.m_macCeValue.m_phrNumRb;
++    if (!m_phrUlRbLimit || usedRb == 0)
++    {
++        NS_LOG_INFO("PHR from UE " << phr.m_rnti << " not used for the UL PRB limit");
++        return;
++    }
++    // Type 1 PH (TS 38.213 7.7.1) for M_RB = usedRb: P_CMAX minus the power the
++    // open-loop target needs on usedRb RBs. The target needs 10log10(M/usedRb)
++    // dB more on M RBs, so the UE can power M_max = usedRb x 10^(PH/10) RBs.
++    // The PH is decoded as the lower edge of its TS 38.133 range.
++    const double phDb = NrMacSingleEntryPhrCe::PhIndexToDb(phr.m_macCeValue.m_phr);
++    const double maxRbD = usedRb * std::pow(10.0, phDb / 10.0);
++    uint32_t maxRb = UINT32_MAX;
++    if (maxRbD < 1.0e6)
++    {
++        maxRb = std::max<uint32_t>(1, static_cast<uint32_t>(std::floor(maxRbD)));
++    }
++    UeInfoOf(*itUe)->m_ulMaxRb = maxRb;
++    UeInfoOf(*itUe)->m_ulPhrReceived = true;
++    NS_LOG_INFO("PHR from UE " << phr.m_rnti << ": PH " << phDb << " dB on " << usedRb
++                               << " RBs, UL PRB limit " << maxRb);
++    m_ulPhrLimitTrace(phr.m_rnti, phDb, usedRb, maxRb);
++}
++
++uint32_t
++NrMacSchedulerNs3::GetUlPhrPrbLimit(uint16_t rnti) const
++{
++    auto itUe = m_ueMap.find(rnti);
++    if (itUe == m_ueMap.end() || !itUe->second->m_ulPhrReceived)
++    {
++        return UINT32_MAX;
++    }
++    return itUe->second->m_ulMaxRb;
++}
++
++bool
++NrMacSchedulerNs3::IsUlPhrLimited(const UePtr& ue) const
++{
++    // Until the first PHR the gNB does not know whether the UE can power a
++    // wide PUSCH, so it starts narrow (the floor below) rather than spreading
++    // P_CMAX over the band: a full-band PUSCH from a power-limited UE does not
++    // decode, and so the PHR riding on it would never arrive either.
++    return m_phrUlRbLimit && (!ue->m_ulPhrReceived || ue->m_ulMaxRb != UINT32_MAX);
++}
++
++uint32_t
++NrMacSchedulerNs3::GetUlRbgCapPerSym(const UePtr& ue, uint32_t assignableRbg) const
++{
++    if (!IsUlPhrLimited(ue))
++    {
++        return assignableRbg;
++    }
++    const auto rbPerRbg = static_cast<uint32_t>(GetNumRbPerRbg());
++    const uint32_t maxRb = ue->m_ulPhrReceived ? ue->m_ulMaxRb : 1;
++    uint32_t cap = std::max<uint32_t>(1, maxRb / rbPerRbg);
++    cap = std::min(cap, assignableRbg);
++    // Never below an allocation whose TB can carry data (kMinUlTbWithData)
++    // over the UL data symbols of a slot: a smaller grant (CreateUlDci accepts
++    // 12 bytes) would carry the MAC CEs only, every slot, and the UE would
++    // never send its data. The floor is sized on the whole slot, not on the
++    // symbols left over in this one, so a few leftover symbols never turn
++    // into a wide, low-PSD grant: such a UE waits for a slot with room.
++    const uint32_t slotUlSym =
++        m_macSchedSapUser->GetSymbolsPerSlot() - m_ulCtrlSymbols - m_dlCtrlSymbols;
++    const uint32_t sym = std::max<uint32_t>(slotUlSym, 1);
++    while (cap < assignableRbg &&
++           m_ulAmc->CalculateTbSize(ue->m_ulMcs, ue->m_ulRank, cap * rbPerRbg * sym) <
++               kMinUlTbWithData)
++    {
++        ++cap;
++    }
++    return cap;
++}
++
+ /**
+  * @brief Evaluate different types of control messages (only BSR for the moment)
+  * @param params parameters of the control message
+@@ -926,6 +1077,10 @@ NrMacSchedulerNs3::DoSchedUlMacCtrlInfoReq(
+         {
+             BSRReceivedFromUe(element);
+         }
++        else if (element.m_macCeType == MacCeElement::PHR)
++        {
++            PhrReceivedFromUe(element);
++        }
+         else
+         {
+             NS_LOG_INFO("Ignoring received CTRL message because it's not a BSR");
+@@ -933,6 +1088,26 @@ NrMacSchedulerNs3::DoSchedUlMacCtrlInfoReq(
+     }
+ }
+ 
++bool
++NrMacSchedulerNs3::SetUeDlMcsUntilCsi(uint16_t rnti, uint8_t mcs)
++{
++    NS_LOG_FUNCTION(this << rnti << +mcs);
++    auto it = m_ueMap.find(rnti);
++    if (it == m_ueMap.end() || it->second->m_dlCqi.m_timer > 0)
++    {
++        return false;
++    }
++    const auto& ue = it->second;
++    const uint8_t cap = m_dlAmc ? static_cast<uint8_t>(m_dlAmc->GetMaxMcs()) : mcs;
++    ue->m_startMcsDlUe = std::min(mcs, cap);
++    ue->m_dlMcsUntilCsi = true;
++    if (!m_fixedMcsDl)
++    {
++        ue->m_dlMcs = ue->m_startMcsDlUe;
++    }
++    return true;
++}
++
+ /**
+  * @brief Received a DL CQI message
+  * @param params DL CQI message
+@@ -1177,6 +1352,23 @@ NrMacSchedulerNs3::ProcessHARQFeedbacks(
+         NS_ASSERT_MSG(ueProcess.m_txAttempts <= maxReTx + 1,
+                       "Process has exceeded " << +(maxReTx + 1) << " attempts");
+ 
++        // Outer-loop link adaptation from the feedback of first transmissions (RV 0), counted once
++        // per feedback: a NACKed process stays in this list (status RECEIVED_FEEDBACK) until its
++        // retransmission is scheduled and is evaluated again every slot meanwhile.
++        // The loop starts once the UE has reported a wideband CQI (connection-setup transmissions
++        // run at the start MCS), and the backoff is bounded to [-4, +8] MCS indices, about the
++        // +/-10 dB range deployed loops use: an unbounded offset could reach MCS 0, where nothing
++        // decodable is scheduled, no ACK arrives, and the loop could never recover.
++        auto& ollaUe = m_ueMap.find(rnti)->second;
++        if (m_ollaEnabled && direction == "DL" && ueProcess.m_dciElement->m_rv == 0 &&
++            ueProcess.m_status != HarqProcess::RECEIVED_FEEDBACK &&
++            ollaUe->m_dlCqi.m_cqiType == NrMacSchedulerUeInfo::CqiInfo::WB)
++        {
++            const double down = m_ollaStep * m_ollaBlerTarget / (1.0 - m_ollaBlerTarget);
++            ollaUe->m_dlOllaOffset += harqFeedbackIt->IsReceivedOk() ? -down : m_ollaStep;
++            ollaUe->m_dlOllaOffset = std::clamp(ollaUe->m_dlOllaOffset, -4.0, 8.0);
++        }
++
+         if (harqFeedbackIt->IsReceivedOk() || ueProcess.m_txAttempts > maxReTx)
+         {
+             ueHarqVector.Erase(harqId);
+@@ -1227,7 +1419,17 @@ NrMacSchedulerNs3::ResetExpiredHARQ(uint16_t rnti, NrMacHarqVector* harq)
+             continue;
+         }
+ 
+-        if (process.m_timer < m_macSchedSapUser->GetNumHarqProcess())
++        // ntn: the expiry recovers a process whose feedback was lost (WAITING_FEEDBACK). A NACKed
++        // process (RECEIVED_FEEDBACK) is not waiting for feedback but for retransmission resources,
++        // and erasing it after the same bound silently dropped TBs the gNB knew it had to
++        // retransmit whenever NACKs queued up (one UL retransmission per UE and slot): measured on
++        // a weak NTN uplink, ~1 in 3 failed first transmissions was never retransmitted and the
++        // RLC SDU was lost. A NACKed process now gets four times the bound, so one that can never
++        // be rescheduled still cannot hold the process forever.
++        const uint32_t bound = (process.m_status == HarqProcess::RECEIVED_FEEDBACK)
++                                   ? 4U * m_macSchedSapUser->GetNumHarqProcess()
++                                   : m_macSchedSapUser->GetNumHarqProcess();
++        if (process.m_timer < bound)
+         {
+             ++process.m_timer;
+             NS_LOG_INFO("Updated process for UE " << rnti << " number "
+@@ -1655,6 +1857,17 @@ NrMacSchedulerNs3::DoScheduleDlData(PointInFTPlane* spoint,
+ 
+             NS_ABORT_IF(slotInfo.m_rlcPduInfo.empty());
+ 
++            // NTN downlinkHARQ-FeedbackDisabled-r17: a feedback-disabled
++            // process does not wait one HARQ round trip for an ACK/NACK that
++            // the UE is not expected to send. Release it now; the TB is
++            // already in slotInfo, and a late feedback for an INACTIVE process
++            // is discarded by DoSchedDlTriggerReq.
++            if (dci->m_harqProcess < 32 && ((m_dlHarqFeedbackDisabled >> dci->m_harqProcess) & 1U))
++            {
++                ue.first->m_dlHarq.Erase(dci->m_harqProcess);
++                ++m_dlHarqFeedbackDisabledTx;
++            }
++
+             slotAlloc->m_varTtiAllocInfo.emplace_back(slotInfo);
+         }
+         if (assigned)
+@@ -1836,8 +2049,15 @@ NrMacSchedulerNs3::DoScheduleUlData(PointInFTPlane* spoint,
+             for (const auto& byteDistribution : distributedBytes)
+             {
+                 assignedToLC = true;
++                // ntn-patch 17: charge the buffer only the bytes left after the
++                // MAC subheader (and nr's 2-byte RLC header inside AssignedData).
++                uint32_t charged = byteDistribution.m_bytes;
++                if (m_ulGrantSubheaderBytes > 0 && charged > m_ulGrantSubheaderBytes + 2)
++                {
++                    charged -= m_ulGrantSubheaderBytes;
++                }
+                 ue.first->m_ulLCG.at(byteDistribution.m_lcg)
+-                    ->AssignedData(byteDistribution.m_lcId, byteDistribution.m_bytes, "UL");
++                    ->AssignedData(byteDistribution.m_lcId, charged, "UL");
+                 NS_LOG_DEBUG("UL LCG " << static_cast<uint32_t>(byteDistribution.m_lcg)
+                                        << " assigned bytes " << byteDistribution.m_bytes
+                                        << " to LCID "
+@@ -1910,9 +2130,16 @@ NrMacSchedulerNs3::DoScheduleUlSr(PointInFTPlane* spoint, const std::list<uint16
+                         << v << " (no UE context on this cell, likely a handover race)");
+             continue;
+         }
+-        NS_LOG_DEBUG("Owing a " << srGrantSize << " byte bootstrap grant to UE " << v
++        // ntn-patch 16: a PHR-limited UE (PHR known) only gets a TB of at least kMinUlTbWithData,
++        // so the bootstrap must be sized to that floor; a 17 B bootstrap fell one byte short, no
++        // DCI was ever created for it and the UE's residual data (e.g. the last RLC segment of a
++        // TCP SYN) waited for the next regular BSR trigger, seconds later.
++        const uint32_t grant = (IsUlPhrLimited(ueIt->second) && ueIt->second->m_ulPhrReceived)
++                                   ? std::max(srGrantSize, kMinUlTbWithData)
++                                   : srGrantSize;
++        NS_LOG_DEBUG("Owing a " << grant << " byte bootstrap grant to UE " << v
+                                 << " because of a SR");
+-        ueIt->second->m_srBytesPending = srGrantSize;
++        ueIt->second->m_srBytesPending = grant;
+     }
+ }
+ 
+diff --git a/model/nr-mac-scheduler-ns3.h b/model/nr-mac-scheduler-ns3.h
+index 774612e..e850f8a 100644
+--- a/model/nr-mac-scheduler-ns3.h
++++ b/model/nr-mac-scheduler-ns3.h
+@@ -12,6 +12,8 @@
+ #include "nr-mac-scheduler-ue-info.h"
+ #include "nr-mac-scheduler.h"
+ #include "nr-phy-mac-common.h"
++#include <ns3/traced-callback.h>
++
+ 
+ #include "ns3/nr-export.h"
+ #include "ns3/traced-callback.h"
+@@ -441,6 +443,21 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
+      * @param v the value
+      */
+     void SetStartMcsDl(uint8_t v);
++
++    /**
++     * @brief ntn-patch 20: DL MCS for one UE until its first DL CQI in this cell.
++     *
++     * A UE admitted by a handover has sent no CSI to this cell yet (TS 38.214
++     * 5.2.2.5: the CSI reference resource is in the serving cell), so the
++     * scheduler has no measured MCS for it. The caller (e.g. from the
++     * handover-time SS-RSRP the UE reported) sets a robust MCS here; it is
++     * used, instead of StartingMcsDl, until the first DL CQI of the UE arrives,
++     * after which the CQI (and OLLA) take over as usual.
++     * @param rnti the UE's C-RNTI in this cell
++     * @param mcs the MCS (capped at the table maximum)
++     * @return false if the RNTI is unknown or a DL CQI was already received
++     */
++    bool SetUeDlMcsUntilCsi(uint16_t rnti, uint8_t mcs);
+     /**
+      * @brief Get the DL MCS starting value
+      * @return the value
+@@ -742,6 +759,32 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
+   protected:
+     Ptr<NrAmc> m_dlAmc; //!< AMC pointer
+     Ptr<NrAmc> m_ulAmc; //!< AMC pointer
++    /**
++     * \brief UL RBGs per symbol a UE may get in this slot (ntn-patch 16).
++     *
++     * With PhrUlRbLimit, the UE's last power headroom report bounds its
++     * PUSCH to the PRBs it can power at its open-loop target PSD (TS 38.213
++     * 7.1.1 / 7.7.1), never below the smallest allocation on which a TB that
++     * can carry data after the SHORT_BSR and PHR MAC CEs (kMinUlTbWithData)
++     * fits in the UL data symbols of a slot at the UE's current UL MCS.
++     * Otherwise, and before any PHR, it returns assignableRbg (the band).
++     * \param ue the UE
++     * \param assignableRbg RBGs per symbol available to the scheduler
++     * \return RBGs per symbol for this UE
++     */
++    uint32_t GetUlRbgCapPerSym(const UePtr& ue, uint32_t assignableRbg) const;
++
++    /**
++     * \param ue the UE
++     * \return true if a PHR limits this UE's UL PRBs (ntn-patch 16)
++     */
++    bool IsUlPhrLimited(const UePtr& ue) const;
++
++    /// Smallest UL TB worth granting to a PHR-limited UE: SHORT_BSR (5 bytes),
++    /// PHR MAC CE (3) and one data subPDU, which NrUeMac builds only with at
++    /// least 10 bytes (3 MAC subheader, 2 RLC header, 5 data). ntn-patch 16.
++    static constexpr uint32_t kMinUlTbWithData = 5 + 3 + 10;
++
+     NrMacSchedulerUeInfo::McsCsiSource
+         m_mcsCsiSource; //!< CSI information source for DL MCS estimation
+ 
+@@ -826,6 +869,12 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
+     };
+ 
+     void BSRReceivedFromUe(const MacCeElement& bsr);
++    /**
++     * \brief Single Entry PHR MAC CE (TS 38.321 6.1.3.8) received from a UE
++     * (ntn-patch 16).
++     * \param phr the CE, with the M_RB of the PUSCH it arrived on
++     */
++    void PhrReceivedFromUe(const MacCeElement& phr);
+ 
+     template <typename T>
+     std::vector<T> MergeHARQ(std::vector<T>* existingFeedbacks,
+@@ -1173,6 +1222,53 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
+ 
+     TracedCallback<uint16_t, uint16_t, const std::shared_ptr<NrMacSchedulerUeInfo>&>
+         m_csiFeedbackReceived; //!< Traced callback to access CSI feedback
++
++  private:
++    bool m_ollaEnabled{false};      //!< outer-loop link adaptation on DL (attribute OllaEnabled)
++    double m_ollaBlerTarget{0.1};  //!< initial-transmission BLER target (attribute OllaBlerTarget)
++    double m_ollaStep{1.0};        //!< MCS-index increase per NACK (attribute OllaStep)
++    /// downlinkHARQ-FeedbackDisabled-r17 bitmap over DL HARQ process IDs (attribute).
++    uint32_t m_dlHarqFeedbackDisabled{0};
++    /// DL transmissions released without waiting for HARQ feedback.
++    mutable uint64_t m_dlHarqFeedbackDisabledTx{0};
++    /// ntn-patch 16: limit UL PRBs by the reported power headroom (attribute PhrUlRbLimit).
++    bool m_phrUlRbLimit{false};
++    /// ntn-patch 17: MAC subheader bytes per UL grant not charged to the buffer.
++    uint32_t m_ulGrantSubheaderBytes{0};
++    /// PHR MAC CEs received.
++    uint64_t m_phrReceived{0};
++    /// rnti, PH (dB, decoded), M_RB of the PUSCH carrying the PHR, resulting UL PRB limit.
++    TracedCallback<uint16_t, double, uint16_t, uint32_t> m_ulPhrLimitTrace;
++
++  public:
++    /// \return number of DL TBs sent on feedback-disabled HARQ processes (released
++    /// at scheduling time, TS 38.321 5.3.2 Rel-17).
++    uint64_t GetDlHarqFeedbackDisabledTxCount() const
++    {
++        return m_dlHarqFeedbackDisabledTx;
++    }
++
++    /// \return PHR MAC CEs received from the UEs of this BWP (ntn-patch 16).
++    uint64_t GetPhrReceivedCount() const
++    {
++        return m_phrReceived;
++    }
++
++    /// \return the UL PRB limit currently derived from this UE's PHR, or
++    /// UINT32_MAX if none applies (ntn-patch 16).
++    uint32_t GetUlPhrPrbLimit(uint16_t rnti) const;
++
++    /**
++     * TracedCallback signature for the UL PRB limit set from a PHR.
++     * \param [in] rnti the RNTI
++     * \param [in] phDb the decoded power headroom (dB)
++     * \param [in] numRb M_RB of the PUSCH the PHR arrived on
++     * \param [in] maxRb the resulting UL PRB limit
++     */
++    typedef void (*UlPhrLimitTracedCallback)(const uint16_t rnti,
++                                             const double phDb,
++                                             const uint16_t numRb,
++                                             const uint32_t maxRb);
+ };
+ 
+ } // namespace ns3
+diff --git a/model/nr-mac-scheduler-ofdma.cc b/model/nr-mac-scheduler-ofdma.cc
+index 2e7b163..46453fe 100644
+--- a/model/nr-mac-scheduler-ofdma.cc
++++ b/model/nr-mac-scheduler-ofdma.cc
+@@ -646,6 +646,7 @@ NrMacSchedulerOfdma::AssignULRBG(uint32_t symAvail, const ActiveUeMap& activeUl)
+         }
+ 
+         NS_ASSERT(!remainingRbgSet.empty());
++        const uint32_t bandRbg = remainingRbgSet.size(); // ntn-patch 16: UL RBGs of the band
+ 
+         for (const auto& ue : GetUeVector(el))
+         {
+@@ -674,7 +675,13 @@ NrMacSchedulerOfdma::AssignULRBG(uint32_t symAvail, const ActiveUeMap& activeUl)
+                 while (schedInfoIt != ueVector.end())
+                 {
+                     uint32_t bufQueueSize = schedInfoIt->second;
+-                    if (GetUe(*schedInfoIt)->m_ulTbSize >= std::max(bufQueueSize, 12U))
++                    // ntn-patch 16: a UE at its power-headroom PRB limit is full too.
++                    const bool atPhrLimit =
++                        beamSym > 0 &&
++                        GetUe(*schedInfoIt)->m_ulRBG.size() >=
++                            GetUlRbgCapPerSym(GetUe(*schedInfoIt), bandRbg) * beamSym;
++                    if (GetUe(*schedInfoIt)->m_ulTbSize >= std::max(bufQueueSize, 12U) ||
++                        atPhrLimit)
+                     {
+                         std::advance(schedInfoIt, 1);
+                     }
+@@ -823,7 +830,10 @@ NrMacSchedulerOfdma::CreateUlDci(PointInFTPlane* spoint,
+ 
+     // If is less than 12, i.e., 7 (3 mac header, 2 rlc header, 2 data) + 5 bytes for
+     // the SHORT_BSR. then we can't transmit any new data, so don't create dci.
+-    if (tbs < 12)
++    // ntn-patch 16: for a PHR-limited UE the floor is kMinUlTbWithData, once its PHR is known.
++    // Before the first PHR, 5G-LENA v5.1 answers an SR with a small bootstrap grant (17 B) meant
++    // for the BSR (+ PHR); rejecting it would leave the UE with no grant, so no PHR, forever.
++    if (tbs < 12 || (IsUlPhrLimited(ueInfo) && ueInfo->m_ulPhrReceived && tbs < kMinUlTbWithData))
+     {
+         NS_LOG_DEBUG("While creating UL DCI for UE "
+                      << ueInfo->m_rnti << " assigned "
+diff --git a/model/nr-mac-scheduler-tdma.cc b/model/nr-mac-scheduler-tdma.cc
+index cbe7c74..cb30ce5 100644
+--- a/model/nr-mac-scheduler-tdma.cc
++++ b/model/nr-mac-scheduler-tdma.cc
+@@ -142,6 +142,20 @@ NrMacSchedulerTdma::AssignRBGTDMA(uint32_t symAvail,
+         BeforeSchedFn(ue, FTResources(numOfAssignableRbgs, 1));
+     }
+ 
++    // ntn-patch 16 (v5.1 port): on UL a UE limited by its power headroom gets only
++    // the RBGs per symbol it can power (GetUlRbgCapPerSym); the rest of the symbol
++    // stays idle, as TDMA gives a symbol to one UE. Without the PHR limit this is
++    // the whole band, exactly the upstream behavior.
++    auto rbgPerSymOf = [&](const std::shared_ptr<NrMacSchedulerUeInfo>& ue) -> uint32_t {
++        if (type != "UL")
++        {
++            return numOfAssignableRbgs;
++        }
++        const uint32_t cap = GetUlRbgCapPerSym(ue, numOfAssignableRbgs);
++        ue->m_ulRbgPerSym = cap;
++        return cap;
++    };
++
+     while (resources > 0)
+     {
+         if (m_activeDlAi || m_activeUlAi)
+@@ -182,19 +196,19 @@ NrMacSchedulerTdma::AssignRBGTDMA(uint32_t symAvail,
+             break;
+         }
+ 
+-        // Assign 1 entire symbol (full RBG) to the selected UE and to the total
+-        // resources assigned count
++        // Assign 1 entire symbol (full RBG; ntn-patch 16: up to the UE's per-symbol
++        // power-headroom cap on UL) to the selected UE and to the total resources
++        // assigned count
++        const uint32_t perSym = rbgPerSymOf(GetUe(*schedInfoIt));
+         auto& assignedRbgs = GetRBGFn(GetUe(*schedInfoIt));
+         auto existingRbgs = assignedRbgs.size();
+-        assignedRbgs.resize(assignedRbgs.size() + numOfAssignableRbgs);
+-        std::copy(remainingRbgSet.begin(),
+-                  remainingRbgSet.end(),
+-                  assignedRbgs.begin() + existingRbgs);
+-        assigned.m_rbg += numOfAssignableRbgs;
++        assignedRbgs.resize(assignedRbgs.size() + perSym);
++        std::copy_n(remainingRbgSet.begin(), perSym, assignedRbgs.begin() + existingRbgs);
++        assigned.m_rbg += perSym;
+ 
+         auto& assignedSymbols = GetSymFn(GetUe(*schedInfoIt));
+         auto existingSymbols = assignedSymbols.size();
+-        assignedSymbols.resize(assignedSymbols.size() + numOfAssignableRbgs);
++        assignedSymbols.resize(assignedSymbols.size() + perSym);
+         std::fill(assignedSymbols.begin() + existingSymbols, assignedSymbols.end(), resources);
+         assigned.m_sym += 1;
+ 
+@@ -202,18 +216,18 @@ NrMacSchedulerTdma::AssignRBGTDMA(uint32_t symAvail,
+         resources -= 1;
+ 
+         // Update metrics for the successful UE
+-        NS_LOG_DEBUG("Assigned " << numOfAssignableRbgs << " " << type << " RBG (= 1 SYM) to UE "
++        NS_LOG_DEBUG("Assigned " << perSym << " " << type << " RBG (= 1 SYM) to UE "
+                                  << GetUe(*schedInfoIt)->m_rnti << " total assigned up to now: "
+                                  << GetRBGFn(GetUe(*schedInfoIt)).size() << " that corresponds to "
+                                  << assigned.m_rbg);
+-        SuccessfulAssignmentFn(*schedInfoIt, FTResources(numOfAssignableRbgs, 1), assigned);
++        SuccessfulAssignmentFn(*schedInfoIt, FTResources(perSym, 1), assigned);
+ 
+         // Update metrics for the unsuccessful UEs (who did not get any resource in this iteration)
+         for (auto& ue : ueVector)
+         {
+             if (GetUe(ue)->m_rnti != GetUe(*schedInfoIt)->m_rnti)
+             {
+-                UnSuccessfulAssignmentFn(ue, FTResources(numOfAssignableRbgs, 1), assigned);
++                UnSuccessfulAssignmentFn(ue, FTResources(perSym, 1), assigned);
+             }
+         }
+     }
+@@ -226,8 +240,19 @@ NrMacSchedulerTdma::AssignRBGTDMA(uint32_t symAvail,
+     // discarded and the cell starves indefinitely.
+     const uint32_t minTbs = type == "DL" ? 10 : 12;
+     GetFirst GetUe;
++    // ntn-patch 16: a PHR-limited UE needs a TB that carries data after its MAC CEs.
++    auto minTbsOf = [&](const UePtrAndBufferReq& ue) -> uint32_t {
++        return (type == "UL" && IsUlPhrLimited(GetUe(ue)) && GetUe(ue)->m_ulPhrReceived)
++                   ? kMinUlTbWithData
++                   : minTbs;
++    };
+     auto isStarved = [&](const UePtrAndBufferReq& ue) {
+-        return !GetRBGFn(GetUe(ue)).empty() && GetTBSFn(GetUe(ue)) < minTbs;
++        return !GetRBGFn(GetUe(ue)).empty() && GetTBSFn(GetUe(ue)) < minTbsOf(ue);
++    };
++    // ntn-patch 16: reaping moves whole full-band symbols, so a UE whose symbols are
++    // narrowed by its power headroom neither gives nor receives one.
++    auto fullBand = [&](const UePtrAndBufferReq& ue) {
++        return type != "UL" || !IsUlPhrLimited(GetUe(ue));
+     };
+     while (true)
+     {
+@@ -261,7 +286,8 @@ NrMacSchedulerTdma::AssignRBGTDMA(uint32_t symAvail,
+             auto& donor = **donorIt;
+             auto& donorRbgs = GetRBGFn(GetUe(donor));
+             auto& donorSyms = GetSymFn(GetUe(donor));
+-            if (donorRbgs.size() < numOfAssignableRbgs || donorSyms.size() < numOfAssignableRbgs)
++            if (donorRbgs.size() < numOfAssignableRbgs || donorSyms.size() < numOfAssignableRbgs ||
++                !fullBand(donor) || !fullBand(receiver))
+             {
+                 ++donorIt;
+                 continue;
+@@ -281,7 +307,7 @@ NrMacSchedulerTdma::AssignRBGTDMA(uint32_t symAvail,
+                                      << GetUe(receiver)->m_rnti);
+             SuccessfulAssignmentFn(receiver, FTResources(numOfAssignableRbgs, 1), assigned);
+             SuccessfulAssignmentFn(donor, FTResources(numOfAssignableRbgs, 1), assigned);
+-            receiverUnstarved = GetTBSFn(GetUe(receiver)) >= minTbs;
++            receiverUnstarved = GetTBSFn(GetUe(receiver)) >= minTbsOf(receiver);
+         }
+         if (!receiverUnstarved)
+         {
+@@ -299,7 +325,12 @@ NrMacSchedulerTdma::AssignRBGTDMA(uint32_t symAvail,
+         uint32_t symOfBeam = 0;
+         for (const auto& ue : el.second)
+         {
+-            symOfBeam += GetRBGFn(ue.first).size() / numOfAssignableRbgs;
++            uint32_t perSym = numOfAssignableRbgs;
++            if (type == "UL" && ue.first->m_ulRbgPerSym > 0)
++            {
++                perSym = ue.first->m_ulRbgPerSym; // ntn-patch 16
++            }
++            symOfBeam += GetRBGFn(ue.first).size() / perSym;
+         }
+         ret.insert(std::make_pair(el.first, symOfBeam));
+     }
+@@ -487,7 +518,10 @@ NrMacSchedulerTdma::CreateUlDci(NrMacSchedulerNs3::PointInFTPlane* spoint,
+ 
+     // If is less than 12, 7 (3 mac header, 2 rlc header, 2 data) + SHORT_BSR (5),
+     // then we can't transmit any new data, so don't create dci.
+-    if (tbs < 12)
++    // ntn-patch 16: for a PHR-limited UE the floor is kMinUlTbWithData, once its PHR is known.
++    // Before the first PHR, 5G-LENA v5.1 answers an SR with a small bootstrap grant (17 B) meant
++    // for the BSR (+ PHR); rejecting it would leave the UE with no grant, so no PHR, forever.
++    if (tbs < 12 || (IsUlPhrLimited(ueInfo) && ueInfo->m_ulPhrReceived && tbs < kMinUlTbWithData))
+     {
+         NS_LOG_DEBUG("While creating UL DCI for UE " << ueInfo->m_rnti << " assigned "
+                                                      << ueInfo->m_ulRBG.size()
+@@ -499,8 +533,13 @@ NrMacSchedulerTdma::CreateUlDci(NrMacSchedulerNs3::PointInFTPlane* spoint,
+     int zeroes = std::count(notchedRBGsMask.begin(), notchedRBGsMask.end(), 0);
+     uint32_t numOfAssignableRbgs = GetBandwidthInRbg() - zeroes;
+ 
+-    uint8_t numSym =
+-        static_cast<uint8_t>(std::max<size_t>(ueInfo->m_ulRBG.size() / numOfAssignableRbgs, 1));
++    // ntn-patch 16: a power-headroom-limited UE got fewer RBGs per symbol.
++    uint32_t perSym = numOfAssignableRbgs;
++    if (ueInfo->m_ulRbgPerSym > 0 && ueInfo->m_ulRbgPerSym < numOfAssignableRbgs)
++    {
++        perSym = ueInfo->m_ulRbgPerSym;
++    }
++    uint8_t numSym = static_cast<uint8_t>(std::max<size_t>(ueInfo->m_ulRBG.size() / perSym, 1));
+     numSym = std::min(numSym, static_cast<uint8_t>(maxSym));
+ 
+     NS_ASSERT(spoint->m_sym >= numSym);
+@@ -517,6 +556,26 @@ NrMacSchedulerTdma::CreateUlDci(NrMacSchedulerNs3::PointInFTPlane* spoint,
+                          ueInfo->m_ulPrecMats,
+                          numSym);
+ 
++    // ntn-patch 16: keep only the first perSym assignable RBGs of the band.
++    if (perSym < numOfAssignableRbgs)
++    {
++        uint32_t kept = 0;
++        for (std::size_t i = 0; i < dci->m_rbgBitmask.size(); ++i)
++        {
++            if (dci->m_rbgBitmask[i])
++            {
++                if (kept < perSym)
++                {
++                    ++kept;
++                }
++                else
++                {
++                    dci->m_rbgBitmask[i] = false;
++                }
++            }
++        }
++    }
++
+     // Reset the RBG (we are TDMA)
+     spoint->m_rbg = 0;
+ 
+diff --git a/model/nr-mac-scheduler-ue-info.cc b/model/nr-mac-scheduler-ue-info.cc
+index ed6b387..c3977a4 100644
+--- a/model/nr-mac-scheduler-ue-info.cc
++++ b/model/nr-mac-scheduler-ue-info.cc
+@@ -4,6 +4,9 @@
+ 
+ #include "nr-mac-scheduler-ue-info.h"
+ 
++#include <algorithm>
++#include <cmath>
++
+ #include "ns3/log.h"
+ 
+ #include <numeric>
+@@ -88,24 +91,34 @@ NrMacSchedulerUeInfo::GetDlMcs() const
+         return m_dlMcs;
+     }
+ 
++    // ntn-patch 13 (v5.1 port): the sub-band estimate gets the same outer-loop
++    // correction as the wideband MCS (m_dlMcs already carries it), otherwise OLLA
++    // would do nothing whenever sub-band CSI drives the MCS.
++    auto olla = [this](uint8_t sbMcs) -> uint8_t {
++        const int mcs = static_cast<int>(sbMcs) - static_cast<int>(std::lround(m_dlOllaOffset));
++        return static_cast<uint8_t>(
++            std::min(std::max(mcs, 0), static_cast<int>(m_dlAmc->GetMaxMcs())));
++    };
++
+     // Otherwise, compute the SINR of allocated RBGs
+     switch (m_mcsCsiSource)
+     {
+     // Estimate MCS based on the average MCS of allocated RBGs
+     case McsCsiSource::AVG_MCS: {
+-        return ComputeMcs(this, &SbMcsInfo::mcs, [](double avg) { return (uint8_t)floor(avg); });
++        return olla(
++            ComputeMcs(this, &SbMcsInfo::mcs, [](double avg) { return (uint8_t)floor(avg); }));
+     }
+     // Estimate MCS based on the average spectral efficiency of allocated RBGs
+     case McsCsiSource::AVG_SPEC_EFF: {
+-        return ComputeMcs(this,
+-                          &SbMcsInfo::specEff,
+-                          std::bind_front(&NrAmc::GetMcsFromSpectralEfficiency, m_dlAmc));
++        return olla(ComputeMcs(this,
++                               &SbMcsInfo::specEff,
++                               std::bind_front(&NrAmc::GetMcsFromSpectralEfficiency, m_dlAmc)));
+     }
+     // Estimate MCS based on the average SINR of allocated RBGs
+     case McsCsiSource::AVG_SINR: {
+-        return ComputeMcs(this, &SbMcsInfo::sinr, [amc = m_dlAmc](double avgSinr) {
++        return olla(ComputeMcs(this, &SbMcsInfo::sinr, [amc = m_dlAmc](double avgSinr) {
+             return amc->GetMcsFromSpectralEfficiency(amc->GetSpectralEfficiencyForSinr(avgSinr));
+-        });
++        }));
+     }
+     default:
+         NS_ABORT_MSG("Invalid csi source for MCS computation");
+diff --git a/model/nr-mac-scheduler-ue-info.h b/model/nr-mac-scheduler-ue-info.h
+index b954019..e716867 100644
+--- a/model/nr-mac-scheduler-ue-info.h
++++ b/model/nr-mac-scheduler-ue-info.h
+@@ -255,6 +255,10 @@ class NR_EXPORT NrMacSchedulerUeInfo
+      */
+     uint32_t GetTotalNumUlLc() const;
+ 
++    /// Outer-loop link adaptation (OLLA) offset in MCS indices, subtracted from the CQI-derived DL
++    /// MCS. Raised on a NACK and lowered on an ACK of a first transmission so the initial BLER
++    /// converges to the target (NrMacSchedulerNs3 OllaEnabled / OllaBlerTarget / OllaStep).
++    double m_dlOllaOffset{0.0};
+     /**
+      * @brief Get the total number of active logical channels in the downlink LCG map.
+      *
+@@ -353,6 +357,12 @@ class NR_EXPORT NrMacSchedulerUeInfo
+                                           //!< SINR for a sub-band CQI associated with a RBG
+     std::vector<uint8_t> m_rbgToSb;       //!< Precomputed RBG to SB mapping
+ 
++    /// ntn-patch 16: UL PRB limit from the last PHR (UINT32_MAX = none).
++    uint32_t m_ulMaxRb{UINT32_MAX};
++    /// ntn-patch 16: a PHR has been received from this UE.
++    bool m_ulPhrReceived{false};
++    /// ntn-patch 16: UL RBGs per symbol of the allocation being built (TDMA).
++    uint32_t m_ulRbgPerSym{0};
+     uint32_t m_dlTbSize{0}; //!< DL Transport Block Size, depends on MCS and RBG,
+                             //!< updated in UpdateDlMetric()
+     uint32_t m_ulTbSize{0}; //!< UL Transport Block Size, depends on MCS and RBG,
+@@ -371,6 +381,9 @@ class NR_EXPORT NrMacSchedulerUeInfo
+     uint32_t m_srsPeriodicity{0}; //!< SRS periodicity
+     uint32_t m_srsOffset{0};      //!< SRS offset
+     uint8_t m_startMcsDlUe{0};    //!< Starting DL MCS to be used
++    /// ntn-patch 20: m_startMcsDlUe was set per UE (SetUeDlMcsUntilCsi) and
++    /// holds until the first DL CQI of this UE in this cell.
++    bool m_dlMcsUntilCsi{false};
+ 
+     // Settings from the scheduler, that affects MCS, TBS and throughput computation
+     Ptr<NrAmc> m_dlAmc;          //!< AMC instance of scheduler associated with DL
+diff --git a/model/nr-phy-mac-common.h b/model/nr-phy-mac-common.h
+index d9e3beb..b908b26 100644
+--- a/model/nr-phy-mac-common.h
++++ b/model/nr-phy-mac-common.h
+@@ -495,6 +495,10 @@ struct NR_EXPORT MacCeValue
+     uint8_t m_phr;
+     uint8_t m_crnti;
+     std::vector<uint8_t> m_bufferStatus;
++    // ntn-patch 16: PHR (TS 38.321 6.1.3.8) P_CMAX,f,c index, and the M_RB of
++    // the PUSCH the PHR arrived on (known to the gNB, which scheduled it).
++    uint8_t m_phrPcmax{0};
++    uint16_t m_phrNumRb{0};
+ };
+ 
+ /**
+diff --git a/model/nr-phy-sap.h b/model/nr-phy-sap.h
+index e07a82f..d77500a 100644
+--- a/model/nr-phy-sap.h
++++ b/model/nr-phy-sap.h
+@@ -137,6 +137,30 @@ class NR_EXPORT NrPhySapProvider
+      */
+     virtual uint32_t GetRbNum() const = 0;
+ 
++    /**
++     * \brief Type 1 power headroom of a PUSCH (TS 38.213 7.7.1), for a PHR
++     * MAC CE (TS 38.321 5.4.6). ntn-patch 16.
++     */
++    struct PuschPowerHeadroom
++    {
++        bool valid{false};      //!< false when the PHY runs no uplink power control
++        double phDb{0.0};       //!< P_CMAX - (P0 + 10log10(2^mu M_RB) + alpha PL + deltaTF + f)
++        double pcmaxDbm{0.0};   //!< P_CMAX,f,c used for phDb
++        double pathlossDb{0.0}; //!< the UE's downlink path-loss estimate PL
++        uint32_t numRb{0};      //!< M_RB of the PUSCH
++    };
++
++    /**
++     * \brief Power headroom of a PUSCH on the given RBG allocation.
++     * \param rbgBitmask the RBG allocation of the UL grant
++     * \return the headroom; invalid by default (gNB PHY, or no power control)
++     */
++    virtual PuschPowerHeadroom GetPuschPowerHeadroom(
++        [[maybe_unused]] const std::vector<bool>& rbgBitmask) const
++    {
++        return PuschPowerHeadroom{};
++    }
++
+     virtual void RegisterToGnb(uint16_t cellId) = 0;
+ 
+     virtual uint32_t GetArfcn() const = 0;
+diff --git a/model/nr-phy.cc b/model/nr-phy.cc
+index e55f9e8..e06b1fc 100644
+--- a/model/nr-phy.cc
++++ b/model/nr-phy.cc
+@@ -60,6 +60,9 @@ class NrMemberPhySapProvider : public NrPhySapProvider
+     Time GetSlotPeriod() const override;
+ 
+     uint32_t GetRbNum() const override;
++    PuschPowerHeadroom GetPuschPowerHeadroom(
++        const std::vector<bool>& rbgBitmask) const override;
++
+ 
+     void RegisterToGnb(uint16_t cellId) override;
+ 
+@@ -162,6 +165,12 @@ NrMemberPhySapProvider::GetArfcn() const
+     return m_phy->DoGetArfcn();
+ }
+ 
++NrPhySapProvider::PuschPowerHeadroom
++NrMemberPhySapProvider::GetPuschPowerHeadroom(const std::vector<bool>& rbgBitmask) const
++{
++    return m_phy->GetPuschPowerHeadroom(rbgBitmask);
++}
++
+ /* ======= */
+ 
+ TypeId
+@@ -178,6 +187,12 @@ NrPhy::GetTypeId()
+     return tid;
+ }
+ 
++NrPhySapProvider::PuschPowerHeadroom
++NrPhy::GetPuschPowerHeadroom([[maybe_unused]] const std::vector<bool>& rbgBitmask) const
++{
++    return NrPhySapProvider::PuschPowerHeadroom{};
++}
++
+ std::vector<int>
+ NrPhy::FromRBGBitmaskToRBAssignment(const std::vector<bool> rbgBitmask) const
+ {
+diff --git a/model/nr-phy.h b/model/nr-phy.h
+index eeadb0f..409317e 100644
+--- a/model/nr-phy.h
++++ b/model/nr-phy.h
+@@ -189,6 +189,16 @@ class NR_EXPORT NrPhy : public Object
+      * @return the Tx power
+      */
+     virtual double GetTxPower() const = 0;
++    /**
++     * \brief Type 1 power headroom (TS 38.213 7.7.1) of a PUSCH on the given
++     * RBG allocation (ntn-patch 16). The base class runs no uplink power
++     * control and returns an invalid value; NrUePhy overrides it.
++     * \param rbgBitmask the RBG allocation of the UL grant
++     * \return the power headroom
++     */
++    virtual NrPhySapProvider::PuschPowerHeadroom GetPuschPowerHeadroom(
++        const std::vector<bool>& rbgBitmask) const;
++
+ 
+     // Installation / Helpers
+     /**
+diff --git a/model/nr-rlc-um.cc b/model/nr-rlc-um.cc
+index dac4f2d..8eff206 100644
+--- a/model/nr-rlc-um.cc
++++ b/model/nr-rlc-um.cc
+@@ -73,6 +73,15 @@ NrRlcUm::GetTypeId()
+                           UintegerValue(0),
+                           MakeUintegerAccessor(&NrRlcUm::m_discardTimerMs),
+                           MakeUintegerChecker<uint32_t>())
++            .AddAttribute("PerSduDiscardTimer",
++                          "With EnablePdcpDiscarding: discard each SDU when its own waiting "
++                          "time exceeds the discard timer (TS 38.323 clause 5.2.2.1), at every "
++                          "arrival and transmission opportunity. False (default) keeps the "
++                          "5G-LENA rule: drop the ARRIVING SDU when the head of the buffer is "
++                          "older than the discard timer.",
++                          BooleanValue(false),
++                          MakeBooleanAccessor(&NrRlcUm::m_perSduDiscard),
++                          MakeBooleanChecker())
+             .AddAttribute("BufferStatusReportTimer",
+                           "How much to wait to issue a new Buffer Status Report while the "
+                           "transmission buffer is not empty",
+@@ -106,9 +115,10 @@ void
+ NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
+ {
+     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << p->GetSize());
++    DiscardExpiredSdus();
+     if ((m_txBufferSize + p->GetSize() <= m_maxTxBufferSize) || (m_maxTxBufferSize == 0))
+     {
+-        if (m_enablePdcpDiscarding)
++        if (m_enablePdcpDiscarding && !m_perSduDiscard)
+         {
+             // discard the packet
+             uint32_t headOfLineDelayInMs = 0;
+@@ -166,6 +176,38 @@ NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
+     DoTransmitBufferStatusReport();
+ }
+ 
++void
++NrRlcUm::DiscardExpiredSdus()
++{
++    if (!m_enablePdcpDiscarding || !m_perSduDiscard || m_txBuffer.empty())
++    {
++        return;
++    }
++    const uint32_t discardTimerMs =
++        (m_discardTimerMs > 0) ? m_discardTimerMs : m_packetDelayBudgetMs;
++    const Time now = Simulator::Now();
++    for (auto it = m_txBuffer.begin(); it != m_txBuffer.end();)
++    {
++        NrRlcSduStatusTag tag;
++        const bool whole = it->m_pdu->PeekPacketTag(tag) &&
++                           tag.GetStatus() == NrRlcSduStatusTag::FULL_SDU;
++        if (!whole)
++        {
++            ++it; // partly transmitted: its segments are already with the lower layers
++            continue;
++        }
++        if ((now - it->m_waitingSince).GetMilliSeconds() <= discardTimerMs)
++        {
++            break; // arrival order: every SDU behind this one is younger
++        }
++        NS_LOG_INFO("discardTimer (" << discardTimerMs << " ms) expired for an RLC SDU of "
++                                     << it->m_pdu->GetSize() << " bytes: discarded");
++        m_txBufferSize -= it->m_pdu->GetSize();
++        m_txDropTrace(it->m_pdu);
++        it = m_txBuffer.erase(it);
++    }
++}
++
+ /**
+  * MAC SAP
+  */
+@@ -186,6 +228,8 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
+         return;
+     }
+ 
++    DiscardExpiredSdus();
++
+     Ptr<Packet> packet = Create<Packet>();
+     NrRlcHeader rlcHeader;
+ 
+diff --git a/model/nr-rlc-um.h b/model/nr-rlc-um.h
+index 549aeaa..27e5b53 100644
+--- a/model/nr-rlc-um.h
++++ b/model/nr-rlc-um.h
+@@ -123,6 +123,14 @@ class NR_EXPORT NrRlcUm : public NrRlc
+     /// Buffer status report
+     void DoTransmitBufferStatusReport();
+ 
++    /**
++     * NTN patch 26 (TS 38.323 clause 5.2.2.1 discardTimer, per SDU): drop every SDU still whole in
++     * the transmission buffer whose own waiting time exceeds the discard timer. A partly
++     * transmitted SDU is kept (its segments are already with the lower layers). Active only with
++     * EnablePdcpDiscarding and PerSduDiscardTimer.
++     */
++    void DiscardExpiredSdus();
++
+   private:
+     friend class NrRlcUmTestCase; ///< Grant NrRlcUmTestCase access to private members for
+                                   ///<  RLC UM RX verification
+@@ -212,6 +220,7 @@ class NR_EXPORT NrRlcUm : public NrRlc
+     bool m_enablePdcpDiscarding{false}; //!< whether to use the PDCP discarding (perform discarding
+                                         //!< at the moment of passing the PDCP SDU to RLC)
+     uint32_t m_discardTimerMs{0};       //!< the discard timer value in milliseconds
++    bool m_perSduDiscard{false}; //!< TS 38.323 5.2.2.1: each SDU expires on its own discardTimer
+     bool m_outOfOrderDelivery{false};   //!< whether to deliver RLC SDUs without reordering timer
+ 
+     /**
+diff --git a/model/nr-spectrum-phy.cc b/model/nr-spectrum-phy.cc
+index 2b2176a..1007e31 100644
+--- a/model/nr-spectrum-phy.cc
++++ b/model/nr-spectrum-phy.cc
+@@ -8,6 +8,7 @@
+ #include "nr-gnb-net-device.h"
+ #include "nr-gnb-phy.h"
+ #include "nr-lte-mi-error-model.h"
++#include "nr-mac-phr-ce.h"
+ #include "nr-radio-bearer-tag.h"
+ #include "nr-ue-net-device.h"
+ #include "nr-ue-phy.h"
+@@ -556,6 +557,14 @@ NrSpectrumPhy::SetDataErrorModelEnabled(bool dataErrorModelEnabled)
+     m_dataErrorModelEnabled = dataErrorModelEnabled;
+ }
+ 
++bool
++NrSpectrumPhy::IsDataErrorModelEnabled() const
++{
++    // NTN patch, see the header. The attribute is setter-only, so this is the
++    // only way to distinguish "error model off" from "clean link".
++    return m_dataErrorModelEnabled;
++}
++
+ void
+ NrSpectrumPhy::SetErrorModelType(TypeId errorModelType)
+ {
+@@ -732,6 +741,7 @@ NrSpectrumPhy::StartRx(Ptr<SpectrumSignalParameters> params)
+ 
+                 if (!m_phyRxPssCallback.IsNull())
+                 {
++                    m_lastRxSsbIndex = dlCtrlRxParams->ssbIndex; // ntn-patch 19
+                     m_phyRxPssCallback(dlCtrlRxParams->cellId, dlCtrlRxParams->psd);
+                 }
+             }
+@@ -831,7 +841,20 @@ NrSpectrumPhy::StartTxDataFrames(const Ptr<PacketBurst>& pb,
+         /* no break*/
+         [[fallthrough]];
+     case RX_UL_SRS:
+-        NS_FATAL_ERROR("Cannot TX while RX.");
++        // NTN patch, same rule as StartTxUlControlFrames. A TDD node cannot
++        // transmit and receive on one carrier at the same instant, and the
++        // modelled outcome is that the transmission does not happen, not that
++        // the simulation stops. Aborting models the absence of the scheduler
++        // rule, not a physical impossibility.
++        //
++        // Dropping DATA is more consequential than dropping control, because it
++        // removes user traffic and depresses throughput. It is therefore counted
++        // separately and reported: a run with a large GetDataDropCount() has an
++        // over-subscribed half-duplex node, and its throughput figure means
++        // something different from a run with zero. Silent loss here would be
++        // worse than the crash it replaces.
++        ++m_dataDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping DATA: half-duplex node is receiving (state " << m_state << ")");
+         break;
+     case TX:
+         // No break, gNB may transmit multiple times to multiple UEs
+@@ -910,7 +933,22 @@ NrSpectrumPhy::StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
+     case RX_UL_CTRL:
+         /* no break*/
+     case RX_UL_SRS:
+-        NS_FATAL_ERROR("Cannot TX while RX.");
++        // NTN patch, same rule as the other transmit paths. A TDD gNB cannot
++        // send downlink control while it is receiving on the same carrier; the
++        // modelled outcome is that it does not send, not that the simulation
++        // stops.
++        //
++        // This is the site that blocked boundary A6: enabling a real
++        // ConstantSpeedPropagationDelayModel on the air interface, so the
++        // service-link slant is borne by the radio rather than folded into the
++        // backhaul, made the downlink control of one slot overlap the uplink
++        // reception of another once the slant exceeded a few hundred kilometres.
++        //
++        // Counted separately from uplink control, because a lost downlink
++        // control message costs the UE a grant or an acknowledgement and that is
++        // a different kind of damage from a lost SRS.
++        ++m_dlCtrlDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping DL CTRL: half-duplex node is receiving (state " << m_state << ")");
+         break;
+     case TX:
+         NS_FATAL_ERROR("Cannot TX while already TX.");
+@@ -928,6 +966,7 @@ NrSpectrumPhy::StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
+         txParams->psd = m_txPsd;
+         txParams->cellId = GetCellId();
+         txParams->pss = true;
++        txParams->ssbIndex = m_txSsbIndex; // ntn-patch 19
+         txParams->ctrlMsgList = ctrlMsgList;
+ 
+         m_txCtrlTrace(duration);
+@@ -1011,7 +1050,25 @@ NrSpectrumPhy::StartTxUlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
+     case RX_UL_CTRL:
+         /* no break */
+     case RX_UL_SRS:
+-        NS_FATAL_ERROR("Cannot TX while RX.");
++        // NTN patch. A half-duplex UE asked to transmit uplink control while it
++        // is receiving does not crash; it does not transmit. TS 38.213 defines
++        // the prioritisation, and dropping the lower-priority uplink is the
++        // modelled outcome. Aborting here models the ABSENCE of that rule, not a
++        // physical impossibility.
++        //
++        // This matters over NTN specifically. The cell-specific K_offset widens
++        // the gap between an uplink grant and the transmission it authorises
++        // from about 2 slots to about 13 at 780 km and 30 kHz SCS, and the
++        // scheduler does not reserve the target slot when it issues the grant,
++        // so across a window that wide it can later allocate a downlink to the
++        // same UE in the slot the grant claimed. Terrestrial spacing hides this.
++        //
++        // The drop is COUNTED, not silent: GetUlCtrlDropCount() reports it, so a
++        // run that quietly stopped sending uplink control is visible rather than
++        // merely not fatal. A scenario seeing a large count is over-subscribing
++        // its uplink, and should say so.
++        ++m_ulCtrlDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping UL CTRL: half-duplex UE is receiving (state " << m_state << ")");
+         break;
+     case TX:
+         NS_FATAL_ERROR("Cannot TX while already TX.");
+@@ -1357,8 +1414,14 @@ NrSpectrumPhy::StartRxDlCtrl(const Ptr<NrSpectrumSignalParametersDlCtrlFrame>& p
+     switch (m_state)
+     {
+     case TX:
+-        NS_FATAL_ERROR("Cannot RX while TX.");
+-        break;
++        // NTN patch (07 family): a half-duplex UE that is transmitting does not receive this
++        // downlink control. Over NTN the UE keeps the slot timing it acquired at attach and
++        // has no Timing Advance, so as the slant range drifts the round-trip-shifted symbols
++        // slide across slot boundaries and can overlap its own uplink. Counted, see
++        // GetDlCtrlRxDropCount(); a lost DL CTRL costs the UE a DCI.
++        ++m_dlCtrlRxDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping received DL CTRL: half-duplex UE is transmitting");
++        return;
+     case RX_DATA:
+         NS_FATAL_ERROR("Cannot RX CTRL while receiving DATA.");
+         break;
+@@ -1402,9 +1465,19 @@ NrSpectrumPhy::StartRxUlCtrl(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& p
+     // RDF: method currently supports Uplink control only!
+     switch (m_state)
+     {
+-    case TX:
+-        NS_FATAL_ERROR("Cannot RX UL CTRL while TX.");
+-        break;
++    case TX: {
++        // NTN patch (07 family): a TDD gNB transmitting on this carrier cannot receive the uplink
++        // control that arrives now; the modelled outcome is that it is lost, not that the
++        // simulation stops. Over NTN without per-UE Timing Advance the UE's uplink control lands
++        // one round trip (2 x slant / c, e.g. 4.0 ms = 8 slots at LEO-600, mu=1) after the UE's
++        // slot, so it can fall into a downlink slot of the gNB's TDD pattern. COUNTED, see
++        // GetUlCtrlRxDropCount(): a run with a large count is missing uplink control (SR, HARQ
++        // feedback, CSI) and its KPIs mean something different from a run with zero.
++        ++m_ulCtrlRxDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping received UL CTRL (" << params->ctrlMsgList.size()
++                                                  << " msgs): half-duplex gNB is transmitting");
++        return;
++    }
+     case RX_DATA:
+         NS_FATAL_ERROR("Cannot RX UL CTRL while receiving DATA.");
+         break;
+@@ -1467,8 +1540,12 @@ NrSpectrumPhy::StartRxSrs(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& para
+     switch (m_state)
+     {
+     case TX:
+-        NS_FATAL_ERROR("Cannot RX SRS while TX.");
+-        break;
++        // NTN patch 07 (ported onto v5.1, whose switch has an explicit TX case ahead of the
++        // default branch that carried the counted drop in v3.3): a transmitting TDD gNB does not
++        // receive this SRS; counted, see GetSrsDropCount().
++        ++m_srsDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping SRS reception: half-duplex gNB is transmitting");
++        return;
+     case RX_DATA:
+         NS_FATAL_ERROR("Cannot RX SRS while receiving DATA.");
+         break;
+@@ -1500,8 +1577,20 @@ NrSpectrumPhy::StartRxSrs(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& para
+     }
+     break;
+     default: {
+-        // not allowed state for starting the SRS reception
+-        NS_FATAL_ERROR("Not allowed state for starting SRS reception.");
++        // NTN patch, same rule as the transmit paths above. A TDD gNB that is
++        // transmitting cannot simultaneously receive an SRS on the same
++        // carrier; the modelled outcome is that it does not receive it, not
++        // that the simulation stops.
++        //
++        // Reached over NTN because the cell-specific K_offset widens the
++        // grant-to-transmission gap enough that a UE's SRS can arrive while the
++        // gNB has begun a downlink it scheduled later. Counted, because an SRS
++        // the gNB never heard degrades its channel estimate and that should be
++        // visible rather than assumed away. Measured on
++        // ntn-cho-full-constellation at 8 UEs over 20 s: single-digit drops
++        // against ~144,000 received transport blocks.
++        ++m_srsDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping SRS reception: node is not IDLE/BUSY (state " << m_state << ")");
+         break;
+     }
+     }
+@@ -1832,6 +1921,14 @@ NrSpectrumPhy::ProcessReceivedPacketBurst()
+ 
+             if (!tbInfo.m_isCorrupted)
+             {
++                // ntn-patch 16: the gNB scheduled this PUSCH, so it knows the
++                // M_RB a PHR MAC CE on it refers to (TS 38.213 7.7.1).
++                if (gnbRx && bearerTag.GetLcid() == NrMacHeaderFsUl::SINGLE_ENTRY_PHR)
++                {
++                    NrPuschAllocationTag allocTag(
++                        static_cast<uint16_t>(tbInfo.m_expected.m_rbBitmap.size()));
++                    packet->AddPacketTag(allocTag);
++                }
+                 m_phyRxDataEndOkCallback(packet);
+             }
+             else
+diff --git a/model/nr-spectrum-phy.h b/model/nr-spectrum-phy.h
+index df1a9a9..15f39d9 100644
+--- a/model/nr-spectrum-phy.h
++++ b/model/nr-spectrum-phy.h
+@@ -154,6 +154,25 @@ class NR_EXPORT NrSpectrumPhy : public SpectrumPhy
+      */
+     void SetPhyRxPssCallback(const NrPhyRxPssCallback& c);
+ 
++    /// ntn-patch 19: SSB index value meaning "the cell does not sweep SSB beams".
++    static constexpr uint8_t NO_SSB_INDEX = 255;
++    /**
++     * @brief ntn-patch 19: SSB index (TS 38.213 4.1) carried by the DL control
++     * frames this PHY transmits from now on; NO_SSB_INDEX (default) for none.
++     */
++    void SetTxSsbIndex(uint8_t ssbIndex)
++    {
++        m_txSsbIndex = ssbIndex;
++    }
++    /**
++     * @brief ntn-patch 19: SSB index of the last PSS this PHY received,
++     * valid inside the PSS callback; NO_SSB_INDEX when the cell does not sweep.
++     */
++    uint8_t GetLastRxSsbIndex() const
++    {
++        return m_lastRxSsbIndex;
++    }
++
+     /**
+      * @brief Sets the callback to be called when DL HARQ feedback is generated
+      */
+@@ -321,6 +340,19 @@ class NR_EXPORT NrSpectrumPhy : public SpectrumPhy
+      * @param dataErrorModelEnabled boolean saying whether the data error model should be enabled
+      */
+     void SetDataErrorModelEnabled(bool dataErrorModelEnabled);
++
++    /**
++     * \brief NTN patch: read back whether the data error model is enabled.
++     *
++     * The DataErrorModelEnabled attribute is registered with a setter-only
++     * accessor, so GetAttribute on it aborts and a health gate cannot tell a
++     * disabled error model from a pristine link that simply produced no block
++     * errors. Both report a TBLER of exactly zero. This getter makes the
++     * distinction readable.
++     *
++     * \return true when the data error model is applied to received TBs
++     */
++    bool IsDataErrorModelEnabled() const;
+     /**
+      * @brief Sets the error model type
+      */
+@@ -657,7 +689,77 @@ class NR_EXPORT NrSpectrumPhy : public SpectrumPhy
+      */
+     void NotifyTxDataTrace(Time duration) const;
+ 
++  public:
++    /**
++     * \brief Uplink control transmissions dropped because the half-duplex UE
++     *        was receiving at the time (NTN patch).
++     *
++     * Non-zero means the scheduler asked this UE to transmit uplink control in a
++     * slot it was already using to receive. Over NTN that is expected under a
++     * large cell-specific K_offset; a large count means the uplink is
++     * over-subscribed and the run should report it rather than hide it.
++     */
++    uint64_t GetUlCtrlDropCount() const { return m_ulCtrlDroppedHalfDuplex; }
++
++    /**
++     * \brief Data transmissions dropped because the half-duplex node was
++     *        receiving at the time (NTN patch).
++     *
++     * More consequential than a control drop: this is user traffic that never
++     * went out, so a non-zero count changes what the throughput figure means.
++     */
++    uint64_t GetDataDropCount() const { return m_dataDroppedHalfDuplex; }
++
++    /**
++     * \brief SRS receptions dropped because the node was not IDLE or BUSY
++     *        (NTN patch).
++     *
++     * An SRS the gNB never heard degrades its channel estimate for that UE, so
++     * a non-zero count is worth reporting rather than assuming away.
++     */
++    uint64_t GetSrsDropCount() const { return m_srsDroppedHalfDuplex; }
++
++    /**
++     * \brief Downlink control transmissions dropped because the half-duplex
++     *        node was receiving at the time (NTN patch).
++     *
++     * A lost downlink control message costs the UE a grant or an
++     * acknowledgement, which is a different kind of damage from a lost SRS, so
++     * it is counted apart from the uplink figure.
++     */
++    uint64_t GetDlCtrlDropCount() const { return m_dlCtrlDroppedHalfDuplex; }
++
++    /**
++     * NTN patch: number of uplink-control receptions a gNB dropped because it was transmitting
++     * on the carrier when they arrived (TDD half-duplex; over NTN without Timing Advance the
++     * arrival is shifted by the round trip).
++     *
++     * @return the count
++     */
++    uint64_t GetUlCtrlRxDropCount() const { return m_ulCtrlRxDroppedHalfDuplex; }
++
++    /**
++     * NTN patch: number of downlink-control receptions a UE dropped because it was transmitting
++     * when they arrived (half-duplex; over NTN the timing drifts without Timing Advance).
++     *
++     * @return the count
++     */
++    uint64_t GetDlCtrlRxDropCount() const { return m_dlCtrlRxDroppedHalfDuplex; }
++
+   private:
++    /// NTN patch: half-duplex uplink-control drops, see GetUlCtrlDropCount().
++    uint64_t m_ulCtrlDroppedHalfDuplex{0};
++    /// NTN patch: half-duplex data drops, see GetDataDropCount().
++    uint64_t m_dataDroppedHalfDuplex{0};
++    /// NTN patch: SRS receptions dropped, see GetSrsDropCount().
++    uint64_t m_srsDroppedHalfDuplex{0};
++    /// NTN patch: downlink-control drops, see GetDlCtrlDropCount().
++    uint64_t m_dlCtrlDroppedHalfDuplex{0};
++    /// NTN patch: uplink-control receptions dropped at a transmitting gNB, see GetUlCtrlRxDropCount().
++    uint64_t m_ulCtrlRxDroppedHalfDuplex{0};
++    /// NTN patch: downlink-control receptions dropped at a transmitting UE, see GetDlCtrlRxDropCount().
++    uint64_t m_dlCtrlRxDroppedHalfDuplex{0};
++
+     std::vector<MimoSinrChunk>
+         m_mimoSinrPerceived; //!< received SINR values during data reception for TB decoding, to
+                              //!< replace m_sinrPerceived for all (MIMO and SISO) receivers
+@@ -867,6 +969,8 @@ class NR_EXPORT NrSpectrumPhy : public SpectrumPhy
+     NrPhyRxDataEndOkCallback
+         m_phyRxDataEndOkCallback;          //!< callback that is notified when the DATA is received
+     NrPhyRxPssCallback m_phyRxPssCallback; ///< the phy receive PSS callback
++    uint8_t m_txSsbIndex{NO_SSB_INDEX};     ///< ntn-patch 19: SSB index of transmitted DL CTRL
++    uint8_t m_lastRxSsbIndex{NO_SSB_INDEX}; ///< ntn-patch 19: SSB index of the last received PSS
+     NrPhyDlHarqFeedbackCallback
+         m_phyDlHarqFeedbackCallback; //!< callback that is notified when the DL HARQ feedback is
+                                      //!< being generated
+diff --git a/model/nr-spectrum-signal-parameters.cc b/model/nr-spectrum-signal-parameters.cc
+index 3b2aef9..be71160 100644
+--- a/model/nr-spectrum-signal-parameters.cc
++++ b/model/nr-spectrum-signal-parameters.cc
+@@ -61,6 +61,7 @@ NrSpectrumSignalParametersDlCtrlFrame::NrSpectrumSignalParametersDlCtrlFrame(
+     NS_LOG_FUNCTION(this << &p);
+     cellId = p.cellId;
+     pss = p.pss;
++    ssbIndex = p.ssbIndex;
+     ctrlMsgList = p.ctrlMsgList;
+ }
+ 
+diff --git a/model/nr-spectrum-signal-parameters.h b/model/nr-spectrum-signal-parameters.h
+index 0bb7902..8ecf156 100644
+--- a/model/nr-spectrum-signal-parameters.h
++++ b/model/nr-spectrum-signal-parameters.h
+@@ -74,6 +74,7 @@ struct NR_EXPORT NrSpectrumSignalParametersDlCtrlFrame : public SpectrumSignalPa
+     std::list<Ptr<NrControlMessage>> ctrlMsgList; //!< CTRL message list
+     bool pss;                                     //!< PSS (?)
+     uint16_t cellId;                              //!< cell id
++    uint8_t ssbIndex{255}; //!< ntn-patch 19: SSB index (TS 38.213 4.1), 255 = no SSB beam sweep
+ };
+ 
+ /**
+diff --git a/model/nr-ue-mac.cc b/model/nr-ue-mac.cc
+index f454c58..5c112e1 100644
+--- a/model/nr-ue-mac.cc
++++ b/model/nr-ue-mac.cc
+@@ -13,17 +13,20 @@
+ 
+ #include "nr-control-messages.h"
+ #include "nr-mac-header-vs.h"
++#include "nr-mac-phr-ce.h"
+ #include "nr-mac-short-bsr-ce.h"
+ #include "nr-phy-sap.h"
+ #include "nr-radio-bearer-tag.h"
+ 
+ #include "ns3/boolean.h"
++#include "ns3/double.h"
+ #include "ns3/log.h"
+ #include "ns3/nstime.h"
+ #include "ns3/random-variable-stream.h"
+ #include "ns3/uinteger.h"
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <limits>
+ #include <utility>
+ 
+@@ -266,6 +269,75 @@ NrUeMac::GetTypeId()
+         TypeId("ns3::NrUeMac")
+             .SetParent<Object>()
+             .AddConstructor<NrUeMac>()
++            .AddAttribute(
++                "RaResponseWindowStartOffset",
++                "NTN (TS 38.321 5.1.4, Rel-17): extra delay between the end of the RA preamble "
++                "and the start of ra-ResponseWindow, i.e. the UE-gNB RTT T_TA + k_mac. The window "
++                "end moves by the same amount. A RAR that arrives before the window opens is "
++                "ignored, as the UE is not monitoring the RA-RNTI then. Zero (default) is the "
++                "terrestrial behavior.",
++                TimeValue(Time(0)),
++                MakeTimeAccessor(&NrUeMac::m_raWindowStartOffset),
++                MakeTimeChecker(Time(0)))
++            .AddAttribute(
++                "PhrPeriodicTimer",
++                "TS 38.321 5.4.6 / TS 38.331 PHR-Config phr-PeriodicTimer. A positive value "
++                "configures power headroom reporting: a Single Entry PHR MAC CE (TS 38.321 "
++                "6.1.3.8) carrying the type 1 power headroom of the PUSCH it rides on (TS 38.213 "
++                "7.7.1, needs NrUePhy::EnableUplinkPowerControl) is sent on a new UL transmission "
++                "upon configuration, on expiry of this timer, and when the path loss changed by "
++                "more than PhrTxPowerFactorChange after PhrProhibitTimer. Zero (default) leaves "
++                "PHR unconfigured, as in nr before ntn-patch 16.",
++                TimeValue(Time(0)),
++                MakeTimeAccessor(&NrUeMac::m_phrPeriodicTimer),
++                MakeTimeChecker(Time(0)))
++            .AddAttribute("PhrProhibitTimer",
++                          "TS 38.331 PHR-Config phr-ProhibitTimer",
++                          TimeValue(MilliSeconds(10)),
++                          MakeTimeAccessor(&NrUeMac::m_phrProhibitTimer),
++                          MakeTimeChecker(Time(0)))
++            .AddAttribute("PhrTxPowerFactorChange",
++                          "TS 38.331 PHR-Config phr-Tx-PowerFactorChange (dB): a path-loss "
++                          "change above this since the last PHR triggers a new one once "
++                          "phr-ProhibitTimer has expired",
++                          DoubleValue(1.0),
++                          MakeDoubleAccessor(&NrUeMac::m_phrTxPowerFactorChange),
++                          MakeDoubleChecker<double>(0.0))
++            .AddAttribute(
++                "BsrTriggering",
++                "TS 38.321 5.4.5 (ntn-patch 17): send the SHORT_BSR MAC CE only when a BSR is "
++                "triggered: a Regular BSR when UL data becomes available for a logical channel of "
++                "higher priority than any with data, or when no logical channel had data, and on "
++                "retxBSR-Timer expiry; a Periodic BSR on periodicBSR-Timer expiry; a Padding BSR "
++                "when the padding of a new transmission can hold the CE. A triggered BSR is "
++                "cancelled when the grant holds all pending data but not the CE as well. False "
++                "(default) keeps nr's behavior, a BSR in every UL transport block.",
++                BooleanValue(false),
++                MakeBooleanAccessor(&NrUeMac::m_bsrTriggering),
++                MakeBooleanChecker())
++            .AddAttribute("PeriodicBsrTimer",
++                          "TS 38.331 BSR-Config periodicBSR-Timer, used with BsrTriggering. "
++                          "Zero (default) is infinity: no Periodic BSR.",
++                          TimeValue(Time(0)),
++                          MakeTimeAccessor(&NrUeMac::m_periodicBsrTimer),
++                          MakeTimeChecker(Time(0)))
++            .AddTraceSource("BsrSent",
++                            "A SHORT_BSR MAC CE was multiplexed into a PUSCH: IMSI, RNTI, "
++                            "BsrType (0 regular, 1 periodic, 2 padding, 3 unconditional), "
++                            "reported bytes",
++                            MakeTraceSourceAccessor(&NrUeMac::m_bsrTrace),
++                            "ns3::NrUeMac::BsrTracedCallback")
++            .AddTraceSource("PowerHeadroomReport",
++                            "A Single Entry PHR MAC CE was multiplexed into a PUSCH (TS 38.321 "
++                            "5.4.6): IMSI, RNTI, PH (dB), PH index, M_RB, path loss (dB)",
++                            MakeTraceSourceAccessor(&NrUeMac::m_phrTrace),
++                            "ns3::NrUeMac::PhrTracedCallback")
++            .AddTraceSource("RarOutsideWindow",
++                            "A RAR addressed to this UE arrived while ra-ResponseWindow was not "
++                            "running (before the NTN start offset elapsed) and was ignored. "
++                            "Exports the IMSI.",
++                            MakeTraceSourceAccessor(&NrUeMac::m_rarOutsideWindowTrace),
++                            "ns3::NrUeMac::ImsiTracedCallback")
+             .AddAttribute(
+                 "NumHarqProcess",
+                 "Number of concurrent stop-and-wait Hybrid ARQ processes per user",
+@@ -415,6 +487,19 @@ NrUeMac::GetTotalBufSize() const
+  * @brief Sets the number of HARQ processes
+  * @param numHarqProcesses the maximum number of harq processes
+  */
++uint32_t
++NrUeMac::GetPendingUlBytesWithHeaders() const
++{
++    uint32_t ret = 0;
++    for (const auto& it : m_ulBsrReceived)
++    {
++        ret += it.second.statusPduSize;
++        ret += it.second.txQueueSize > 0 ? it.second.txQueueSize + 3 : 0;
++        ret += it.second.retxQueueSize > 0 ? it.second.retxQueueSize + 3 : 0;
++    }
++    return ret;
++}
++
+ void
+ NrUeMac::SetNumHarqProcess(uint8_t numHarqProcess)
+ {
+@@ -502,6 +587,61 @@ NrUeMac::DoTransmitBufferStatusReport(NrMacSapProvider::BufferStatusReportParame
+ 
+     NS_LOG_INFO("Received BSR for LC Id" << static_cast<uint32_t>(params.lcid));
+ 
++    // New UL data for this channel: RLC's buffer grew since RLC last reported it. Since 5G-LENA
++    // v5.2 RLC also refreshes its status from within every transmit opportunity, which is not
++    // new data; v5.1 reported only when an SDU arrived.
++    auto rlcTotal = [](const NrMacSapProvider::BufferStatusReportParameters& b) {
++        return b.txQueueSize + b.retxQueueSize + b.statusPduSize;
++    };
++    const uint32_t rlcBefore = m_rlcReportedBytes[params.lcid];
++    const bool newData = rlcTotal(params) > rlcBefore;
++
++    // ntn-patch 17: TS 38.321 5.4.5 Regular BSR trigger. UL data becomes
++    // available for a logical channel in an LCG (LCID 0 is in none) and either
++    // no logical channel in an LCG had data, or this one has a higher priority
++    // (a lower priority value) than every logical channel with data.
++    if (m_bsrTriggering && params.lcid != 0)
++    {
++        auto total = [](const NrMacSapProvider::BufferStatusReportParameters& b) {
++            return b.txQueueSize + b.retxQueueSize + b.statusPduSize;
++        };
++        // Compare with what RLC itself last reported for each channel, not with the cached
++        // m_ulBsrReceived: since 5G-LENA v5.2 the MAC decrements that cache as it hands
++        // transmit opportunities to RLC, and RLC then refreshes its buffer status from within
++        // the opportunity. Against the decremented cache every refresh looked like new data
++        // arriving in an empty buffer (measured: 1076 Regular BSRs for 62 UL packets, so
++        // periodicBSR-Timer never expired).
++        const uint32_t before = rlcBefore;
++        if (newData)
++        {
++            bool anyData = false;
++            uint8_t highest = UINT8_MAX;
++            for (const auto& [lcid, bytes] : m_rlcReportedBytes)
++            {
++                if (lcid == 0 || lcid == params.lcid || bytes == 0)
++                {
++                    continue;
++                }
++                anyData = true;
++                auto lc = m_lcInfoMap.find(lcid);
++                if (lc != m_lcInfoMap.end())
++                {
++                    highest = std::min(highest, lc->second.lcConfig.priority);
++                }
++            }
++            auto own = m_lcInfoMap.find(params.lcid);
++            const uint8_t prio = (own != m_lcInfoMap.end()) ? own->second.lcConfig.priority
++                                                            : UINT8_MAX;
++            anyData = anyData || before > 0;
++            if (!anyData || prio < highest)
++            {
++                m_regularBsrTriggered = true;
++            }
++        }
++    }
++
++    m_rlcReportedBytes[params.lcid] = rlcTotal(params);
++
+     if (it != m_ulBsrReceived.end())
+     {
+         // update entry
+@@ -518,7 +658,7 @@ NrUeMac::DoTransmitBufferStatusReport(NrMacSapProvider::BufferStatusReportParame
+     // the last received UL DCI (HARQ process 0, or rv 3), which deadlocks the uplink when the
+     // bootstrap BSR TBs are lost: the gNB stops granting without a BSR, the stale m_ulDci
+     // never satisfies the condition, and no SR is ever sent again.
+-    if (m_srState == INACTIVE || (m_srState == ACTIVE && GetTotalBufSize() > 0))
++    if (m_srState == INACTIVE || (m_srState == ACTIVE && GetTotalBufSize() > 0 && newData))
+     {
+         if (m_srState == INACTIVE)
+         {
+@@ -551,11 +691,12 @@ NrUeMac::DoTransmitBufferStatusReport(NrMacSapProvider::BufferStatusReportParame
+                                 "DoTransmitBufferStatusReport");
+         }
+         m_srState = TO_SEND;
++        m_regularBsrTriggered = true; // ntn-patch 17: a Regular BSR
+     }
+ }
+ 
+ void
+-NrUeMac::SendBufferStatusReport(const SfnSf& dataSfn, uint8_t symStart)
++NrUeMac::SendBufferStatusReport(const SfnSf& dataSfn, uint8_t symStart, uint8_t type)
+ {
+     NS_LOG_FUNCTION(this);
+ 
+@@ -650,6 +791,34 @@ NrUeMac::SendBufferStatusReport(const SfnSf& dataSfn, uint8_t symStart)
+     NS_ASSERT_MSG(m_ulDciTotalUsed <= m_ulDci->m_tbSize,
+                   "We used more data than the DCI allowed us.");
+ 
++    if (type != BSR_UNCONDITIONAL)
++    {
++        // ntn-patch 17: the triggered BSR is part of this MAC PDU, so HARQ
++        // retransmits it with the PDU (nr regenerates its unconditional BSR on
++        // every retransmission instead).
++        auto& harq = m_miUlHarqProcessesPacket.at(m_ulDci->m_harqProcess);
++        if (!harq.m_pktBurst)
++        {
++            harq.m_pktBurst = CreateObject<PacketBurst>();
++        }
++        harq.m_pktBurst->AddPacket(p->Copy());
++        m_miUlHarqProcessesPacketTimer.at(m_ulDci->m_harqProcess) = GetNumHarqProcess();
++        // TS 38.321 5.4.5: a MAC PDU with a BSR cancels all triggered BSRs and
++        // (re)starts periodicBSR-Timer (the CE carries every LCG, never a
++        // truncated BSR); retxBSR-Timer restarts with the UL grant.
++        m_regularBsrTriggered = false;
++        m_periodicBsrTriggered = false;
++        m_periodicBsrExpiry = m_periodicBsrTimer.IsStrictlyPositive()
++                                  ? Simulator::Now() + m_periodicBsrTimer
++                                  : Time(0);
++    }
++    if (type < m_bsrSent.size())
++    {
++        ++m_bsrSent[type];
++    }
++    m_bsrTrace(m_imsi, m_rnti, type, queue.at(0) + queue.at(1) + queue.at(2) + queue.at(3));
++
++
+     m_phySapProvider->SendMacPdu(p, dataSfn, symStart, m_ulDci->m_rnti);
+ 
+     // The transmitted MAC PDU carries the buffer status, so the pending scheduling requests are
+@@ -670,6 +839,101 @@ NrUeMac::SendBufferStatusReport(const SfnSf& dataSfn, uint8_t symStart)
+                         "SendBufferStatusReport");
+ }
+ 
++uint32_t
++NrUeMac::PreparePhr()
++{
++    NS_LOG_FUNCTION(this);
++    m_phrPending = NrPhySapProvider::PuschPowerHeadroom{};
++    if (!m_phrPeriodicTimer.IsStrictlyPositive() || m_rnti == 0)
++    {
++        return 0; // PHR not configured
++    }
++    const Time now = Simulator::Now();
++    const auto ph = m_phySapProvider->GetPuschPowerHeadroom(m_ulDci->m_rbgBitmask);
++    if (!ph.valid)
++    {
++        return 0; // no PUSCH power control, so no power headroom to report
++    }
++    // TS 38.321 5.4.6 triggers.
++    if (m_phrPeriodicExpiry.IsStrictlyPositive() && now >= m_phrPeriodicExpiry)
++    {
++        m_phrTriggered = true; // phr-PeriodicTimer expired
++    }
++    if (now >= m_phrProhibitExpiry && std::isfinite(m_phrLastPathloss) &&
++        std::abs(ph.pathlossDb - m_phrLastPathloss) > m_phrTxPowerFactorChange)
++    {
++        m_phrTriggered = true; // phr-ProhibitTimer expired and PL changed
++    }
++    if (!m_phrTriggered)
++    {
++        return 0;
++    }
++    // The CE (2 octets) and its subheader (1 octet) must fit after the
++    // status PDUs and the SHORT_BSR (5 bytes), which come first.
++    uint32_t statusBytes = 0;
++    for (const auto& b : m_ulBsrReceived)
++    {
++        statusBytes += b.second.statusPduSize;
++    }
++    NrMacSingleEntryPhrCe ce;
++    const uint32_t ceBytes = ce.GetSerializedSize();
++    if (m_ulDciTotalUsed + statusBytes + m_bsrReservedBytes + ceBytes > m_ulDci->m_tbSize)
++    {
++        return 0; // stays triggered for the next grant
++    }
++    m_phrPending = ph;
++    return ceBytes;
++}
++
++void
++NrUeMac::SendPhr(const SfnSf& dataSfn, uint8_t symStart)
++{
++    NS_LOG_FUNCTION(this);
++    NS_ASSERT(m_phrPending.valid);
++    NrMacSingleEntryPhrCe ce;
++    ce.m_phIndex = NrMacSingleEntryPhrCe::PhDbToIndex(m_phrPending.phDb);
++    ce.m_pcmaxIndex = NrMacSingleEntryPhrCe::PcmaxDbmToIndex(m_phrPending.pcmaxDbm);
++
++    Ptr<Packet> p = Create<Packet>();
++    p->AddHeader(ce);
++    NrRadioBearerTag bearerTag(m_rnti, NrMacHeaderFsUl::SINGLE_ENTRY_PHR, 0);
++    p->AddPacketTag(bearerTag);
++
++    m_ulDciTotalUsed += p->GetSize();
++    NS_ASSERT_MSG(m_ulDciTotalUsed <= m_ulDci->m_tbSize,
++                  "We used more data than the DCI allowed us.");
++    // The CE is part of the MAC PDU, so a HARQ retransmission of this TB
++    // carries it again (unlike nr's SHORT_BSR, which is regenerated): at the
++    // cell edge the first transmission is often lost and the PHR would only
++    // ever arrive on a TB that decodes the first time.
++    auto& harq = m_miUlHarqProcessesPacket.at(m_ulDci->m_harqProcess);
++    if (!harq.m_pktBurst)
++    {
++        harq.m_pktBurst = CreateObject<PacketBurst>();
++    }
++    harq.m_pktBurst->AddPacket(p->Copy());
++    m_miUlHarqProcessesPacketTimer.at(m_ulDci->m_harqProcess) = GetNumHarqProcess();
++    m_phySapProvider->SendMacPdu(p, dataSfn, symStart, m_ulDci->m_rnti);
++
++    // TS 38.321 5.4.6: start or restart both timers, cancel the trigger.
++    const Time now = Simulator::Now();
++    m_phrPeriodicExpiry = now + m_phrPeriodicTimer;
++    m_phrProhibitExpiry = now + m_phrProhibitTimer;
++    m_phrLastPathloss = m_phrPending.pathlossDb;
++    m_phrTriggered = false;
++    ++m_phrSent;
++    m_phrTrace(m_imsi,
++               m_rnti,
++               m_phrPending.phDb,
++               ce.m_phIndex,
++               m_phrPending.numRb,
++               m_phrPending.pathlossDb);
++    NS_LOG_INFO("PHR sent: PH " << m_phrPending.phDb << " dB (index " << +ce.m_phIndex
++                                << ") on " << m_phrPending.numRb << " RBs, PL "
++                                << m_phrPending.pathlossDb << " dB");
++    m_phrPending = NrPhySapProvider::PuschPowerHeadroom{};
++}
++
+ void
+ NrUeMac::SetUeCmacSapUser(NrUeCmacSapUser* s)
+ {
+@@ -926,12 +1190,63 @@ NrUeMac::ProcessUlDci(const Ptr<NrUlDciMessage>& dciMsg)
+                             m_ulDci->m_ndi,
+                             "ProcessUlDci");
+ 
+-        // This method will transmit a new BSR.
+-        SendBufferStatusReport(dataSfn, m_ulDci->m_symStart);
++        // This method will transmit a new BSR. ntn-patch 17: with BSR
++        // triggering, a BSR the PDU carried is in the HARQ buffer already.
++        if (!m_bsrTriggering)
++        {
++            SendBufferStatusReport(dataSfn, m_ulDci->m_symStart);
++        }
+     }
+     else if (m_ulDci->m_ndi == 1)
+     {
++        ++m_ulNewTxGrants;
++        // ntn-patch 17: TS 38.321 5.4.5. Decide whether this new transmission
++        // carries a Regular or Periodic BSR before LCP fills it.
++        constexpr uint32_t kShortBsrBytes = 5; // nr's SHORT_BSR subPDU
++        uint8_t bsrType = BSR_UNCONDITIONAL;
++        m_bsrReservedBytes = kShortBsrBytes;
++        if (m_bsrTriggering)
++        {
++            m_bsrReservedBytes = 0;
++            if (m_periodicBsrExpiry.IsStrictlyPositive() &&
++                Simulator::Now() >= m_periodicBsrExpiry)
++            {
++                m_periodicBsrTriggered = true; // periodicBSR-Timer expired
++                m_periodicBsrExpiry = Time(0);
++            }
++            if (m_regularBsrTriggered || m_periodicBsrTriggered)
++            {
++                const uint32_t pending = GetPendingUlBytesWithHeaders();
++                if (pending <= m_ulDci->m_tbSize && pending + kShortBsrBytes > m_ulDci->m_tbSize)
++                {
++                    // The grant holds all pending data but not the BSR as
++                    // well: all triggered BSRs may be cancelled.
++                    m_regularBsrTriggered = false;
++                    m_periodicBsrTriggered = false;
++                    bsrType = UINT8_MAX;
++                }
++                else
++                {
++                    bsrType = m_regularBsrTriggered ? BSR_REGULAR : BSR_PERIODIC;
++                    m_bsrReservedBytes = kShortBsrBytes;
++                }
++            }
++            else
++            {
++                bsrType = UINT8_MAX; // none triggered: padding BSR at most
++            }
++        }
++
++        // ntn-patch 16: TS 38.321 5.4.6, a triggered PHR goes into a new
++        // transmission when the grant can hold it (LCP: after the BSR, before
++        // data, TS 38.321 5.4.3.1.3).
++        m_phrReservedBytes = PreparePhr();
+         SendNewData();
++        if (m_phrReservedBytes > 0)
++        {
++            SendPhr(dataSfn, m_ulDci->m_symStart);
++            m_phrReservedBytes = 0;
++        }
+         m_macUeStateMachine(m_imsi,
+                             m_currentSlot,
+                             GetCellId(),
+@@ -945,8 +1260,17 @@ NrUeMac::ProcessUlDci(const Ptr<NrUlDciMessage>& dciMsg)
+         NS_LOG_INFO("After sending NewData, bufSize " << GetTotalBufSize());
+ 
+         // Send a new BSR. SendNewData() already took into account the size of
+-        // the BSR.
+-        SendBufferStatusReport(dataSfn, m_ulDci->m_symStart);
++        // the BSR. ntn-patch 17: with BsrTriggering only a triggered BSR, or a
++        // Padding BSR when the padding holds the CE (TS 38.321 5.4.5).
++        if (bsrType != UINT8_MAX)
++        {
++            SendBufferStatusReport(dataSfn, m_ulDci->m_symStart, bsrType);
++        }
++        else if (m_ulDci->m_tbSize >= m_ulDciTotalUsed + kShortBsrBytes)
++        {
++            SendBufferStatusReport(dataSfn, m_ulDci->m_symStart, BSR_PADDING);
++        }
++        m_bsrReservedBytes = kShortBsrBytes;
+ 
+         NS_LOG_INFO("UL DCI processing done, sent to PHY a total of "
+                     << m_ulDciTotalUsed << " B out of " << m_ulDci->m_tbSize
+@@ -1172,13 +1496,15 @@ NrUeMac::SendNewData()
+         }
+     }
+ 
+-    // STATUS admission already reserved the SHORT_BSR.
+-    // Use the remaining space for retransmissions and new data.
+-    NS_ASSERT_MSG(m_ulDciTotalUsed + SHORT_BSR_BYTES <= m_ulDci->m_tbSize,
+-                  "The UL TBS of " << m_ulDci->m_tbSize << " B cannot fit the " << SHORT_BSR_BYTES
+-                                   << " B SHORT_BSR after " << m_ulDciTotalUsed
++    // STATUS admission already reserved the SHORT_BSR (ntn-patch 17: only when a BSR is
++    // triggered) and the PHR MAC CE (ntn-patch 16). Use the remaining space for retransmissions
++    // and new data.
++    const uint32_t ceReserved = m_bsrReservedBytes + m_phrReservedBytes;
++    NS_ASSERT_MSG(m_ulDciTotalUsed + ceReserved <= m_ulDci->m_tbSize,
++                  "The UL TBS of " << m_ulDci->m_tbSize << " B cannot fit the " << ceReserved
++                                   << " B of MAC CEs after " << m_ulDciTotalUsed
+                                    << " B of STATUS PDUs");
+-    const uint32_t tbLimit = m_ulDci->m_tbSize - SHORT_BSR_BYTES;
++    const uint32_t tbLimit = m_ulDci->m_tbSize - ceReserved;
+ 
+     if (activeLcsRetx == 0 && activeLcsTx == 0 && m_ulDciTotalUsed < tbLimit)
+     {
+@@ -1201,8 +1527,8 @@ NrUeMac::SendNewData()
+     }
+ 
+     NS_ASSERT_MSG(m_ulDciTotalUsed <= tbLimit,
+-                  "The UL TBS of " << m_ulDci->m_tbSize << " B cannot fit the " << SHORT_BSR_BYTES
+-                                   << " B SHORT_BSR after " << m_ulDciTotalUsed
++                  "The UL TBS of " << m_ulDci->m_tbSize << " B cannot fit the " << ceReserved
++                                   << " B of MAC CEs after " << m_ulDciTotalUsed
+                                    << " B of STATUS and RETX PDUs");
+ 
+     if (activeLcsTx > 0)
+@@ -1240,7 +1566,7 @@ NrUeMac::SendNewStatusData()
+         if (bsr.statusPduSize > 0)
+         {
+             if (m_ulDciTotalUsed + bsr.statusPduSize + MacSubheaderBytes(bsr.statusPduSize) +
+-                    SHORT_BSR_BYTES <=
++                    m_bsrReservedBytes + m_phrReservedBytes <=
+                 m_ulDci->m_tbSize)
+             {
+                 NrMacSapUser::TxOpportunityParameters txParams;
+@@ -1286,6 +1612,24 @@ NrUeMac::DoReceiveControlMessage(Ptr<NrControlMessage> msg)
+ 
+         m_macRxedCtrlMsgsTrace(m_imsi, m_currentSlot, GetCellId(), m_rnti, GetBwpId(), msg);
+ 
++        if (!m_waitingForRaResponse && m_raWindowStartOffset.IsStrictlyPositive() &&
++            m_noRaResponseReceivedEvent.IsPending())
++        {
++            Ptr<NrRarMessage> early = DynamicCast<NrRarMessage>(msg);
++            for (auto it = early->RarListBegin(); it != early->RarListEnd(); ++it)
++            {
++                if (it->rarPayload.raPreambleId == m_raPreambleId)
++                {
++                    NS_LOG_INFO("RAR for preamble " << +m_raPreambleId
++                                                    << " arrived before ra-ResponseWindow opened"
++                                                    << " (NTN start offset "
++                                                    << m_raWindowStartOffset.As(Time::MS)
++                                                    << "), ignored");
++                    m_rarOutsideWindowTrace(m_imsi);
++                    break;
++                }
++            }
++        }
+         if (m_waitingForRaResponse)
+         {
+             Ptr<NrRarMessage> rarMsg = DynamicCast<NrRarMessage>(msg);
+@@ -1295,7 +1639,12 @@ NrUeMac::DoReceiveControlMessage(Ptr<NrControlMessage> msg)
+             {
+                 if (it->rarPayload.raPreambleId == m_raPreambleId)
+                 {
++                    // TS 38.321 5.1.4: the first MAC subPDU whose RAPID matches the transmitted
++                    // preamble completes RAR reception. A RAR can also carry a stale entry for the
++                    // same (wrapped) preamble ID that another UE abandoned; handling a second match
++                    // made the RRC see "random access successful" twice and abort in IDLE_CONNECTING.
+                     RecvRaResponse(it->rarPayload);
++                    break;
+                 }
+             }
+         }
+@@ -1407,8 +1756,17 @@ NrUeMac::SendRaPreamble(bool contention)
+     m_phySapProvider->SendRachPreamble(m_raPreambleId, m_raRnti);
+     NS_LOG_INFO(" Sent preamble id " << +m_raPreambleId
+                                      << " at: " << Simulator::Now().As(Time::MS));
+-    Time raWindowBegin = m_phySapProvider->GetSlotPeriod();
+-    Time raWindowEnd = m_phySapProvider->GetSlotPeriod() * (6 + m_rachConfig.raResponseWindowSize);
++    // NTN (TS 38.321 5.1.4, Rel-17): the window starts T_TA + k_mac after the
++    // preamble, so the UE does not monitor (or time out on) a RAR that cannot
++    // have arrived yet. Both window edges move by the offset; with a zero
++    // offset this is the terrestrial window, unchanged.
++    Time raWindowBegin = m_phySapProvider->GetSlotPeriod() + m_raWindowStartOffset;
++    Time raWindowEnd = m_phySapProvider->GetSlotPeriod() * (6 + m_rachConfig.raResponseWindowSize) +
++                       m_raWindowStartOffset;
++    if (m_raWindowStartOffset.IsStrictlyPositive())
++    {
++        m_waitingForRaResponse = false;
++    }
+     Simulator::Schedule(raWindowBegin, &NrUeMac::StartWaitingForRaResponse, this);
+     m_noRaResponseReceivedEvent =
+         Simulator::Schedule(raWindowEnd, &NrUeMac::RaResponseTimeout, this, contention);
+@@ -1513,6 +1871,16 @@ NrUeMac::DoReset()
+     m_noRaResponseReceivedEvent.Cancel();
+     m_rachConfigured = false;
+     m_ulBsrReceived.clear();
++    // ntn-patch 16: a PHR is triggered when the MAC entity is (re)configured
++    // for a new cell (TS 38.321 5.4.6); the timers restart from there.
++    m_phrTriggered = true;
++    m_phrPeriodicExpiry = Time(0);
++    m_phrProhibitExpiry = Time(0);
++    // ntn-patch 17: no BSR stays triggered across a MAC reset.
++    m_regularBsrTriggered = false;
++    m_rlcReportedBytes.clear();
++    m_periodicBsrTriggered = false;
++    m_periodicBsrExpiry = Time(0);
+     m_srState = INACTIVE;
+     m_lastSrSent = Time::Min();
+     m_srCounter = 0;
+diff --git a/model/nr-ue-mac.h b/model/nr-ue-mac.h
+index 3b347f9..59e594f 100644
+--- a/model/nr-ue-mac.h
++++ b/model/nr-ue-mac.h
+@@ -8,11 +8,15 @@
+ #include "nr-ccm-mac-sap.h"
+ #include "nr-phy-mac-common.h"
+ #include "nr-ue-cmac-sap.h"
++#include "nr-phy-sap.h"
+ 
+ #include "ns3/nr-export.h"
+ #include "ns3/nstime.h"
+ #include "ns3/traced-callback.h"
+ 
++#include <limits>
++#include <array>
++#include <map>
+ #include <unordered_map>
+ 
+ namespace ns3
+@@ -109,6 +113,72 @@ class NR_EXPORT NrUeMac : public Object
+     friend class MacUeMemberPhySapUser;
+     friend class NrUeMacStaleBsrTestCase;
+ 
++    // ntn-patch 16: TS 38.321 5.4.6 power headroom reporting (PHR-Config).
++    /**
++     * \brief Evaluate the PHR triggers for a new UL transmission and, when a
++     * PHR is triggered, return the bytes to reserve for the Single Entry PHR
++     * MAC CE and its subheader (0 when none is sent in this grant).
++     * \return 3 or 0
++     */
++    uint32_t PreparePhr();
++    /**
++     * \brief Multiplex the Single Entry PHR MAC CE prepared by PreparePhr().
++     * \param dataSfn slot of the PUSCH
++     * \param symStart first symbol of the PUSCH
++     */
++    void SendPhr(const SfnSf& dataSfn, uint8_t symStart);
++    Time m_phrPeriodicTimer{0};          ///< phr-PeriodicTimer (0 = PHR not configured)
++    Time m_phrProhibitTimer{0};          ///< phr-ProhibitTimer
++    double m_phrTxPowerFactorChange{1.0}; ///< phr-Tx-PowerFactorChange (dB)
++    bool m_phrTriggered{true};           ///< a PHR is triggered (initially: configuration)
++    Time m_phrPeriodicExpiry{0};         ///< phr-PeriodicTimer expiry (running if > 0)
++    Time m_phrProhibitExpiry{0};         ///< phr-ProhibitTimer expiry
++    double m_phrLastPathloss{std::numeric_limits<double>::quiet_NaN()}; ///< PL at the last PHR
++    NrPhySapProvider::PuschPowerHeadroom m_phrPending; ///< PH obtained for this grant
++    uint64_t m_phrSent{0};                             ///< PHR MAC CEs multiplexed
++    uint32_t m_phrReservedBytes{0}; ///< bytes reserved in this grant for the PHR MAC CE
++    TracedCallback<uint64_t, uint16_t, double, uint8_t, uint32_t, double> m_phrTrace;
++
++  public:
++    /// \return Single Entry PHR MAC CEs sent (TS 38.321 5.4.6, ntn-patch 16).
++    uint64_t GetPhrSentCount() const
++    {
++        return m_phrSent;
++    }
++    /**
++     * \param type a BsrType
++     * \return SHORT_BSR MAC CEs sent as that type (ntn-patch 17)
++     */
++    uint64_t GetBsrSentCount(uint8_t type) const
++    {
++        return type < m_bsrSent.size() ? m_bsrSent[type] : 0;
++    }
++
++    /// \return UL grants for a new transmission received (ntn-patch 17).
++    uint64_t GetUlNewTxGrantCount() const
++    {
++        return m_ulNewTxGrants;
++    }
++
++  private:
++    // ntn-patch 17: TS 38.321 5.4.5 BSR triggering (BSR-Config).
++    /**
++     * \brief Bytes the MAC needs to empty its buffers, with nr's per-LC subPDU
++     * header estimate (3 bytes per non-empty queue).
++     * \return the pending UL bytes
++     */
++    uint32_t GetPendingUlBytesWithHeaders() const;
++    bool m_bsrTriggering{false};      ///< BSR only when triggered (false: in every TB)
++    Time m_periodicBsrTimer{0};       ///< periodicBSR-Timer (0 = infinity)
++    bool m_regularBsrTriggered{false};  ///< a Regular BSR is triggered and not cancelled
++    std::map<uint8_t, uint32_t> m_rlcReportedBytes; ///< last buffer RLC reported per LCID (ntn-patch 17)
++    bool m_periodicBsrTriggered{false}; ///< a Periodic BSR is triggered and not cancelled
++    Time m_periodicBsrExpiry{0};        ///< periodicBSR-Timer expiry (running if > 0)
++    uint32_t m_bsrReservedBytes{5};     ///< bytes this grant keeps for the SHORT_BSR
++    std::array<uint64_t, 4> m_bsrSent{}; ///< SHORT_BSR CEs sent, per BsrType
++    uint64_t m_ulNewTxGrants{0};         ///< UL grants with NDI toggled (new data)
++    TracedCallback<uint64_t, uint16_t, uint8_t, uint32_t> m_bsrTrace; ///< BsrSent trace
++
+   public:
+     /**
+      * @brief Get the Type id
+@@ -180,6 +250,51 @@ class NR_EXPORT NrUeMac : public Object
+      */
+     NrUePhySapUser* GetPhySapUser();
+ 
++    /**
++     * TracedCallback signature for per-UE MAC events identified by IMSI.
++     * \param [in] imsi the IMSI
++     */
++    typedef void (*ImsiTracedCallback)(const uint64_t imsi);
++
++    /**
++     * TracedCallback signature for a transmitted PHR MAC CE (ntn-patch 16).
++     * @param [in] imsi the IMSI
++     * @param [in] rnti the C-RNTI
++     * @param [in] phDb the type 1 power headroom in dB (before quantization)
++     * @param [in] phIndex the reported TS 38.133 PH index
++     * @param [in] numRb M_RB of the PUSCH carrying the PHR
++     * @param [in] pathlossDb the path-loss estimate used
++     */
++    typedef void (*PhrTracedCallback)(const uint64_t imsi,
++                                      const uint16_t rnti,
++                                      const double phDb,
++                                      const uint8_t phIndex,
++                                      const uint32_t numRb,
++                                      const double pathlossDb);
++
++    /**
++     * The kind of BSR a SHORT_BSR MAC CE was sent as (ntn-patch 17).
++     */
++    enum BsrType : uint8_t
++    {
++        BSR_REGULAR = 0,       ///< TS 38.321 5.4.5 Regular BSR (new data / retxBSR-Timer)
++        BSR_PERIODIC = 1,      ///< TS 38.321 5.4.5 Periodic BSR (periodicBSR-Timer)
++        BSR_PADDING = 2,       ///< TS 38.321 5.4.5 Padding BSR (padding holds the CE)
++        BSR_UNCONDITIONAL = 3, ///< nr default: a BSR in every UL TB, triggered or not
++    };
++
++    /**
++     * TracedCallback signature for a transmitted SHORT_BSR MAC CE (ntn-patch 17).
++     * @param [in] imsi the IMSI
++     * @param [in] rnti the C-RNTI
++     * @param [in] type the BsrType
++     * @param [in] bufferBytes the buffer the CE reports, summed over the LCGs
++     */
++    typedef void (*BsrTracedCallback)(const uint64_t imsi,
++                                      const uint16_t rnti,
++                                      const uint8_t type,
++                                      const uint32_t bufferBytes);
++
+     /**
+      * @brief Set PHY SAP provider (AKA the PHY representation for the MAC)
+      * @param ptr the PHY SAP provider (AKA the PHY representation for the MAC)
+@@ -384,10 +499,16 @@ class NR_EXPORT NrUeMac : public Object
+      * @param dataSfn data slot
+      * @param symStart symStart
+      *
+-     * Please note that the BSR is not saved in the HARQ buffer, so it will
+-     * not get retransmitted.
+-     */
+-    void SendBufferStatusReport(const SfnSf& dataSfn, uint8_t symStart);
++     * @param type the BsrType (ntn-patch 17)
++     *
++     * Please note that with the nr default (BSR_UNCONDITIONAL) the BSR is not
++     * saved in the HARQ buffer, so it will not get retransmitted. A BSR sent
++     * because it was triggered (BsrTriggering, ntn-patch 17) is part of the
++     * MAC PDU and HARQ retransmits it.
++     */
++    void SendBufferStatusReport(const SfnSf& dataSfn,
++                                uint8_t symStart,
++                                uint8_t type = BSR_UNCONDITIONAL);
+     void RefreshHarqProcessesPacketBuffer();
+ 
+     /**
+@@ -475,6 +596,10 @@ class NR_EXPORT NrUeMac : public Object
+ 
+     std::unordered_map<uint8_t, NrMacSapProvider::BufferStatusReportParameters>
+         m_ulBsrReceived; //!< BSR received from RLC (the last one)
++    /// NTN ra-ResponseWindow start offset, T_TA + k_mac (TS 38.321 5.1.4, Rel-17).
++    Time m_raWindowStartOffset{0};
++    /// RAR for this UE ignored because ra-ResponseWindow was not yet running.
++    TracedCallback<uint64_t> m_rarOutsideWindowTrace;
+ 
+     SrBsrMachine m_srState{INACTIVE}; //!< Current state for the SR/BSR machine.
+ 
+diff --git a/model/nr-ue-phy.cc b/model/nr-ue-phy.cc
+index 0c9696d..60a3085 100644
+--- a/model/nr-ue-phy.cc
++++ b/model/nr-ue-phy.cc
+@@ -25,6 +25,7 @@
+ #include "ns3/node.h"
+ #include "ns3/pointer.h"
+ #include "ns3/simulator.h"
++#include "ns3/uinteger.h"
+ 
+ #include <algorithm>
+ #include <cfloat>
+@@ -249,7 +250,59 @@ NrUePhy::GetTypeId()
+                           "If true, RLF detection will be enabled.",
+                           BooleanValue(true),
+                           MakeBooleanAccessor(&NrUePhy::m_enableRlfDetection),
+-                          MakeBooleanChecker());
++                          MakeBooleanChecker())
++            .AddAttribute(
++                "SsRsrpOnOccupiedRbs",
++                "ntn-patch 19 (TS 38.215 5.1.1: SS-RSRP is the linear average over the REs "
++                "that carry the SSS): average the PSS power per RB over the RBs that carry the "
++                "cell's SSB, i.e. those with a non-zero received PSD (nr's own convention, "
++                "NrAmc: 'SINR == 0 means no signal in this RB'). Needed when cells send their "
++                "control region in a sub-band (frequency reuse); false (nr default) averages "
++                "over every RB of the BWP.",
++                BooleanValue(false),
++                MakeBooleanAccessor(&NrUePhy::m_ssRsrpOnOccupiedRbs),
++                MakeBooleanChecker())
++            .AddAttribute(
++                "SsbBeamsPerBurst",
++                "ntn-patch 19: number of SSB beams the serving cell sweeps (TS 38.213 4.1, "
++                "ssb-PositionsInBurst). The path-loss reference of uplink power control is then "
++                "the best SSB of the last burst (TS 38.213 7.1.1, the SS/PBCH block the UE "
++                "uses as q_d) instead of the last control region received, which is sent on "
++                "whichever beam the sweep is at. 0 (default): no sweep, nr behavior.",
++                UintegerValue(0),
++                MakeUintegerAccessor(&NrUePhy::m_ssbBeamsPerBurst),
++                MakeUintegerChecker<uint32_t>(0, 255))
++            .AddAttribute(
++                "SsbBeamResultLifetime",
++                "ntn-patch 21: how long a per-SSB-beam layer-1 result is kept when the beam is "
++                "not measured again (a sweep longer than the layer-1 period). The cell quality "
++                "is the best of the kept results (TS 38.331 5.5.3.3). 0 (default): only the "
++                "beams measured in the current period count (patch 19).",
++                TimeValue(Seconds(0)),
++                MakeTimeAccessor(&NrUePhy::m_ssbBeamResultLifetime),
++                MakeTimeChecker(Seconds(0)))
++            .AddAttribute(
++                "InitialBandwidthRbs",
++                "ntn-patch 19: RBs of the UE's initial (pre-SIB) receive bandwidth, centred on the "
++                "carrier. 0 (default) is nr's 6 RBs. Set to the BWP's RB count when cells send "
++                "their SSB in reuse sub-bands, so the UE finds its cell's SSB anywhere in the BWP.",
++                UintegerValue(0),
++                MakeUintegerAccessor(&NrUePhy::m_initialBandwidthRbs),
++                MakeUintegerChecker<uint32_t>())
++            .AddAttribute("DlHarqFeedbackDisabled",
++                          "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.213 9.1.2): "
++                          "bitmap over DL HARQ process IDs, bit i set = the UE does not report "
++                          "HARQ-ACK on PUCCH for a PDSCH received on process i. Must match the "
++                          "gNB scheduler's DlHarqFeedbackDisabled. 0 (default) reports every "
++                          "process, the terrestrial behavior.",
++                          UintegerValue(0),
++                          MakeUintegerAccessor(&NrUePhy::m_dlHarqFeedbackDisabled),
++                          MakeUintegerChecker<uint32_t>())
++            .AddTraceSource("DlHarqFeedbackSuppressed",
++                            "A DL HARQ-ACK that was not sent on PUCCH because its HARQ process "
++                            "has feedback disabled (RNTI, HARQ process ID).",
++                            MakeTraceSourceAccessor(&NrUePhy::m_dlHarqFeedbackSuppressedTrace),
++                            "ns3::NrUePhy::DlHarqFeedbackSuppressedTracedCallback");
+     return tid;
+ }
+ 
+@@ -370,6 +423,28 @@ NrUePhy::GetUplinkPowerControl() const
+     return m_powerControl;
+ }
+ 
++NrPhySapProvider::PuschPowerHeadroom
++NrUePhy::GetPuschPowerHeadroom(const std::vector<bool>& rbgBitmask) const
++{
++    NrPhySapProvider::PuschPowerHeadroom ph;
++    if (!m_enableUplinkPowerControl || !m_powerControl ||
++        !m_powerControl->HasPathLossEstimate())
++    {
++        return ph;
++    }
++    const auto rbs = FromRBGBitmaskToRBAssignment(rbgBitmask);
++    if (rbs.empty())
++    {
++        return ph;
++    }
++    ph.valid = true;
++    ph.numRb = static_cast<uint32_t>(rbs.size());
++    ph.phDb = m_powerControl->GetPuschPowerHeadroom(rbs.size());
++    ph.pcmaxDbm = m_powerControl->GetPcmax();
++    ph.pathlossDb = m_powerControl->GetPathLoss();
++    return ph;
++}
++
+ void
+ NrUePhy::SetUplinkPowerControl(Ptr<NrUePowerControl> pc)
+ {
+@@ -1466,6 +1541,14 @@ void
+ NrUePhy::EnqueueDlHarqFeedback(const DlHarqInfo& m)
+ {
+     NS_LOG_FUNCTION(this);
++    // NTN downlinkHARQ-FeedbackDisabled-r17: no HARQ-ACK is reported for a
++    // feedback-disabled process, so nothing is put on PUCCH for it.
++    if (m.m_harqProcessId < 32 && ((m_dlHarqFeedbackDisabled >> m.m_harqProcessId) & 1U))
++    {
++        ++m_dlHarqFeedbackSuppressed;
++        m_dlHarqFeedbackSuppressedTrace(m.m_rnti, m.m_harqProcessId);
++        return;
++    }
+     // get the feedback from NrSpectrumPhy and send it through ideal PUCCH to gNB
+     Ptr<NrDlHarqFeedbackMessage> msg = Create<NrDlHarqFeedbackMessage>();
+     msg->SetSourceBwpArfcn(DoGetArfcn());
+@@ -1591,6 +1674,19 @@ NrUePhy::ReportRsReceivedPower(const SpectrumValue& rsReceivedPower)
+ {
+     NS_LOG_FUNCTION(this << rsReceivedPower);
+     m_rsrp = 10 * log10(Integral(rsReceivedPower)) + 30;
++    // ntn-patch 19: with an SSB beam sweep the control region of each slot
++    // goes out on another beam; the downlink path-loss reference is the best
++    // SS/PBCH block (TS 38.213 7.1.1 q_d), here the strongest of the last burst.
++    if (m_ssbBeamsPerBurst > 0)
++    {
++        m_rsPowerBurstMw.push_back(std::pow(10.0, m_rsrp / 10.0));
++        while (m_rsPowerBurstMw.size() > m_ssbBeamsPerBurst)
++        {
++            m_rsPowerBurstMw.pop_front();
++        }
++        const double best = *std::max_element(m_rsPowerBurstMw.begin(), m_rsPowerBurstMw.end());
++        m_rsrp = 10.0 * std::log10(best);
++    }
+     NS_LOG_DEBUG("RSRP value updated: " << m_rsrp << " dBm");
+ 
+     if (m_enableUplinkPowerControl)
+@@ -1614,11 +1710,20 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
+     Values::const_iterator itPi;
+     for (itPi = p->ConstValuesBegin(); itPi != p->ConstValuesEnd(); itPi++)
+     {
++        // ntn-patch 19: only the RBs that carry this cell's SSB (TS 38.215 5.1.1)
++        if (m_ssRsrpOnOccupiedRbs && (*itPi) == 0.0)
++        {
++            continue;
++        }
+         // convert PSD [W/Hz] to linear power [W] for the single RE
+         double powerTxW = (*itPi) * subcarrierSpacing;
+         sum += powerTxW;
+         nRB++;
+     }
++    if (nRB == 0)
++    {
++        return; // ntn-patch 19: nothing of this SSB falls in the BWP
++    }
+ 
+     // Instantaneous RSRP in linear mW per RE. A zero-power sample (e.g. a fully
+     // nulled beamforming cross-link) carries no detectable PSS: skip it rather
+@@ -1633,9 +1738,17 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
+     NS_LOG_DEBUG("RSRP value updated: " << 10 * log10(rsrp) << " dBm"
+                                         << " for Cell Id: " << cellId << " RNTI: " << m_rnti);
+ 
++    // ntn-patch 19: a cell that sweeps SSB beams is measured per SSB index
++    // (TS 38.215 5.1.1 SS-RSRP per SS/PBCH block); its cell quality is derived
++    // from the best beam in ReportUeMeasurements (TS 38.331 5.5.3.3).
++    const uint8_t ssbIndex = m_spectrumPhy->GetLastRxSsbIndex();
++    auto& measMap = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX) ? m_ueMeasurementsMap
++                                                              : m_ueSsbMeasurementsMap[cellId];
++    const uint16_t measKey = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX) ? cellId : ssbIndex;
++
+     // store RSRP measurements
+-    auto itMeasMap = m_ueMeasurementsMap.find(cellId);
+-    if (itMeasMap == m_ueMeasurementsMap.end())
++    auto itMeasMap = measMap.find(measKey);
++    if (itMeasMap == measMap.end())
+     {
+         // insert new entry
+         UeMeasurementsElement newEl;
+@@ -1648,7 +1761,7 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
+                                                     << " RSRP: " << newEl.rsrpSum << " mW"
+                                                     << " number of entries: " << +newEl.rsrpNum);
+ 
+-        m_ueMeasurementsMap.insert(std::pair<uint16_t, UeMeasurementsElement>(cellId, newEl));
++        measMap.insert(std::pair<uint16_t, UeMeasurementsElement>(measKey, newEl));
+     }
+     else
+     {
+@@ -1669,11 +1782,93 @@ NrUePhy::SetGenieRsrpCallback(Callback<std::map<uint16_t, double>> cb)
+     m_genieRsrpCallback = cb;
+ }
+ 
++uint8_t
++NrUePhy::GetBestSsbIndex(uint16_t cellId) const
++{
++    auto it = m_bestSsbIndex.find(cellId);
++    return it == m_bestSsbIndex.end() ? NrSpectrumPhy::NO_SSB_INDEX : it->second;
++}
++
+ void
+ NrUePhy::ReportUeMeasurements()
+ {
+     NS_LOG_FUNCTION(this);
+ 
++    // ntn-patch 19 (v5.1 port): TS 38.331 5.5.3.3 cell quality of a cell that
++    // sweeps SSB beams. Without nrofSS-BlocksToAverage the cell quality is the
++    // highest beam measurement quantity, so the layer-1 result of the best SSB
++    // beam (per-beam linear average over this period, TS 38.215 5.1.1) stands
++    // for the cell. Only that beam enters the map, so the RSSI below counts the
++    // cell once rather than every SSB sample of its sweep.
++    m_bestSsbIndex.clear();
++    // ntn-patch 21: a sweep longer than the layer-1 period (an Earth-moving
++    // grid of more SSB beams than one period visits) left some periods without
++    // a sample of the best beam, and the cell quality fell to the best beam
++    // that HAD been visited, 6 to 8 dB lower, about once a second. With
++    // SsbBeamResultLifetime > 0 each beam keeps its last layer-1 result until
++    // it is measured again or the lifetime expires, so the cell quality is the
++    // best of the most recent per-beam results (TS 38.331 5.5.3.3), whichever
++    // period they were taken in. 0 keeps the patch-19 behavior.
++    std::map<uint16_t, std::map<uint16_t, UeMeasurementsElement>> ssbView;
++    if (m_ssbBeamResultLifetime.IsStrictlyPositive())
++    {
++        const Time now = Simulator::Now();
++        for (const auto& [cell, beams] : m_ueSsbMeasurementsMap)
++        {
++            for (const auto& [idx, el] : beams)
++            {
++                if (el.rsrpNum != 0)
++                {
++                    m_ssbBeamLast[cell][idx] = {el, now};
++                }
++            }
++        }
++        for (auto cit = m_ssbBeamLast.begin(); cit != m_ssbBeamLast.end();)
++        {
++            for (auto bit = cit->second.begin(); bit != cit->second.end();)
++            {
++                if (now - bit->second.second > m_ssbBeamResultLifetime)
++                {
++                    bit = cit->second.erase(bit);
++                }
++                else
++                {
++                    ssbView[cit->first][bit->first] = bit->second.first;
++                    ++bit;
++                }
++            }
++            cit = cit->second.empty() ? m_ssbBeamLast.erase(cit) : std::next(cit);
++        }
++    }
++    const auto& ssbSource =
++        m_ssbBeamResultLifetime.IsStrictlyPositive() ? ssbView : m_ueSsbMeasurementsMap;
++    for (const auto& [cell, beams] : ssbSource)
++    {
++        double bestMw = -1.0;
++        const UeMeasurementsElement* best = nullptr;
++        uint16_t bestIdx = NrSpectrumPhy::NO_SSB_INDEX;
++        for (const auto& [idx, el] : beams)
++        {
++            if (el.rsrpNum == 0)
++            {
++                continue;
++            }
++            const double mw = el.rsrpSum / static_cast<double>(el.rsrpNum); // linear mW
++            if (mw > bestMw)
++            {
++                bestMw = mw;
++                best = &el;
++                bestIdx = idx;
++            }
++        }
++        if (best)
++        {
++            m_ueMeasurementsMap[cell] = *best;
++            m_bestSsbIndex[cell] = static_cast<uint8_t>(bestIdx);
++        }
++    }
++    m_ueSsbMeasurementsMap.clear();
++
+     if (!m_genieRsrpCallback.IsNull())
+     {
+         // Keep the PSS-measured serving cell entry intact (it reflects the
+@@ -1886,9 +2081,13 @@ void
+ NrUePhy::DoSetInitialBandwidth()
+ {
+     NS_LOG_FUNCTION(this);
+-    // configure initial bandwidth to 6 RBs, numerology 0
++    // configure initial bandwidth to 6 RBs, numerology 0. ntn-patch 19: with frequency reuse the
++    // cell's SSB / CORESET#0 sit in its own sub-band (TR 38.821 6.1.1.1), which a 6-RB window at
++    // the carrier centre misses for every reuse colour but the middle one; InitialBandwidthRbs
++    // widens the initial search window (0 keeps the 6 RBs).
++    const uint32_t initialRbs = (m_initialBandwidthRbs > 0) ? m_initialBandwidthRbs : 6;
+     double initialBandwidthHz =
+-        6 * GetSubcarrierSpacing() * NrSpectrumValueHelper::SUBCARRIERS_PER_RB;
++        initialRbs * GetSubcarrierSpacing() * NrSpectrumValueHelper::SUBCARRIERS_PER_RB;
+     // divided by 100*1000 because the parameter should be in 100KHz
+     uint16_t initialBandwidthIn100KHz = ceil(initialBandwidthHz / (100 * 1000));
+     // account for overhead that will be reduced when determining real BW
+diff --git a/model/nr-ue-phy.h b/model/nr-ue-phy.h
+index 7bf1c0f..4d43f9e 100644
+--- a/model/nr-ue-phy.h
++++ b/model/nr-ue-phy.h
+@@ -15,6 +15,8 @@
+ #include "ns3/nr-export.h"
+ #include "ns3/traced-callback.h"
+ 
++#include <deque>
++
+ namespace ns3
+ {
+ 
+@@ -194,6 +196,26 @@ class NR_EXPORT NrUePhy : public NrPhy
+      */
+     Ptr<NrUePowerControl> GetUplinkPowerControl() const;
+ 
++    /**
++     * @brief Type 1 power headroom (TS 38.213 7.7.1) of a PUSCH on the given
++     * RBG allocation, for the MAC's PHR (TS 38.321 5.4.6). Valid only with
++     * EnableUplinkPowerControl and once the UE has a path-loss estimate.
++     * ntn-patch 16.
++     * @param rbgBitmask the RBG allocation of the UL grant
++     * @return the power headroom
++     */
++    NrPhySapProvider::PuschPowerHeadroom GetPuschPowerHeadroom(
++        const std::vector<bool>& rbgBitmask) const override;
++
++    /**
++     * @brief ntn-patch 19: SSB index of the best SSB beam of @p cellId in the
++     * last layer-1 measurement period (TS 38.331 5.5.3.3), or 255 when that
++     * cell does not sweep SSB beams or was not measured.
++     * @param cellId the cell
++     * @return the best SSB index, or 255
++     */
++    uint8_t GetBestSsbIndex(uint16_t cellId) const;
++
+     /**
+      * @brief Allow configuration of uplink power control algorithm.
+      * E.g. necessary in FDD, when measurements are received in
+@@ -313,6 +335,18 @@ class NR_EXPORT NrUePhy : public NrPhy
+      */
+     void EnqueueDlHarqFeedback(const DlHarqInfo& m);
+ 
++    /**
++     * \return the number of DL HARQ-ACK reports not sent on PUCCH because the
++     * HARQ process has feedback disabled (attribute DlHarqFeedbackDisabled).
++     */
++    uint64_t GetDlHarqFeedbackSuppressedCount() const
++    {
++        return m_dlHarqFeedbackSuppressed;
++    }
++
++    /// TracedCallback signature for DlHarqFeedbackSuppressed (RNTI, HARQ process ID).
++    typedef void (*DlHarqFeedbackSuppressedTracedCallback)(uint16_t rnti, uint8_t harqProcessId);
++
+     /**
+      *  TracedCallback signature for DL CTRL SINR trace callback
+      *
+@@ -1045,6 +1079,23 @@ class NR_EXPORT NrUePhy : public NrPhy
+      * Indexed by the physical cell ID where the measurements come from.
+      */
+     std::map<uint16_t, UeMeasurementsElement> m_ueMeasurementsMap;
++    /// ntn-patch 19: per-SSB-beam layer-1 samples of the cells that sweep SSB beams.
++    std::map<uint16_t, std::map<uint16_t, UeMeasurementsElement>> m_ueSsbMeasurementsMap;
++    /// ntn-patch 19: best SSB index per cell in the last layer-1 period.
++    std::map<uint16_t, uint8_t> m_bestSsbIndex;
++    /// ntn-patch 19 (attribute SsRsrpOnOccupiedRbs): average SS-RSRP over the
++    /// RBs that carry the SSB only.
++    bool m_ssRsrpOnOccupiedRbs{false};
++    /// ntn-patch 19 (attribute SsbBeamsPerBurst): SSB beams of the serving cell.
++    uint32_t m_ssbBeamsPerBurst{0};
++    /// ntn-patch 19: RS received power (mW) of the last SsbBeamsPerBurst samples.
++    std::deque<double> m_rsPowerBurstMw;
++    /// ntn-patch 21: last layer-1 result and its time, per cell and SSB index.
++    std::map<uint16_t, std::map<uint16_t, std::pair<UeMeasurementsElement, Time>>> m_ssbBeamLast;
++    /// ntn-patch 21 (attribute SsbBeamResultLifetime).
++    Time m_ssbBeamResultLifetime{Seconds(0)};
++    /// ntn-patch 19 (attribute InitialBandwidthRbs): initial receive bandwidth in RBs (0: 6).
++    uint32_t m_initialBandwidthRbs{0};
+     /**
+      * Optional genie RSRP override. When non-null, ReportUeMeasurements
+      * replaces m_ueMeasurementsMap with the values returned by this
+@@ -1127,6 +1178,13 @@ class NR_EXPORT NrUePhy : public NrPhy
+     TracedCallback<SfnSf, uint16_t, uint16_t, uint8_t, uint8_t, uint32_t>
+         m_phyUeTxedHarqFeedbackTrace;
+ 
++    /// downlinkHARQ-FeedbackDisabled-r17 bitmap over DL HARQ process IDs (attribute).
++    uint32_t m_dlHarqFeedbackDisabled{0};
++    /// HARQ-ACK reports suppressed because of m_dlHarqFeedbackDisabled.
++    uint64_t m_dlHarqFeedbackSuppressed{0};
++    /// Fired for every suppressed HARQ-ACK report.
++    TracedCallback<uint16_t, uint8_t> m_dlHarqFeedbackSuppressedTrace;
++
+     /**
+      * The `ReportUeMeasurements` trace source. Contains trace information
+      * regarding RSRP and RSRQ measured from a specific cell (see TS 36.214).
+diff --git a/model/nr-ue-power-control.cc b/model/nr-ue-power-control.cc
+index d61d020..f46e539 100644
+--- a/model/nr-ue-power-control.cc
++++ b/model/nr-ue-power-control.cc
+@@ -85,10 +85,11 @@ NrUePowerControl::GetTypeId()
+                           MakeDoubleAccessor(&NrUePowerControl::SetPcmin),
+                           MakeDoubleChecker<double>())
+             .AddAttribute("PoNominalPusch",
+-                          "P_O_NOMINAL_PUSCH   INT (-126 ... 24), Default value -80",
++                          "P_O_NOMINAL_PUSCH   INT (-202 ... 24) (TS 38.331 p0-NominalWithGrant; "
++                          "the LTE range was -126 ... 24), Default value -80",
+                           IntegerValue(-80),
+                           MakeIntegerAccessor(&NrUePowerControl::SetPoNominalPusch),
+-                          MakeIntegerChecker<int16_t>(-126, 24))
++                          MakeIntegerChecker<int16_t>(-202, 24))
+             .AddAttribute("PoUePusch",
+                           "P_O_UE_PUSCH   INT(-8...7), Default value 0",
+                           IntegerValue(0),
+@@ -794,6 +795,53 @@ NrUePowerControl::CalculateSrsTxPowerNr(std::size_t rbNum)
+     return txPower;
+ }
+ 
++double
++NrUePowerControl::GetPuschPowerHeadroom(std::size_t rbNum) const
++{
++    NS_LOG_FUNCTION(this << rbNum);
++    NS_ABORT_MSG_IF(rbNum == 0, "a PUSCH has at least one RB");
++    // f(i): the closed-loop state the next PUSCH occasion will use (UpdateFc
++    // applies the stored TPC deltas at the occasion; do the same here
++    // without changing the state).
++    double fc = m_fc;
++    if (m_technicalSpec == TS_38_213 && m_closedLoop)
++    {
++        if (m_accumulationEnabled)
++        {
++            for (const auto& d : m_deltaPusch)
++            {
++                fc += d;
++            }
++        }
++        else if (!m_deltaPusch.empty())
++        {
++            fc = m_deltaPusch.back();
++        }
++    }
++    const double bw = 10 * log10(std::pow(2, m_nrUePhy->GetNumerology()) * rbNum);
++    const double required =
++        m_PoNominalPusch + m_PoUePusch + bw + m_alpha * m_pathLoss + m_deltaTF + fc;
++    return m_Pcmax - required;
++}
++
++double
++NrUePowerControl::GetPcmax() const
++{
++    return m_Pcmax;
++}
++
++double
++NrUePowerControl::GetPathLoss() const
++{
++    return m_pathLoss;
++}
++
++bool
++NrUePowerControl::HasPathLossEstimate() const
++{
++    return m_rsrpSet;
++}
++
+ double
+ NrUePowerControl::GetPuschTxPower(std::size_t rbNum)
+ {
+diff --git a/model/nr-ue-power-control.h b/model/nr-ue-power-control.h
+index 3c8a61b..844b8f6 100644
+--- a/model/nr-ue-power-control.h
++++ b/model/nr-ue-power-control.h
+@@ -215,6 +215,33 @@ class NR_EXPORT NrUePowerControl : public Object
+      * @param rbNum number of RBs used for PUSCH
+      */
+     double GetPuschTxPower(std::size_t rbNum);
++
++    /**
++     * \brief Type 1 power headroom of an actual PUSCH on rbNum RBs, TS 38.213
++     * 7.7.1: P_CMAX - {P_O_PUSCH + 10log10(2^mu M_RB) + alpha PL + deltaTF + f},
++     * with the TPC commands received so far included in f. It changes no
++     * state (ntn-patch 16).
++     * \param rbNum M_RB, the number of RBs of the PUSCH
++     * \return the power headroom in dB
++     */
++    double GetPuschPowerHeadroom(std::size_t rbNum) const;
++
++    /**
++     * \return P_CMAX in dBm
++     */
++    double GetPcmax() const;
++
++    /**
++     * \return the downlink path-loss estimate PL in dB (referenceSignalPower
++     * minus the layer 3 filtered RSRP)
++     */
++    double GetPathLoss() const;
++
++    /**
++     * \return true once an RSRP measurement has been taken, so PL is an
++     * estimate rather than the initial value
++     */
++    bool HasPathLossEstimate() const;
+     /**
+      * @brief Implements calculation of PUCCH
+      * power control according to TS 36.213 and TS 38.213.
+diff --git a/model/nr-ue-rrc.cc b/model/nr-ue-rrc.cc
+index 504a5fc..1742495 100644
+--- a/model/nr-ue-rrc.cc
++++ b/model/nr-ue-rrc.cc
+@@ -174,6 +174,23 @@ NrUeRrc::~NrUeRrc()
+     NS_LOG_FUNCTION(this);
+ }
+ 
++void
++NrUeRrc::NotifyConnectionSuccessfulAllBwps()
++{
++    // ntn-patch 24: every bandwidth part of the serving cell is connected, not only the primary
++    // UL/DL ones. The UE PHY of a BWP gates its MIMO CSI feedback (PDSCH, CSI-RS and CSI-IM
++    // based) on its own connection state, so a BWP never told about the connection received
++    // PDSCH but sent no CQI/PMI/RI: with per-slice BWPs every slice BWP ran at the starting
++    // MCS 0 (measured: MCS 0 at 22 dB SINR, 0.2 Mbit/s; 2.1 Mbit/s with a single BWP).
++    for (auto& mac : m_cmacSapProvider)
++    {
++        if (mac)
++        {
++            mac->NotifyConnectionSuccessful();
++        }
++    }
++}
++
+ void
+ NrUeRrc::DoDispose()
+ {
+@@ -933,8 +950,7 @@ NrUeRrc::DoNotifyRandomAccessSuccessful()
+         }
+ 
+         SwitchToState(CONNECTED_NORMALLY);
+-        m_cmacSapProvider.at(GetPrimaryUlIndex())
+-            ->NotifyConnectionSuccessful(); // RA successful during handover
++        NotifyConnectionSuccessfulAllBwps(); // RA successful during handover
+         m_handoverEndOkTrace(m_imsi, m_cellId, m_rnti);
+         m_lastHoSuccessTime = Simulator::Now();
+         if (m_mseEnable)
+@@ -1448,13 +1464,7 @@ NrUeRrc::DoRecvRrcConnectionSetup(NrRrcSap::RrcConnectionSetup msg)
+         msg2.rrcTransactionIdentifier = msg.rrcTransactionIdentifier;
+         m_rrcSapUser->SendRrcConnectionSetupCompleted(msg2);
+         m_asSapUser->NotifyConnectionSuccessful();
+-        const auto primaryUlIndex = GetPrimaryUlIndex();
+-        const auto primaryDlIndex = GetPrimaryDlIndex();
+-        m_cmacSapProvider.at(primaryUlIndex)->NotifyConnectionSuccessful();
+-        if (primaryDlIndex != primaryUlIndex)
+-        {
+-            m_cmacSapProvider.at(primaryDlIndex)->NotifyConnectionSuccessful();
+-        }
++        NotifyConnectionSuccessfulAllBwps();
+         m_connectionEstablishedTrace(m_imsi, m_cellId, m_rnti);
+         NS_ABORT_MSG_IF(m_noOfSyncIndications > 0,
+                         "Sync indications should be zero "
+@@ -2732,8 +2742,12 @@ NrUeRrc::ApplyMeasConfig(NrRrcSap::MeasConfig mc)
+          ++it)
+     {
+         // simplifying assumptions
+-        NS_ASSERT_MSG(it->reportConfigEutra.triggerType == NrRrcSap::ReportConfigEutra::EVENT,
+-                      "only trigger type EVENT is supported");
++        // ntn-patch 22: patch 08 supports PERIODICAL reports (TS 38.331 5.5.4.1) but left this
++        // assert, so a periodical report config aborted assert-enabled builds.
++        NS_ASSERT_MSG(it->reportConfigEutra.triggerType == NrRrcSap::ReportConfigEutra::EVENT ||
++                          it->reportConfigEutra.triggerType ==
++                              NrRrcSap::ReportConfigEutra::PERIODICAL,
++                      "trigger type must be EVENT or PERIODICAL");
+ 
+         uint8_t reportConfigId = it->reportConfigId;
+         auto reportConfigIt = m_varMeasConfig.reportConfigList.find(reportConfigId);
+@@ -2820,9 +2834,9 @@ NrUeRrc::ApplyMeasConfig(NrRrcSap::MeasConfig mc)
+             measReportIt->second.periodicReportTimer.Cancel();
+             m_varMeasReportList.erase(measReportIt);
+         }
+-        NS_ASSERT(m_varMeasConfig.reportConfigList.find(it->reportConfigId)
+-                      ->second.reportConfigEutra.triggerType !=
+-                  NrRrcSap::ReportConfigEutra::PERIODICAL);
++        // ntn-patch 08: PERIODICAL report configurations are supported
++        // (TS 38.331 5.5.4.1 reportType periodical); see
++        // MeasurementReportTriggering.
+ 
+         // new empty queues for time-to-trigger
+         std::list<PendingTrigger_t> s;
+@@ -2959,8 +2973,44 @@ NrUeRrc::MeasurementReportTriggering(uint8_t measId)
+     auto measReportIt = m_varMeasReportList.find(measId);
+     bool isMeasIdInReportList = (measReportIt != m_varMeasReportList.end());
+ 
+-    // we don't check the purpose field, as it is only included for
+-    // triggerType == periodical, which is not supported
++    // ntn-patch 08: TS 38.331 5.5.4.1, reportType periodical. When a first
++    // measurement result is available, include a reporting entry for this
++    // measId with numberOfReportsSent = 0 and start the reporting procedure
++    // (5.5.5); SendMeasurementReport then re-arms itself every reportInterval.
++    // The applicable cells are all measured cells on the frequency other than
++    // the serving cell, refreshed on every L1 report so newly detected cells
++    // are included (5.5.5: purpose reportStrongestCells, maxReportCells).
++    if (reportConfigEutra.triggerType == NrRrcSap::ReportConfigEutra::PERIODICAL)
++    {
++        if (m_storedMeasValues.find(m_cellId) == m_storedMeasValues.end())
++        {
++            return; // no serving-cell result yet
++        }
++        if (!isMeasIdInReportList)
++        {
++            VarMeasReport r;
++            r.measId = measId;
++            r.numberOfReportsSent = 0;
++            measReportIt = m_varMeasReportList.emplace(measId, r).first;
++        }
++        measReportIt->second.cellsTriggeredList.clear();
++        for (const auto& [cellId, values] : m_storedMeasValues)
++        {
++            if (cellId != m_cellId)
++            {
++                measReportIt->second.cellsTriggeredList.insert(cellId);
++            }
++        }
++        if (!measReportIt->second.periodicReportTimer.IsPending())
++        {
++            measReportIt->second.periodicReportTimer =
++                Simulator::Schedule(NR_UE_MEASUREMENT_REPORT_DELAY,
++                                    &NrUeRrc::SendMeasurementReport,
++                                    this,
++                                    measId);
++        }
++        return;
++    }
+     NS_ASSERT_MSG(reportConfigEutra.triggerType == NrRrcSap::ReportConfigEutra::EVENT,
+                   "only triggerType == event is supported");
+     // only EUTRA is supported, no need to check for it
+@@ -4013,7 +4063,13 @@ NrUeRrc::SendMeasurementReport(uint8_t measId)
+     else
+     {
+         auto servingMeasIt = m_storedMeasValues.find(m_cellId);
+-        NS_ASSERT(servingMeasIt != m_storedMeasValues.end());
++        if (servingMeasIt == m_storedMeasValues.end())
++        {
++            // ntn-patch 08: no serving-cell result (e.g. right after a
++            // handover); a periodical entry is re-armed by the next L1 report.
++            NS_LOG_WARN(this << " no serving-cell measurement for measId " << +measId);
++            return;
++        }
+         measResults.measResultPCell.rsrpResult =
+             nr::EutranMeasurementMapping::Dbm2RsrpRange(servingMeasIt->second.rsrp);
+         measResults.measResultPCell.rsrqResult =
+diff --git a/model/nr-ue-rrc.h b/model/nr-ue-rrc.h
+index 166e6dd..b44bf09 100644
+--- a/model/nr-ue-rrc.h
++++ b/model/nr-ue-rrc.h
+@@ -938,6 +938,8 @@ class NR_EXPORT NrUeRrc : public Object
+ 
+     std::vector<NrUeCmacSapUser*> m_cmacSapUser;         ///< UE CMac SAP user
+     std::vector<NrUeCmacSapProvider*> m_cmacSapProvider; ///< UE CMac SAP provider
++    /// Notify the MAC/PHY of every BWP that the connection succeeded (ntn-patch 24).
++    void NotifyConnectionSuccessfulAllBwps();
+ 
+     NrUeRrcSapUser* m_rrcSapUser;         ///< RRC SAP user
+     NrUeRrcSapProvider* m_rrcSapProvider; ///< RRC SAP provider
