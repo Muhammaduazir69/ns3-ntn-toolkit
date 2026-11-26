@@ -261,7 +261,7 @@ static GlobalValue g_ntnRealStackFddUlOfdma(
 static GlobalValue g_ntnRealStackUeKpiPeriod(
     "NtnRealStackUeKpiPeriod",
     "Sampling period (s) of the per-UE and per-cell KPI dataset NtnRealStackHelper writes to "
-    "<outputDir>/ue_kpi.csv and cell_kpi.csv (nr backend); 0 disables it",
+    "<outputDir>/ue_kpi.csv and cell_kpi.csv (nr and mmwave backends); 0 disables it",
     DoubleValue(1.0),
     MakeDoubleChecker<double>(0.0));
 
@@ -512,6 +512,14 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
     else
     {
         BuildMmwaveRadio();
+        // The per-UE / per-cell KPI dataset on the mmwave backend too (the NR path enables it in
+        // BuildNrRadio): SINR, MCS, BLER, HARQ, MAC and app throughput, serving-satellite geometry.
+        DoubleValue kpiPeriod;
+        GlobalValue::GetValueByName("NtnRealStackUeKpiPeriod", kpiPeriod);
+        if (kpiPeriod.Get() > 0.0)
+        {
+            EnableUeKpiDataset(Seconds(kpiPeriod.Get()));
+        }
     }
 
     m_built = true;
@@ -1993,8 +2001,8 @@ NtnRealStackHelper::BuildNrRadio()
                     << " dBm/180 kHz, receive beam " << rxBeamOverRsBeamDb
                     << " dB over the RS beam); PHR 20/10 ms, 1 dB; PHR PRB limit on");
     }
-    m_nr->UpdateDeviceConfigs(m_enbDevs);
-    m_nr->UpdateDeviceConfigs(m_ueDevs);
+    // (5G-LENA v5.2: NrHelper::UpdateDeviceConfigs is obsolete; the devices are configured at
+    // install time, and the call only printed a deprecation warning per device.)
     // Wave 11: frequency reuse among the cells. After the device configuration,
     // which gives each PHY its RB count and each MAC its RBG count, and after
     // the per-BWP powers above, which it scales to the cell's sub-band.
@@ -3792,6 +3800,24 @@ NtnRealStackHelper::AccumulateDl(double sinrLinear,
 void
 NtnRealStackHelper::DlRxTrace(mmwave::RxPacketTraceParams params)
 {
+    // Per-UE RAN counters (ue_kpi.csv, TS 28.552 TB counts in KPM) on the mmwave backend too.
+    // mmwave is single-layer and allocates whole symbols over the band, so the rank is 1 and the
+    // PRB usage is left to the nr path. The per-UE decision window stays nr-only.
+    if (params.m_tbSize > 0)
+    {
+        const int32_t ue = UeIndexOfCellRnti(static_cast<uint16_t>(params.m_cellId), params.m_rnti);
+        if (ue >= 0)
+        {
+            UeRanCounters& c = m_ueRan[static_cast<uint32_t>(ue)];
+            c.dlTb += 1;
+            c.dlTbErr += params.m_corrupt ? 1 : 0;
+            c.sumMcs += params.m_mcs;
+            c.sumRank += 1.0;
+            c.harqRetx += params.m_rv > 0 ? 1 : 0;
+            c.okBits += params.m_corrupt ? 0.0 : 8.0 * params.m_tbSize;
+            c.sinrLinSum += std::max(params.m_sinr, 1e-30);
+        }
+    }
     AccumulateDl(params.m_sinr,
                  params.m_tbler,
                  params.m_corrupt,
@@ -5851,8 +5877,10 @@ NtnRealStackHelper::SampleUeKpi()
     }
     const double dt = m_ueKpiPeriod.GetSeconds();
     // Available DL PRB-slots in one period: PRBs of the BWP x slots per second x period.
-    const double prbCapacity =
-        static_cast<double>(m_nrBandRb) * (1000.0 * (1 << m_numerology)) * dt;
+    // PRB usage is counted by the nr scheduler traces only; on mmwave the column stays empty.
+    const double prbCapacity = (m_backend == RadioBackend::Nr)
+                                   ? static_cast<double>(m_nrBandRb) * (1000.0 * (1 << m_numerology)) * dt
+                                   : 0.0;
     auto field = [](double v, int prec = 3) {
         std::ostringstream f;
         if (std::isfinite(v))
